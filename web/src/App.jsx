@@ -1540,8 +1540,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (artStage === 2 ? " no-art" : "")
         }
         style={{ "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color }}
-        onClick={onClick}
-        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+        aria-disabled={disabled || undefined}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         onTouchStart={handleMouseEnter}
