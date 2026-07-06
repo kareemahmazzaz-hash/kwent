@@ -286,7 +286,7 @@ const CARDS = [
 {id:"c195",name:"Berserker",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"berserker",abilityMeta:{},img:"Berserker.png"},
 {id:"c196",name:"Birna Bran",faction:"skellige",power:2.0,row:"close",cardType:"Basic",ability:"medic",abilityMeta:{},img:"Birna Bran.png"},
 {id:"c197",name:"Blueboy Lugos",faction:"skellige",power:6.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Blueboy Lugos.png"},
-{id:"c198",name:"Cerys",faction:"skellige",power:10.0,row:"close",cardType:"Hero",ability:null,abilityMeta:{},img:"Cerys.png"},
+{id:"c198",name:"Cerys",faction:"skellige",power:10.0,row:"close",cardType:"Hero",ability:"muster",abilityMeta:{},img:"Cerys.png"},
 {id:"c199",name:"Clan An Craite Warrior (1)",faction:"skellige",power:6.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan An Craite Warrior1.png"},
 {id:"c200",name:"Clan An Craite Warrior (2)",faction:"skellige",power:6.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan An Craite Warrior2.png"},
 {id:"c201",name:"Clan An Craite Warrior (3)",faction:"skellige",power:6.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan An Craite Warrior3.png"},
@@ -335,7 +335,7 @@ const LEADERS = [
 {id:"L06",name:"Emhyr var Emreis: Emperor of Nilfgaard",faction:"nilfgaard",cardType:"Leader",ability:"Look at 3 Opp Cards",img:"Emhyr var Emreis% Emperor of Nilfgaard.png"},
 {id:"L07",name:"Emhyr var Emreis: His Imperial Majesty",faction:"nilfgaard",cardType:"Leader",ability:"Pick a Torrential Rain card directly from your deck and play it instantly.",img:"Emhyr var Emreis% His Imperial Majesty.png"},
 {id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Abilities that restore a unit to the battlefield restore a randomly-chosen unit instead.",img:"Emhyr var Emreis% Invader of the North.png"},
-{id:"L09",name:"Emhyr var Emreis: The Relentless",faction:"nilfgaard",cardType:"Leader",ability:"Draw card from opp Discard",img:"Emhyr var Emreis% The Relentless.png"},
+{id:"L09",name:"Emhyr var Emreis: The Relentless",faction:"nilfgaard",cardType:"Leader",ability:"Take a non-Hero card from opponent's discard and play it instantly.",img:"Emhyr var Emreis% The Relentless.png"},
 {id:"L10",name:"Emhyr var Emreis: The White Flame",faction:"nilfgaard",cardType:"Leader",ability:"Instantly cancels your opponent's Leader Ability.",img:"Emhyr var Emreis% The White Flame.png"},
 {id:"L11",name:"Foltest: King of Temeria",faction:"northern_realms",cardType:"Leader",ability:"Fog",img:"Foltest% King of Temeria.png"},
 {id:"L12",name:"Foltest: Lord Commander of the North",faction:"northern_realms",cardType:"Leader",ability:"Clear Weather",img:"Foltest% Lord Commander of the North.png"},
@@ -360,6 +360,17 @@ CARDS.forEach((c) => { CARD_INDEX[c.id] = c; });
 LEADERS.forEach((l) => { CARD_INDEX[l.id] = l; });
 
 function cardById(id) { return CARD_INDEX[id] || null; }
+
+// Shared display sort: power first, alphabetical by name as the tiebreak.
+// desc=false -> lowest power first (used for hand); desc=true -> highest power first (used for discard/deck lists).
+function sortIdsByPower(ids, { desc = false } = {}) {
+  return [...ids].sort((a, b) => {
+    const ca = cardById(a), cb = cardById(b);
+    const pa = ca?.power ?? 0, pb = cb?.power ?? 0;
+    if (pa !== pb) return desc ? pb - pa : pa - pb;
+    return (ca?.name || "").localeCompare(cb?.name || "");
+  });
+}
 
 // Cards that only ever enter play via another card's ability (Bovine Defense
 // Force, Hemdall) or only ever appear via a transformation (Transformed
@@ -626,6 +637,7 @@ const MUSTER_GROUPS = [
   { leader: "c001", siblings: ["c002", "c003", "c004"] },                 // Arachas Behemoth -> Arachas
   { leader: "c061", siblings: ["c058", "c059", "c060"] },                 // Gaunter O'Dimm -> O'Dimm: Darkness
   { leader: "c039", siblings: ["c035", "c036", "c037", "c038"] },         // Vampire: Katakan -> other Vampires
+  { leader: "c198", siblings: ["c206", "c207", "c208"] },                 // Cerys -> Clan Drummond Shield Maidens
   { leader: null, siblings: ["c008", "c009", "c010"] },                   // Crones (no leader — mutual)
   { leader: null, siblings: ["c020", "c021", "c022"] },                   // Ghouls (no leader — mutual)
   { leader: null, siblings: ["c030", "c031", "c032"] },                   // Nekkers
@@ -895,13 +907,17 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       }
       break;
     }
-    case "L09": { // Take a card from opponent's discard — player's choice (AI/no choice falls back to random)
-      const oppDiscard = state.players[oppKey].discard;
+    case "L09": { // Take a non-Hero card from opponent's discard and play it instantly
+      const oppDiscard = state.players[oppKey].discard.filter((id) => cardById(id)?.cardType !== "Hero");
       if (oppDiscard.length) {
         const pick = options.pickId && oppDiscard.includes(options.pickId) ? options.pickId : oppDiscard[Math.floor(Math.random() * oppDiscard.length)];
+        const pickCard = cardById(pick);
         ns = withPlayer(ns, oppKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== pick) }));
         ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, pick] }));
-        log.push(`Takes ${cardById(pick).name} from the discard pile.`);
+        log.push(`Takes ${pickCard.name} from the discard pile and plays it instantly.`);
+        ns = { ...ns, log: [...ns.log, ...log] };
+        ns = resolvePlayCard(ns, actingKey, pick, pickCard.row === "agile" ? { chosenRow: autoPlacementRow(pickCard, ns.players[actingKey].board) } : {});
+        return ns;
       }
       break;
     }
@@ -1451,11 +1467,14 @@ function computeAIAction(state, aiKey) {
   // rather than burning their whole hand to win it — especially once
   // already ahead in the match, or holding more cards than the opponent
   // (spending them here would throw away that advantage for rounds 2-3).
+  // CRITICAL: never do this if the opponent already has 1 round win — losing
+  // this round too would hand them the match immediately (2 wins = game over).
   const cardEdge = me.hand.length - opp.hand.length;
   const losingThisRound = myTotal < oppTotal;
+  const oppAtMatchPoint = state.roundWins[oppKey] >= 1;
   const canAffordToConcede =
     state.round < 3 &&
-    state.roundWins[aiKey] < 2 && state.roundWins[oppKey] < 2 &&
+    !oppAtMatchPoint &&
     (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 2);
 
   if (losingThisRound && canAffordToConcede && Math.random() < 0.6) {
@@ -1463,7 +1482,9 @@ function computeAIAction(state, aiKey) {
   }
 
   if (myTotal <= oppTotal) return play(ranked[0].card);
-  if (cardEdge <= 0 && Math.random() < 0.55) return { type: "PASS", player: aiKey };
+  // Under match-point pressure, don't gamble on a random pass while still ahead —
+  // keep playing to protect the lead instead of risking the whole match.
+  if (!oppAtMatchPoint && cardEdge <= 0 && Math.random() < 0.55) return { type: "PASS", player: aiKey };
   return play(ranked[ranked.length - 1].card);
 }
 
@@ -1524,7 +1545,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
     clearHoverTimer();
     hoverTimer.current = setTimeout(() => setZoomed(true), 3000);
   };
-  const handleMouseLeave = () => { clearHoverTimer(); setZoomed(false); };
+  const handleMouseLeave = () => { clearHoverTimer(); }; // only cancels a pending (not-yet-triggered) zoom; an already-open zoom stays open until the person clicks away
 
   return (
     <>
@@ -1761,7 +1782,11 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       pool
         .filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
         .slice()
-        .sort((a, b) => (b.power ?? 0) - (a.power ?? 0)),
+        .sort((a, b) => {
+          const pa = a.power ?? 0, pb = b.power ?? 0;
+          if (pa !== pb) return pb - pa;
+          return (a.name || "").localeCompare(b.name || "");
+        }),
     [pool, query]
   );
   const leaders = useMemo(() => leadersForFaction(faction), [faction]);
@@ -1836,7 +1861,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
 function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLabel }) {
   const remaining = MAX_MULLIGAN - swapsUsed;
-  const sortedHand = [...hand].sort((a, b) => (cardById(a)?.power ?? 0) - (cardById(b)?.power ?? 0));
+  const sortedHand = sortIdsByPower(hand);
   return (
     <div className="screen mulligan">
       <h2 className="screen-title">{playerLabel}: opening hand</h2>
@@ -1982,8 +2007,8 @@ function PlayBoard({
   }, [opp.board, me.board]);
   useEffect(() => () => { clearTimeout(flashTimers.current.opp); clearTimeout(flashTimers.current.me); }, []);
 
-  const sortedHand = [...me.hand].sort((a, b) => (cardById(a)?.power ?? 0) - (cardById(b)?.power ?? 0));
-  const sortedMyDiscard = [...me.discard].sort((a, b) => (cardById(b)?.power ?? 0) - (cardById(a)?.power ?? 0));
+  const sortedHand = sortIdsByPower(me.hand);
+  const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
 
   const startPlay = (id) => {
     const card = cardById(id);
@@ -2004,7 +2029,7 @@ function PlayBoard({
 
   const startLeader = () => {
     if (me.leaderId === "L02") return setPending({ kind: "leaderDiscard2", selected: [] });
-    if (me.leaderId === "L09" && opp.discard.length) return setPending({ kind: "leaderPickDiscard" });
+    if (me.leaderId === "L09" && opp.discard.some((id) => cardById(id)?.cardType !== "Hero")) return setPending({ kind: "leaderPickDiscard" });
     onUseLeader({});
   };
   const toggleDiscardPick = (id) => {
@@ -2145,9 +2170,9 @@ function PlayBoard({
       {pending?.kind === "leaderPickDiscard" && (
         <div className="overlay" onClick={() => setPending(null)}>
           <div className="round-banner" onClick={(e) => e.stopPropagation()}>
-            <div className="ribbon">CHOOSE A CARD TO TAKE</div>
+            <div className="ribbon">CHOOSE A CARD TO TAKE &amp; PLAY</div>
             <div className="pool-grid">
-              {opp.discard.map((id) => (
+              {opp.discard.filter((id) => cardById(id)?.cardType !== "Hero").map((id) => (
                 <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPick(id)} />
               ))}
             </div>
@@ -2868,7 +2893,7 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
   background: radial-gradient(ellipse at top, #1a1f14 0%, #0d0f0a 70%);
   color: var(--parchment);
   font-family: var(--font-body);
-  min-height: 100%;
+  min-height: 100vh;
   width: 100%;
   box-sizing: border-box;
   padding: 0;
@@ -2876,6 +2901,7 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
   overflow-x: hidden;
 }
 .gwent-root *, .gwent-root *::before, .gwent-root *::after { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
@@ -3035,14 +3061,15 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 @keyframes zoom-fade-in { 0% { opacity: 0; } 100% { opacity: 1; } }
 .card-zoom-content {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
-  width: 50vw; min-width: 220px; max-width: 520px;
-  max-height: 90vh; overflow-y: auto;
+  height: 90vh; width: auto; max-width: 92vw;
+  overflow-y: auto;
 }
 .card-zoom-art-wrap {
-  width: 100%; aspect-ratio: 0.537; border-radius: 10px; overflow: hidden;
+  height: 72vh; width: auto; aspect-ratio: 0.537; border-radius: 10px; overflow: hidden;
   box-shadow: 0 10px 40px rgba(0,0,0,0.7), 0 0 0 2px var(--gold-dim);
   background: linear-gradient(160deg, var(--parchment), #d8cba3);
   flex-shrink: 0;
+  max-width: 92vw;
 }
 .card-zoom-art { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-zoom-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--ink); font-family: var(--font-display); text-align: center; padding: 12px; }
@@ -3052,8 +3079,8 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 .card-zoom-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin-top: 4px; letter-spacing: 0.03em; }
 .card-zoom-desc { font-size: 0.9rem; line-height: 1.4; color: var(--parchment); margin-top: 10px; max-width: 480px; }
 @media (max-width: 520px) {
-  .card-zoom-content { max-width: 92vw; }
-  .card-zoom-art-wrap { max-height: 50vh; width: auto; }
+  .card-zoom-content { max-width: 96vw; height: 88vh; }
+  .card-zoom-art-wrap { height: 58vh; max-width: 96vw; }
 }
 
 @keyframes card-appear { 0% { opacity: 0; transform: scale(0.75) translateY(8px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
