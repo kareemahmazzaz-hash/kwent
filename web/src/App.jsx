@@ -154,7 +154,7 @@ const CARDS = [
 {id:"c063",name:"Impenetrable Fog (1)",faction:"neutral",power:0.0,row:null,cardType:"Special",ability:"weather",abilityMeta:{"row": "ranged"},img:"Impenetrable Fog1.png"},
 {id:"c064",name:"Impenetrable Fog (2)",faction:"neutral",power:0.0,row:null,cardType:"Special",ability:"weather",abilityMeta:{"row": "ranged"},img:"Impenetrable Fog2.png"},
 {id:"c065",name:"Impenetrable Fog (3)",faction:"neutral",power:0.0,row:null,cardType:"Special",ability:"weather",abilityMeta:{"row": "ranged"},img:"Impenetrable Fog3.png"},
-{id:"c066",name:"Mysterious Elf",faction:"neutral",power:0.0,row:"close",cardType:"Basic",ability:"spy",abilityMeta:{},img:"Mysterious Elf.png"},
+{id:"c066",name:"Mysterious Elf",faction:"neutral",power:0.0,row:"close",cardType:"Hero",ability:"spy",abilityMeta:{},img:"Mysterious Elf.png"},
 {id:"c067",name:"Olgierd von Everec",faction:"neutral",power:6.0,row:"agile",cardType:"Basic",ability:"moraleBoost",abilityMeta:{},img:"Olgierd von Everec.png"},
 {id:"c068",name:"Scorch (1)",faction:"neutral",power:0.0,row:null,cardType:"Special",ability:"scorchGlobal",abilityMeta:{},img:"Scorch1.png"},
 {id:"c069",name:"Scorch (2)",faction:"neutral",power:0.0,row:null,cardType:"Special",ability:"scorchGlobal",abilityMeta:{},img:"Scorch2.png"},
@@ -301,7 +301,7 @@ const CARDS = [
 {id:"c210",name:"Clan Tordarroch Armorsmith",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Tordarroch Armorsmith.png"},
 {id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Donar an Hindar.png"},
 {id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"ranged",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Draig Bon-Dhu.png"},
-{id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Basic",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
+{id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Hero",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
 {id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Hjalmar.png"},
 {id:"c216",name:"Holger Blackhand",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Holger Blackhand.png"},
 {id:"c217",name:"Kambi",faction:"skellige",power:0.0,row:"close",cardType:"Basic",ability:"summonAvenger",abilityMeta:{"summons": "Hemdall", "summonsId": "c236"},img:"Kambi.png"},
@@ -469,7 +469,9 @@ function unitEffectivePower(cardId, board, row, spyDoubled) {
   // Weather is a flat override: an affected row's units are reduced to
   // exactly 1 power, full stop — Tight Bond, Morale Boost, and Horn no
   // longer apply on top of that (that's the entire point of weather).
-  if (board.weather[row]) return 1;
+  // A card whose printed power is already 0 stays at 0 — weather can't
+  // raise a unit's power, only cap it, so there's nothing to "reduce to 1".
+  if (board.weather[row]) return card.power === 0 ? 0 : 1;
 
   let value = card.power;
 
@@ -518,19 +520,26 @@ function strongestInRow(board, row, spyDoubled) {
   return units.filter((id, i) => powers[i] === max);
 }
 
-function strongestOnBoard(board, spyDoubled) {
+/* Global Scorch destroys the strongest non-Hero unit(s) across the ENTIRE
+   battlefield — both players' boards combined — not just the opponent's
+   side. `boardA` belongs to `sideA`, `boardB` to `sideB`; returns hits
+   tagged with whichever side they came from so the caller can route each
+   destroyed id to the correct player's discard pile. */
+function strongestAcrossBoards(boardA, sideA, boardB, sideB, spyDoubled) {
   let max = 0;
-  let hit = [];
-  ROWS.forEach((row) => {
-    board[row].forEach((id) => {
-      const card = cardById(id);
-      if (!card || card.cardType === "Hero") return;
-      const p = unitEffectivePower(id, board, row, spyDoubled);
-      if (p > max) { max = p; hit = [{ id, row }]; }
-      else if (p === max && p > 0) { hit.push({ id, row }); }
+  let hits = [];
+  [{ side: sideA, board: boardA }, { side: sideB, board: boardB }].forEach(({ side, board }) => {
+    ROWS.forEach((row) => {
+      board[row].forEach((id) => {
+        const card = cardById(id);
+        if (!card || card.cardType === "Hero") return;
+        const p = unitEffectivePower(id, board, row, spyDoubled);
+        if (p > max) { max = p; hits = [{ side, id, row }]; }
+        else if (p === max && p > 0) { hits.push({ side, id, row }); }
+      });
     });
   });
-  return hit;
+  return hits;
 }
 
 /* Used when an Agile card needs a row decided automatically rather than via
@@ -576,8 +585,8 @@ function addToRow(board, row, cardId) {
 
 /* Destroys (moves to discard) the given card ids from `victimKey`'s board,
    triggering Summon Avenger replacements where relevant. Hero cards are
-   filtered out by the callers (strongestInRow / strongestOnBoard already
-   exclude them), so no immunity check is needed here. */
+   filtered out by the callers (strongestInRow / strongestAcrossBoards
+   already exclude them), so no immunity check is needed here. */
 function destroyCards(state, victimKey, ids, log) {
   let ns = state;
   ids.forEach((id) => {
@@ -727,14 +736,17 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     case "muster": {
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
       const fetchIds = musterFetchIds(cardId);
-      const found = state.players[actingKey].deck.filter((id) => fetchIds.includes(id));
+      const foundInDeck = state.players[actingKey].deck.filter((id) => fetchIds.includes(id));
+      const foundInHand = ns.players[actingKey].hand.filter((id) => fetchIds.includes(id));
+      const found = [...foundInDeck, ...foundInHand];
       if (found.length) {
         ns = withPlayer(ns, actingKey, (p) => ({
           ...p,
-          deck: p.deck.filter((id) => !found.includes(id)),
+          deck: p.deck.filter((id) => !foundInDeck.includes(id)),
+          hand: p.hand.filter((id) => !foundInHand.includes(id)),
           board: found.reduce((b, id) => addToRow(b, cardById(id).row, id), p.board),
         }));
-        log.push(`${actor.name} plays ${card.name} — Muster fetches ${found.length} more from the deck.`);
+        log.push(`${actor.name} plays ${card.name} — Muster fetches ${found.length} more (deck & hand).`);
       } else {
         log.push(`${actor.name} plays ${card.name}.`);
       }
@@ -767,9 +779,12 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       const isUnitCard = !!card.row;
       if (isUnitCard) ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
       else ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: [...p.discard, cardId] }));
-      const hits = strongestOnBoard(state.players[oppKey].board, spyDoubled);
-      log.push(`${actor.name} plays ${card.name} — Scorch hits the whole battlefield.`);
-      ns = destroyCards(ns, oppKey, hits.map((h) => h.id), log);
+      const hits = strongestAcrossBoards(ns.players[actingKey].board, actingKey, ns.players[oppKey].board, oppKey, spyDoubled);
+      log.push(`${actor.name} plays ${card.name} — Scorch hits the strongest unit(s) on the whole battlefield (both sides).`);
+      const hitsBySide = { [actingKey]: [], [oppKey]: [] };
+      hits.forEach((h) => hitsBySide[h.side].push(h.id));
+      if (hitsBySide[oppKey].length) ns = destroyCards(ns, oppKey, hitsBySide[oppKey], log);
+      if (hitsBySide[actingKey].length) ns = destroyCards(ns, actingKey, hitsBySide[actingKey], log);
       break;
     }
     case "scorchRow": {
@@ -816,7 +831,7 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
    -------------------------------------------------------------------- */
 
 function leaderNeedsOptions(leaderId) {
-  return leaderId === "L02"; // Eredin: Bringer of Death — discard 2, pick which
+  return leaderId === "L02" || leaderId === "L09"; // L02: discard 2, pick which. L09: pick a card from opp discard.
 }
 
 function resolveLeaderAbility(state, actingKey, options = {}) {
@@ -880,10 +895,10 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       }
       break;
     }
-    case "L09": { // Draw a random card from opponent's discard
+    case "L09": { // Take a card from opponent's discard — player's choice (AI/no choice falls back to random)
       const oppDiscard = state.players[oppKey].discard;
       if (oppDiscard.length) {
-        const pick = oppDiscard[Math.floor(Math.random() * oppDiscard.length)];
+        const pick = options.pickId && oppDiscard.includes(options.pickId) ? options.pickId : oppDiscard[Math.floor(Math.random() * oppDiscard.length)];
         ns = withPlayer(ns, oppKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== pick) }));
         ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, pick] }));
         log.push(`Takes ${cardById(pick).name} from the discard pile.`);
@@ -1316,8 +1331,13 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
   }
 
   if (card.ability === "scorchGlobal") {
-    const hits = strongestOnBoard(opp.board, spyDoubled);
-    return hits.reduce((sum, h) => sum + unitEffectivePower(h.id, opp.board, h.row, spyDoubled), 0);
+    const hits = strongestAcrossBoards(me.board, "me", opp.board, "opp", spyDoubled);
+    let gain = 0, selfLoss = 0;
+    hits.forEach((h) => {
+      const v = unitEffectivePower(h.id, h.side === "me" ? me.board : opp.board, h.row, spyDoubled);
+      if (h.side === "opp") gain += v; else selfLoss += v;
+    });
+    return gain - selfLoss;
   }
 
   if (card.ability === "scorchRowThreshold") {
@@ -1333,6 +1353,60 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
   if (card.ability === "decoy") return 1; // pure utility, situational — low priority for a straight power race
 
   return card.power;
+}
+
+/* ---------------------------- AI DECK BUILDING ---------------------------
+   The AI used to just grab a random faction and a random 22-card slice of
+   its pool with a random leader — no wonder it played badly, it was often
+   holding a deck with no coherent plan. Instead, score every card in the
+   pool for how useful it generally is (raw power plus a bonus for value-add
+   abilities) and keep the strongest DECK_SIZE, then pick whichever leader
+   in that faction is most consistently strong. A little randomness is kept
+   among close scores so the AI isn't 100% deterministic every game. */
+function evaluateCardBaseValue(card) {
+  let v = card.power || 0;
+  if (card.cardType === "Hero") v += 3; // immune to removal/weather — always reliable
+  switch (card.ability) {
+    case "muster": v += 2.5; break; // usually pulls 2-3 more cards down with it
+    case "medic": v += 2.5; break; // refills board + fills the hand's card advantage
+    case "moraleBoost": v += 2; break;
+    case "horn": v += 3; break; // doubles a whole row
+    case "tightBond": v += 1.5; break;
+    case "decoy": v += 1; break;
+    case "scorchGlobal": case "scorchRow": case "scorchRowThreshold": v += 2; break;
+    case "weather": v += 1.2; break;
+    case "clearWeather": v += 0.3; break;
+    case "spy": v -= 0.5; break; // gives opponent a body, though the 2-card draw offsets most of it
+    default: break;
+  }
+  return v;
+}
+
+// Rough ranking of each faction's leaders from most to least reliably useful
+// for a heuristic (non-lookahead) AI — favors leaders with an unconditional,
+// always-good effect (extra horn, extra card, guaranteed medic) over
+// situational ones (info reveals, narrow scorch thresholds).
+const LEADER_PRIORITY = {
+  monsters: ["L05", "L04", "L03", "L02", "L01"],
+  nilfgaard: ["L07", "L10", "L09", "L06", "L08"],
+  northern_realms: ["L14", "L12", "L11", "L15", "L13"],
+  scoiatael: ["L16", "L20", "L17", "L18", "L19"],
+  skellige: ["L21", "L22"],
+};
+
+function chooseAiDeck(aiFaction) {
+  const pool = poolForFaction(aiFaction);
+  const scored = pool
+    .map((c) => ({ card: c, value: evaluateCardBaseValue(c) + Math.random() * 1.5 })) // small jitter so it's not identical every game
+    .sort((a, b) => b.value - a.value);
+  const deckIds = scored.slice(0, DECK_SIZE).map((s) => s.card.id);
+
+  const leaders = leadersForFaction(aiFaction);
+  const priority = LEADER_PRIORITY[aiFaction] || leaders.map((l) => l.id);
+  const topChoices = priority.filter((id) => leaders.some((l) => l.id === id)).slice(0, 2);
+  const aiLeaderId = (topChoices.length ? topChoices[Math.floor(Math.random() * topChoices.length)] : leaders[0]?.id) || null;
+
+  return { deckIds, aiLeaderId };
 }
 
 /* ---------------------------- SIMPLE HEURISTIC AI ------------------------ */
@@ -1380,6 +1454,7 @@ function computeAIAction(state, aiKey) {
   const cardEdge = me.hand.length - opp.hand.length;
   const losingThisRound = myTotal < oppTotal;
   const canAffordToConcede =
+    state.round < 3 &&
     state.roundWins[aiKey] < 2 && state.roundWins[oppKey] < 2 &&
     (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 2);
 
@@ -1402,8 +1477,40 @@ const ABILITY_LABEL = {
   mardroeme: "Mardroeme", summonAvenger: "Summon Avenger",
 };
 
+const ABILITY_DESCRIPTIONS = {
+  muster: "Muster: when played, automatically searches your deck and hand for every other card in its Muster family and brings them all onto the battlefield alongside it, for free.",
+  medic: "Medic: when played, immediately revives one non-Hero, non-Special card from your discard pile and puts it onto the battlefield.",
+  decoy: "Decoy: swap this card for one of your own units already on the battlefield, returning that unit safely to your hand so you can replay it later (e.g. to reuse an ability).",
+  spy: "Spy: played onto your OPPONENT'S side of the battlefield instead of your own, but you immediately draw 2 cards from your deck as compensation.",
+  tightBond: "Tight Bond (Bond): this card's power multiplies by the number of copies of itself present in the same row — two copies double each other's power, three copies triple it, and so on.",
+  moraleBoost: "Morale Boost: adds +1 power to every OTHER card in the same row (not itself), stacking additively with every Morale Boost card present.",
+  horn: "Horn: doubles the total power of every unit in the row it affects (its own row for a unit-horn, or a chosen row for a special-card horn).",
+  weather: "Weather: freezes the matching row on BOTH players' sides down to 1 power each (0-power cards stay at 0), cancelling out Tight Bond, Morale Boost, and Horn bonuses until Clear Weather is played.",
+  clearWeather: "Clear Weather: instantly removes all active weather effects from every row, on both sides of the battlefield.",
+  scorchGlobal: "Scorch: destroys the single strongest non-Hero unit(s) across the ENTIRE battlefield — both players' sides — with ties all being destroyed together.",
+  scorchRow: "Scorch (Row): destroys the strongest non-Hero unit(s) in one specific row on the opponent's side of the battlefield.",
+  scorchRowThreshold: "Scorch (Threshold): destroys the strongest non-Hero unit(s) in a specific opponent row, but only if that row's total power is 10 or more.",
+  berserker: "Berserker: a Skellige unit that transforms into a stronger Vildkaarl form when a Mardroeme card is played in its row.",
+  mardroeme: "Mardroeme: transforms every Berserker unit present in the target row into its more powerful Transformed Vildkaarl form.",
+  summonAvenger: "Summon Avenger: when this card leaves the battlefield (destroyed or at round's end), it is automatically replaced by a stronger avenger unit.",
+  unsummonable: "This unit cannot be played directly from a hand or deck — it can only appear on the battlefield as a Summon Avenger replacement.",
+};
+
+function abilityDescriptionFor(card) {
+  if (!card) return "";
+  if (card.cardType === "Leader") return card.ability || "";
+  const heroNote = card.cardType === "Hero" ? "Hero: fully immune to every effect, good or bad — weather, Horn, Morale Boost, Tight Bond, Medic revival, and Scorch all ignore Heroes entirely." : "";
+  const abilityNote = card.ability && ABILITY_DESCRIPTIONS[card.ability] ? ABILITY_DESCRIPTIONS[card.ability] : "";
+  if (heroNote && abilityNote) return heroNote + " " + abilityNote;
+  if (heroNote) return heroNote;
+  if (abilityNote) return abilityNote;
+  return "No special ability — a plain unit valued purely on its printed power.";
+}
+
 function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
+  const [zoomed, setZoomed] = useState(false);
+  const hoverTimer = useRef(null);
   if (!card) return null;
   const fmeta = FACTION_META[card.faction] || FACTION_META.neutral;
   const rmeta = ROW_META[card.row];
@@ -1411,47 +1518,80 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const isSpecial = card.cardType === "Special";
   const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
-  const tooltipText = isLeader
-    ? card.name + (card.ability ? " — " + card.ability : "")
-    : card.name + (abilityLabel ? " — " + abilityLabel : " — No special ability");
+
+  const clearHoverTimer = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
+  const handleMouseEnter = () => {
+    clearHoverTimer();
+    hoverTimer.current = setTimeout(() => setZoomed(true), 3000);
+  };
+  const handleMouseLeave = () => { clearHoverTimer(); setZoomed(false); };
 
   return (
-    <button
-      type="button"
-      className={
-        "card-tile card-" + size +
-        (disabled ? " is-disabled" : "") +
-        (selected ? " is-selected" : "") +
-        (faded ? " is-faded" : "") +
-        (justPlayed ? " card-just-played" : "") +
-        (card.cardType === "Hero" ? " is-hero" : "") +
-        (artStage === 2 ? " no-art" : "")
-      }
-      style={{ "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color }}
-      onClick={onClick}
-      disabled={disabled}
-      title={card.name + (abilityLabel ? " — " + abilityLabel : "")}
-    >
-      {src ? (
-        <img
-          className="card-art"
-          src={src}
-          alt={card.name}
-          onError={() => setArtStage((s) => s + 1)}
-        />
-      ) : null}
-      <div className="card-tile-inner">
-        {!isLeader && card.power != null && <span className="card-power">{card.power}</span>}
-        {!isLeader && rmeta && <span className="card-row-tag">{rmeta.short}</span>}
-        {isSpecial && !rmeta && <span className="card-row-tag">SPC</span>}
-        <span className="card-name">{card.name}</span>
-        <span className="card-faction">
-          {fmeta.short}{isLeader ? " · LEADER" : ""}
-          {abilityLabel ? " · " + abilityLabel : ""}
-        </span>
-      </div>
-      <div className="card-hover-tip">{tooltipText}</div>
-    </button>
+    <>
+      <button
+        type="button"
+        className={
+          "card-tile card-" + size +
+          (disabled ? " is-disabled" : "") +
+          (selected ? " is-selected" : "") +
+          (faded ? " is-faded" : "") +
+          (justPlayed ? " card-just-played" : "") +
+          (card.cardType === "Hero" ? " is-hero" : "") +
+          (artStage === 2 ? " no-art" : "")
+        }
+        style={{ "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color }}
+        onClick={onClick}
+        disabled={disabled}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onTouchStart={handleMouseEnter}
+        onTouchEnd={handleMouseLeave}
+      >
+        {src ? (
+          <img
+            className="card-art"
+            src={src}
+            alt={card.name}
+            onError={() => setArtStage((s) => s + 1)}
+          />
+        ) : null}
+        {artStage === 2 && (
+          <div className="card-tile-inner">
+            {!isLeader && card.power != null && <span className="card-power">{card.power}</span>}
+            {!isLeader && rmeta && <span className="card-row-tag">{rmeta.short}</span>}
+            {isSpecial && !rmeta && <span className="card-row-tag">SPC</span>}
+            <span className="card-name">{card.name}</span>
+            <span className="card-faction">
+              {fmeta.short}{isLeader ? " · LEADER" : ""}
+              {abilityLabel ? " · " + abilityLabel : ""}
+            </span>
+          </div>
+        )}
+      </button>
+      {zoomed && (
+        <div className="card-zoom-overlay" onClick={(e) => { e.stopPropagation(); setZoomed(false); }}>
+          <div className="card-zoom-content" onClick={(e) => e.stopPropagation()}>
+            <div className="card-zoom-art-wrap">
+              {src ? (
+                <img className="card-zoom-art" src={src} alt={card.name} />
+              ) : (
+                <div className="card-zoom-fallback">{card.name}</div>
+              )}
+            </div>
+            <div className="card-zoom-caption">
+              <div className="card-zoom-title">
+                {card.name}
+                {card.power != null && !isLeader ? <span className="card-zoom-power">{card.power}</span> : null}
+              </div>
+              <div className="card-zoom-meta">
+                {fmeta.short}{isLeader ? " · Leader" : ""}{rmeta ? " · " + rmeta.label : ""}{abilityLabel ? " · " + abilityLabel : ""}
+              </div>
+              <p className="card-zoom-desc">{abilityDescriptionFor(card)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1864,6 +2004,7 @@ function PlayBoard({
 
   const startLeader = () => {
     if (me.leaderId === "L02") return setPending({ kind: "leaderDiscard2", selected: [] });
+    if (me.leaderId === "L09" && opp.discard.length) return setPending({ kind: "leaderPickDiscard" });
     onUseLeader({});
   };
   const toggleDiscardPick = (id) => {
@@ -1874,6 +2015,7 @@ function PlayBoard({
     });
   };
   const confirmLeaderDiscard = () => { onUseLeader({ discardIds: pending.selected }); setPending(null); };
+  const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
 
   const decoyTargets = pending?.kind === "decoy" ? ROWS.flatMap((r) => me.board[r].filter((id) => cardById(id)?.cardType !== "Hero" && cardById(id)?.row)) : [];
 
@@ -1996,6 +2138,19 @@ function PlayBoard({
               ))}
             </div>
             <button type="button" className="btn btn-gold" disabled={pending.selected.length !== 2} onClick={confirmLeaderDiscard}>Confirm</button>
+          </div>
+        </div>
+      )}
+
+      {pending?.kind === "leaderPickDiscard" && (
+        <div className="overlay" onClick={() => setPending(null)}>
+          <div className="round-banner" onClick={(e) => e.stopPropagation()}>
+            <div className="ribbon">CHOOSE A CARD TO TAKE</div>
+            <div className="pool-grid">
+              {opp.discard.map((id) => (
+                <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPick(id)} />
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -2245,9 +2400,7 @@ function AIGame({ onExit }) {
     const p1cfg = { name: "You", faction: builder.faction, leaderId: builder.leaderId, deckIds: builder.selected, isAI: false };
     const aiFactionPool = FACTIONS.filter((f) => f !== builder.faction);
     const aiFaction = aiFactionPool[Math.floor(Math.random() * aiFactionPool.length)] || FACTIONS[0];
-    const aiPool = shuffle(poolForFaction(aiFaction)).slice(0, DECK_SIZE).map((c) => c.id);
-    const aiLeaders = leadersForFaction(aiFaction);
-    const aiLeaderId = aiLeaders.length ? aiLeaders[Math.floor(Math.random() * aiLeaders.length)].id : null;
+    const { deckIds: aiPool, aiLeaderId } = chooseAiDeck(aiFaction);
     const p2cfg = { name: "AI Opponent", faction: aiFaction, leaderId: aiLeaderId, deckIds: aiPool, isAI: true };
     const initial = initGame(p1cfg, p2cfg);
     setState(initial);
@@ -2753,9 +2906,9 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 
 /* ---- Card tiles ---- */
 .card-tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; text-align: left; background: linear-gradient(160deg, var(--parchment), #d8cba3); color: var(--ink); border: none; border-left: 4px solid var(--accent); border-radius: 6px; padding: 6px 7px 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; }
-.card-tile.card-xs { width: 46px; height: 60px; padding: 3px 4px; }
-.card-tile.card-sm { width: 64px; height: 84px; }
-.card-tile.card-md { width: 92px; height: 118px; }
+.card-tile.card-xs { width: 50px; height: 93px; padding: 3px 4px; }
+.card-tile.card-sm { width: 76px; height: 141px; }
+.card-tile.card-md { width: 112px; height: 209px; }
 .card-tile .card-power { position: absolute; top: 4px; right: 5px; font-family: var(--font-mono); font-weight: 700; font-size: 0.8rem; background: var(--gold); color: #241d0e; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
 .card-tile.card-xs .card-power, .card-tile.card-sm .card-power { width: 16px; height: 16px; font-size: 0.62rem; top: 3px; right: 3px; }
 .card-tile .card-row-tag { position: absolute; top: 4px; left: 5px; font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.05em; background: var(--row-accent); color: #f4ecd8; padding: 1px 4px; border-radius: 3px; }
@@ -2853,10 +3006,9 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 
 /* ---- v2 additions ---- */
 .card-tile { position: relative; }
-.card-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.card-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; z-index: 0; }
 .card-tile.no-art .card-art { display: none; }
 .card-tile-inner { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
-.card-tile:has(.card-art) .card-tile-inner { text-shadow: 0 1px 3px rgba(0,0,0,0.9); background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.75) 100%); color: #f4ecd8; margin: -6px -7px; padding: 6px 7px; }
 .card-tile.is-hero { border-left-color: var(--gold) !important; box-shadow: 0 0 0 1px var(--gold), 0 2px 4px rgba(0,0,0,0.4); }
 
 .row-markers { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -2874,15 +3026,35 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 .coin { width: 84px; height: 84px; border-radius: 50%; margin: 18px auto; background: radial-gradient(circle at 35% 30%, #f0d896, var(--gold) 60%, var(--gold-dim) 100%); border: 3px solid var(--gold-dim); box-shadow: 0 4px 10px rgba(0,0,0,0.5); animation: coin-spin 0.9s ease-in-out; }
 @keyframes coin-spin { 0% { transform: rotateY(0deg); } 100% { transform: rotateY(1080deg); } }
 
-/* ---- v3 additions: hover tooltip, play animation, passed banner, discard view ---- */
-.card-hover-tip {
-  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%) translateY(4px);
-  min-width: 140px; max-width: 220px; background: #1c1712; color: #f4ecd8; border: 1px solid var(--gold-dim);
-  border-radius: 6px; padding: 6px 9px; font-size: 0.68rem; line-height: 1.25; text-align: left;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.55); opacity: 0; pointer-events: none; z-index: 30;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+/* ---- v3 additions: hover-zoom explainer, play animation, passed banner, discard view ---- */
+.card-zoom-overlay {
+  position: fixed; inset: 0; z-index: 60; background: rgba(6,7,4,0.82);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: zoom-fade-in 0.18s ease-out;
 }
-.card-tile:hover .card-hover-tip { opacity: 1; transform: translateX(-50%) translateY(0); transition-delay: 0.25s; }
+@keyframes zoom-fade-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+.card-zoom-content {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  width: 50vw; min-width: 220px; max-width: 520px;
+  max-height: 90vh; overflow-y: auto;
+}
+.card-zoom-art-wrap {
+  width: 100%; aspect-ratio: 0.537; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.7), 0 0 0 2px var(--gold-dim);
+  background: linear-gradient(160deg, var(--parchment), #d8cba3);
+  flex-shrink: 0;
+}
+.card-zoom-art { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-zoom-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--ink); font-family: var(--font-display); text-align: center; padding: 12px; }
+.card-zoom-caption { text-align: center; color: var(--parchment); }
+.card-zoom-title { font-family: var(--font-display); font-size: 1.15rem; color: var(--gold); display: flex; align-items: center; justify-content: center; gap: 8px; }
+.card-zoom-power { font-family: var(--font-mono); background: var(--gold); color: #241d0e; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+.card-zoom-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin-top: 4px; letter-spacing: 0.03em; }
+.card-zoom-desc { font-size: 0.9rem; line-height: 1.4; color: var(--parchment); margin-top: 10px; max-width: 480px; }
+@media (max-width: 520px) {
+  .card-zoom-content { max-width: 92vw; }
+  .card-zoom-art-wrap { max-height: 50vh; width: auto; }
+}
 
 @keyframes card-appear { 0% { opacity: 0; transform: scale(0.75) translateY(8px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
 .row-cards .card-tile { animation: card-appear 0.32s ease-out; }
