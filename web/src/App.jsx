@@ -2229,52 +2229,54 @@ function PlayBoard({
         onShowLog={() => setShowLog(true)}
       />
 
-      <div className="board-half opp-half">
-        <div className="leader-slot">
-          <CardTile card={oppLeader} size="xs" disabled />
-          {opp.leaderUsed && <span className="leader-used-tag">used</span>}
+      <div className="board-frame">
+        <div className="board-half opp-half">
+          <div className="leader-slot">
+            <CardTile card={oppLeader} size="xs" disabled />
+            {opp.leaderUsed && <span className="leader-used-tag">used</span>}
+          </div>
+          {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
+          {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
+          {flash.opp && (
+            <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>
+          )}
+          <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
+          <div className="hand-strip opp-hand">
+            <CardBackStack count={opp.hand.length} faction={opp.faction} />
+            <span className="deck-count-badge">Deck {opp.deck.length} · Discard {opp.discard.length}</span>
+          </div>
         </div>
-        {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
-        {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
-        {flash.opp && (
-          <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>
-        )}
-        <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
-        <div className="hand-strip opp-hand">
-          <CardBackStack count={opp.hand.length} faction={opp.faction} />
-          <span className="deck-count-badge">Deck {opp.deck.length} · Discard {opp.discard.length}</span>
-        </div>
-      </div>
 
-      <div className="mid-divider">
-        <div className="mid-score">
-          <span>{boardTotal(opp.board, spyDoubled)}</span>
-          <span className="vs">vs</span>
-          <span>{boardTotal(me.board, spyDoubled)}</span>
-        </div>
-        <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
-          {me.passed ? "You passed" : "Pass"}
-        </button>
-        {myLeader && (
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!canAct || me.leaderUsed || me.leaderBlocked} onClick={startLeader}>
-            {me.leaderBlocked ? "Leader blocked" : me.leaderUsed ? "Leader used" : `Use Leader: ${myLeader.name.split(":")[0]}`}
+        <div className="mid-divider">
+          <div className="mid-score">
+            <span>{boardTotal(opp.board, spyDoubled)}</span>
+            <span className="vs">vs</span>
+            <span>{boardTotal(me.board, spyDoubled)}</span>
+          </div>
+          <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
+            {me.passed ? "You passed" : "Pass"}
           </button>
-        )}
-      </div>
+          {myLeader && (
+            <button type="button" className="btn btn-ghost btn-sm" disabled={!canAct || me.leaderUsed || me.leaderBlocked} onClick={startLeader}>
+              {me.leaderBlocked ? "Leader blocked" : me.leaderUsed ? "Leader used" : `Use Leader: ${myLeader.name.split(":")[0]}`}
+            </button>
+          )}
+        </div>
 
-      <div className="board-half my-half">
-        <PlayerBoard
-          board={me.board}
-          order={["close", "ranged", "siege"]}
-          spyDoubled={spyDoubled}
-          onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
-          selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
-          flashId={flash.me}
-          half="mine"
-        />
-        <div className="leader-slot mine">
-          <CardTile card={myLeader} size="xs" disabled />
-          {me.leaderUsed && <span className="leader-used-tag">used</span>}
+        <div className="board-half my-half">
+          <PlayerBoard
+            board={me.board}
+            order={["close", "ranged", "siege"]}
+            spyDoubled={spyDoubled}
+            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+            flashId={flash.me}
+            half="mine"
+          />
+          <div className="leader-slot mine">
+            <CardTile card={myLeader} size="xs" disabled />
+            {me.leaderUsed && <span className="leader-used-tag">used</span>}
+          </div>
         </div>
       </div>
 
@@ -3195,16 +3197,16 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .pip-filled { background: var(--gold); }
 .log-btn { position: absolute; right: 8px; top: 8px; }
 
-.board-half { position: relative; background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
-.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background-color: #241a10; border-radius: 6px; }
-/* board.png is one texture covering all 6 shelves (3 opponent + 3 mine)
-   stacked with a divider dead-center. Stretching it to 200% height and
-   pinning to the top/bottom edge crops out exactly the 3-row half each
-   side needs — since each half also renders exactly 3 equal-height rows,
-   the shelf seams always land exactly on our row boundaries. */
-.player-board-opp { background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 200%; background-position: 0% 0%; background-repeat: no-repeat; }
-.player-board-mine { background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 200%; background-position: 0% 100%; background-repeat: no-repeat; }
-.board-row { border-left: 3px solid var(--row-accent); background: rgba(0,0,0,0.12); border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+/* board.png is the single full-board texture (both players' shelves +
+   center divider) rendered once behind everything. Position/size it here
+   to line up the row art with the row markup below. */
+.board-frame {
+  position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;
+  background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center;
+}
+.board-half { position: relative; background: transparent; border: none; border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background: transparent; border-radius: 6px; }
+.board-row { border-left: none; background: transparent; border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .row-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
