@@ -1727,7 +1727,7 @@ function CardBackStack({ count, faction }) {
   const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
   if (count <= 0) return <span className="hint">No cards left.</span>;
   return (
-    <FitRow count={count} className="card-back-row" gap={4} maxWidth={70} minWidth={20} squeezeAfter={14}>
+    <FitRow count={count} className="card-back-row" gap={4} maxWidth={70} minWidth={20} squeezeAfter={14} clampToHeight>
       {(width, overlap) => Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
@@ -2288,7 +2288,7 @@ function PlayBoard({
         {me.hand.length === 0 ? (
           <span className="hint">No cards left.</span>
         ) : (
-          <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14}>
+          <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
             {(width, overlap) => sortedHand.map((id, i) => (
               <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
                 <CardTile
@@ -3218,10 +3218,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .mid-score { font-family: var(--font-mono); font-size: 1.3rem; display: flex; gap: 8px; align-items: baseline; }
 .mid-score .vs { color: var(--muted); font-size: 0.8rem; }
 
-.hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; }
-.hand-strip.opp-hand { justify-content: flex-start; }
-.hand-fit { display: flex; width: 100%; align-items: flex-end; }
-.card-back-row { display: flex; width: 100%; align-items: center; }
+.hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; overflow: hidden; }
+.hand-strip.opp-hand { justify-content: flex-start; flex: 0 0 64px; height: 64px; }
+.hand-strip.my-hand { flex: 0 0 140px; height: 140px; }
+.hand-fit { display: flex; width: 100%; align-items: center; flex: 1 1 auto; min-height: 0; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; }
 .card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
