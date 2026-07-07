@@ -3213,8 +3213,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
 
-.leader-slot { display: flex; flex: 0 0 auto; }
-.leader-slot.mine { margin-top: 4px; }
+.leader-slot { display: flex; flex: 0 0 auto; transform: translate(55px, 50px);}
+.leader-slot.mine { margin-top: 4px; transform: translate(55px, -50px);}
 
 .mid-divider { display: flex; align-items: center; justify-content: space-between; padding: 4px 14px; flex: 0 0 auto; }
 .mid-score { font-family: var(--font-mono); font-size: 1.3rem; display: flex; gap: 8px; align-items: baseline; }
