@@ -49,6 +49,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 // as an automatic fallback in case a path hasn't propagated to the CDN yet.
 const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@main/";
 const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/main/";
+// The real Gwent board-shelf texture, in the repo's Neutral folder. It's one
+// image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
+// line dead-center) — see BOARD_HALF background rules below for how each
+// half crops its own 3-row half out of it via background-size/position.
+const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/board.png";
 
 /* ----------------------------- META ------------------------------------ */
 
@@ -333,7 +338,7 @@ const LEADERS = [
 {id:"L05",name:"Eredin: King of the Wild Hunt",faction:"monsters",cardType:"Leader",ability:"Horn Close Combat",img:"Eredin% King of the Wild Hunt.png"},
 {id:"L06",name:"Emhyr var Emreis: Emperor of Nilfgaard",faction:"nilfgaard",cardType:"Leader",ability:"Look at 3 Opp Cards",img:"Emhyr var Emreis% Emperor of Nilfgaard.png"},
 {id:"L07",name:"Emhyr var Emreis: His Imperial Majesty",faction:"nilfgaard",cardType:"Leader",ability:"Pick a Torrential Rain card directly from your deck and play it instantly.",img:"Emhyr var Emreis% His Imperial Majesty.png"},
-{id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Abilities that restore a unit to the battlefield restore a randomly-chosen unit instead — affects both players.",img:"Emhyr var Emreis% Invader of the North.png"},
+{id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Every revive ability, on both sides, brings back a random unit instead of a chosen one.",img:"Emhyr var Emreis% Invader of the North.png"},
 {id:"L09",name:"Emhyr var Emreis: The Relentless",faction:"nilfgaard",cardType:"Leader",ability:"Take a non-Hero card from opponent's discard and play it instantly.",img:"Emhyr var Emreis% The Relentless.png"},
 {id:"L10",name:"Emhyr var Emreis: The White Flame",faction:"nilfgaard",cardType:"Leader",ability:"Instantly cancels your opponent's Leader Ability.",img:"Emhyr var Emreis% The White Flame.png"},
 {id:"L11",name:"Foltest: King of Temeria",faction:"northern_realms",cardType:"Leader",ability:"Fog",img:"Foltest% King of Temeria.png"},
@@ -347,8 +352,8 @@ const LEADERS = [
 {id:"L19",name:"Francesca Findabair: Queen of Dol Blathanna",faction:"scoiatael",cardType:"Leader",ability:"Destroys enemy's strongest Close Combat unit(s) if the combined strength of all their Close Combat units is 10 or more.",img:"Francesca Findabair% Queen of Dol Blathanna.png"},
 {id:"L20",name:"Francesca Findabair: The Beautiful",faction:"scoiatael",cardType:"Leader",ability:"Horn on Ranged",img:"Francesca Findabair% The Beautiful.png"},
 // CONFIRMED by Kareem (V7): Skellige's two Leaders (Crach an Craite, King Bran).
-{id:"L21",name:"Crach an Craite",faction:"skellige",cardType:"Leader",ability:"Shuffles all cards from each player's graveyard back into their decks.",img:"Crach an Craite.png"},
-{id:"L22",name:"King Bran",faction:"skellige",cardType:"Leader",ability:"Your units lose only half their Strength (rounded in their favor) when a Weather card is played, instead of dropping to 1.",img:"King Bran.png"}
+{id:"L21",name:"Crach an Craite",faction:"skellige",cardType:"Leader",ability:"Shuffles both graveyards back into their owners' decks.",img:"Crach an Craite.png"},
+{id:"L22",name:"King Bran",faction:"skellige",cardType:"Leader",ability:"Your units only lose half their Strength to weather, instead of dropping to 1.",img:"King Bran.png"}
 ];
 /* ------------------------- CARD INDEX / POOLS --------------------------- */
 
@@ -1524,33 +1529,33 @@ const ABILITY_LABEL = {
 };
 
 const ABILITY_DESCRIPTIONS = {
-  muster: "Muster: this unit has kin scattered across your deck and hand. The moment it hits the battlefield, it calls out to them — every other card in its Muster family marches out to join it, all for free.",
-  medic: "Medic: a battlefield healer. On arrival, they rush to the graveyard and drag one fallen non-Hero, non-Special comrade back onto the battlefield, alive and ready to fight again.",
-  decoy: "Decoy: a body double. Swap it for one of your own units already fighting, and that unit slips quietly back into your hand unharmed — free to be played again later for another round of value.",
-  spy: "Spy: a double agent. They cross the battlefield and fight from your OPPONENT'S side instead of yours, but in exchange for the betrayal you immediately draw 2 fresh cards from your deck.",
-  tightBond: "Tight Bond (Bond): brothers-in-arms. This card's power multiplies by however many copies of itself stand in the same row beside it — two copies double each other, three copies triple, and so on.",
-  moraleBoost: "Morale Boost: a rousing warcry. Every OTHER card sharing its row gets +1 power (not itself), and the effect stacks additively with every other Morale Boost card in that row.",
-  horn: "Horn: a battle-horn's call. It doubles the total power of every unit standing in the row it sounds for — its own row for a unit-horn, or a row of your choosing for a special-card horn.",
-  weather: "Weather: a brutal storm rolls in and freezes the matching row on BOTH sides of the battlefield, crushing every unit there down to just 1 power each (0-power cards stay at 0) — Tight Bond, Morale Boost, and Horn all mean nothing until someone clears the skies.",
-  clearWeather: "Clear Weather: the storm breaks. Every active weather effect on every row, on both sides of the battlefield, lifts at once.",
-  scorchGlobal: "Scorch: a wave of fire sweeps the entire battlefield, incinerating the single strongest non-Hero unit(s) present — both players' sides are fair game, and ties all burn together.",
-  scorchRow: "Scorch (Row): fire rains down on one row of the opponent's side, incinerating whichever non-Hero unit(s) stand strongest there.",
-  scorchRowThreshold: "Scorch (Threshold): fire only rains down if the opponent's chosen row has built up enough combined power (10 or more) — then it incinerates that row's strongest non-Hero unit(s).",
-  berserker: "Berserker: a Skellige warrior teetering on the edge of a battle-rage, waiting for a Mardroeme card to unleash a far stronger Vildkaarl form.",
-  mardroeme: "Mardroeme: the battle-rage takes hold. Every Berserker standing in the target row transforms at once into its towering, more powerful Vildkaarl form.",
-  summonAvenger: "Summon Avenger: this fighter has sworn an oath — should they fall in battle or the round simply end, a stronger avenger rises in their place to finish the fight.",
-  unsummonable: "This unit cannot be played directly from a hand or deck — it can only step onto the battlefield as a Summon Avenger's replacement.",
+  muster: "Muster: calls every kin card from your deck and hand onto the battlefield beside it, free of charge.",
+  medic: "Medic: drags one fallen comrade from the graveyard back onto the battlefield, alive and fighting again.",
+  decoy: "Decoy: swaps for one of your units, pulling it safely back to your hand to be replayed.",
+  spy: "Spy: infiltrates the enemy ranks, fighting for them — but hands you 2 fresh cards in return.",
+  tightBond: "Tight Bond: brothers-in-arms — power multiplies with every copy standing beside it in the row.",
+  moraleBoost: "Morale Boost: a rousing warcry, granting +1 power to every other unit sharing its row.",
+  horn: "Horn: doubles the total power of every unit standing in the row it sounds for.",
+  weather: "Weather: a storm freezes the matching row on both sides, crushing units down to 1 power each.",
+  clearWeather: "Clear Weather: breaks every storm at once, lifting all weather effects from the battlefield.",
+  scorchGlobal: "Scorch: fire sweeps the whole battlefield, incinerating the strongest non-Hero unit(s) on either side.",
+  scorchRow: "Scorch (Row): fire hits one enemy row, incinerating whichever non-Hero unit(s) stand strongest there.",
+  scorchRowThreshold: "Scorch (Threshold): fire strikes an enemy row only once its power hits 10 — then burns the strongest.",
+  berserker: "Berserker: a warrior teetering on the edge of rage, waiting for Mardroeme to unleash their true form.",
+  mardroeme: "Mardroeme: ignites battle-rage, transforming every Berserker in the row into its towering Vildkaarl form.",
+  summonAvenger: "Summon Avenger: sworn to vengeance — falling in battle or the round ending summons a stronger replacement.",
+  unsummonable: "Unsummonable: never played by hand — only rises onto the battlefield as a Summon Avenger's replacement.",
 };
 
 function abilityDescriptionFor(card) {
   if (!card) return "";
   if (card.cardType === "Leader") return card.ability || "";
-  const heroNote = card.cardType === "Hero" ? "Hero: fully immune to every effect, good or bad — weather, Horn, Morale Boost, Tight Bond, Medic revival, and Scorch all ignore Heroes entirely." : "";
+  const heroNote = card.cardType === "Hero" ? "Hero: immune to everything — weather, Horn, Morale, Bond, Medic, and Scorch all pass right through." : "";
   const abilityNote = card.ability && ABILITY_DESCRIPTIONS[card.ability] ? ABILITY_DESCRIPTIONS[card.ability] : "";
   if (heroNote && abilityNote) return heroNote + " " + abilityNote;
   if (heroNote) return heroNote;
   if (abilityNote) return abilityNote;
-  return "No special ability — a plain unit valued purely on its printed power.";
+  return "A plain unit, valued purely on its printed power.";
 }
 
 function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, fitWidth }) {
@@ -1651,29 +1656,40 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
    scrolling. Below a squeeze threshold, cards simply stretch or shrink to
    fill the row. Past the threshold, card width holds steady and the extra
    cards instead overlap each other (like a hand of cards fanned out) so
-   everything still fits in the same footprint. */
-function useMeasuredWidth() {
+   everything still fits in the same footprint.
+
+   Board rows additionally have a FIXED, content-independent height (the
+   flexbox gives each row an equal share of the board, capped with
+   min-height: 0 + overflow: hidden) — so for those we also clamp card
+   width by that available height (via clampToHeight), or a tall card
+   would get its bottom sliced off instead of shrinking to fit. Hand rows
+   don't pass clampToHeight since their container height depends on the
+   cards themselves, which would be a circular, oscillating measurement. */
+function useMeasuredSize() {
   const containerRef = useRef(null);
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setContainerWidth(el.getBoundingClientRect().width);
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  return [containerRef, containerWidth];
+  return [containerRef, size];
 }
 
-function fitCardMetrics(containerWidth, count, { gap = 6, maxWidth = 112, minWidth = 30, squeezeAfter = 14 } = {}) {
+function fitCardMetrics(containerWidth, count, { gap = 6, maxWidth = 112, minWidth = 30, squeezeAfter = 14, stretchFactor = 1.5 } = {}) {
   if (!containerWidth || count <= 0) return { width: maxWidth, overlap: 0 };
   const naturalTotal = count * maxWidth + (count - 1) * gap;
   if (naturalTotal <= containerWidth) {
     // Room to spare — stretch cards to fill the row instead of leaving dead space beside them.
     const stretched = (containerWidth - (count - 1) * gap) / count;
-    return { width: Math.min(stretched, maxWidth * 1.5), overlap: 0 };
+    return { width: Math.min(stretched, maxWidth * stretchFactor), overlap: 0 };
   }
   if (count <= squeezeAfter) {
     const width = Math.max(minWidth, (containerWidth - (count - 1) * gap) / count);
@@ -1687,9 +1703,14 @@ function fitCardMetrics(containerWidth, count, { gap = 6, maxWidth = 112, minWid
   return { width: widthAtThreshold, overlap };
 }
 
-function FitRow({ count, className, children, gap, maxWidth, minWidth, squeezeAfter }) {
-  const [containerRef, containerWidth] = useMeasuredWidth();
-  const { width, overlap } = fitCardMetrics(containerWidth, count, { gap, maxWidth, minWidth, squeezeAfter });
+function FitRow({ count, className, children, gap, maxWidth, minWidth, squeezeAfter, clampToHeight }) {
+  const [containerRef, size] = useMeasuredSize();
+  // A row's card height is always fitWidth / CARD_ASPECT (see CardTile), so
+  // capping the effective max width to height * CARD_ASPECT guarantees the
+  // rendered card height never exceeds the space actually available.
+  const effectiveMaxWidth = clampToHeight && size.height > 0 ? Math.min(maxWidth, size.height * CARD_ASPECT) : maxWidth;
+  const stretchFactor = clampToHeight ? 1 : 1.5; // never grow past the height cap on board rows
+  const { width, overlap } = fitCardMetrics(size.width, count, { gap, maxWidth: effectiveMaxWidth, minWidth, squeezeAfter, stretchFactor });
   return (
     <div ref={containerRef} className={className}>
       {children(width, overlap)}
@@ -1752,7 +1773,7 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
       <div className="row-cards">
         {cardIds.length === 0 && <span className="row-empty">no units</span>}
         {cardIds.length > 0 && (
-          <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={76} minWidth={26} squeezeAfter={12}>
+          <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={96} minWidth={22} squeezeAfter={12} clampToHeight>
             {(width, overlap) => cardIds.map((id, i) => (
               <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
                 <CardTile
@@ -1772,9 +1793,9 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
   );
 }
 
-function PlayerBoard({ board, order, spyDoubled, onClickCard, selectableIds, flashId }) {
+function PlayerBoard({ board, order, spyDoubled, onClickCard, selectableIds, flashId, half }) {
   return (
-    <div className="player-board">
+    <div className={"player-board" + (half ? " player-board-" + half : "")}>
       {order.map((r) => (
         <BoardRow key={r} rowKey={r} board={board} spyDoubled={spyDoubled} onClickCard={onClickCard} selectableIds={selectableIds} flashId={flashId} />
       ))}
@@ -2218,7 +2239,7 @@ function PlayBoard({
         {flash.opp && (
           <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>
         )}
-        <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} />
+        <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
         <div className="hand-strip opp-hand">
           <CardBackStack count={opp.hand.length} faction={opp.faction} />
           <span className="deck-count-badge">Deck {opp.deck.length} · Discard {opp.discard.length}</span>
@@ -2249,6 +2270,7 @@ function PlayBoard({
           onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
           selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
           flashId={flash.me}
+          half="mine"
         />
         <div className="leader-slot mine">
           <CardTile card={myLeader} size="xs" disabled />
@@ -3174,13 +3196,20 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .log-btn { position: absolute; right: 8px; top: 8px; }
 
 .board-half { position: relative; background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
-.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; }
-.board-row { border-left: 3px solid var(--row-accent); background: rgba(0,0,0,0.22); border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background-color: #241a10; border-radius: 6px; }
+/* board.png is one texture covering all 6 shelves (3 opponent + 3 mine)
+   stacked with a divider dead-center. Stretching it to 200% height and
+   pinning to the top/bottom edge crops out exactly the 3-row half each
+   side needs — since each half also renders exactly 3 equal-height rows,
+   the shelf seams always land exactly on our row boundaries. */
+.player-board-opp { background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 200%; background-position: 0% 0%; background-repeat: no-repeat; }
+.player-board-mine { background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 200%; background-position: 0% 100%; background-repeat: no-repeat; }
+.board-row { border-left: 3px solid var(--row-accent); background: rgba(0,0,0,0.12); border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .row-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
 .row-total { color: var(--gold); font-weight: 700; }
-.row-cards { display: flex; align-items: center; flex: 1 1 0; min-height: 0; overflow: hidden; }
-.row-cards-fit { display: flex; width: 100%; align-items: center; }
-.row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; }
+.row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
+.row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
 
 .leader-slot { display: flex; flex: 0 0 auto; }
 .leader-slot.mine { margin-top: 4px; }
