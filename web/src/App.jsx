@@ -36,13 +36,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
      toast calls out the most recently played card on either side, and
      opponent Pass is called out with a banner.
 
-   Known open item (flagged here rather than guessed silently):
-   - Skellige's two leaders (Crach an Craite, King Bran) were confirmed via
-     their card art (blank frame, no power circle), but their actual
-     abilities weren't specified. They currently reuse two existing,
-     already-implemented mechanics (Horn on Close Combat / Draw extra
-     card) as placeholders — swap in the real ability text once you have
-     it (see the LEADERS array below, ids L21/L22).
+   V7 update: Skellige's two leaders are now confirmed and fully implemented
+   (see LEADERS array, ids L21/L22):
+   - Crach an Craite: shuffles both graveyards back into their owners' decks.
+   - King Bran: passive — his own board only loses half Strength (instead
+     of dropping to 1) when a Weather card is active on a row.
    ======================================================================= */
 
 // jsDelivr mirrors the public GitHub repo with proper cross-origin headers
@@ -87,6 +85,7 @@ const ROW_META = {
 const DECK_SIZE = 22;
 const HAND_SIZE = 10;
 const MAX_MULLIGAN = 2;
+const CARD_ASPECT = 0.537; // width:height, matches real card art
 
 const CARDS = [
 {id:"c001",name:"Arachas Behemoth",faction:"monsters",power:6.0,row:"siege",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Arachas Behemoth.png"},
@@ -334,7 +333,7 @@ const LEADERS = [
 {id:"L05",name:"Eredin: King of the Wild Hunt",faction:"monsters",cardType:"Leader",ability:"Horn Close Combat",img:"Eredin% King of the Wild Hunt.png"},
 {id:"L06",name:"Emhyr var Emreis: Emperor of Nilfgaard",faction:"nilfgaard",cardType:"Leader",ability:"Look at 3 Opp Cards",img:"Emhyr var Emreis% Emperor of Nilfgaard.png"},
 {id:"L07",name:"Emhyr var Emreis: His Imperial Majesty",faction:"nilfgaard",cardType:"Leader",ability:"Pick a Torrential Rain card directly from your deck and play it instantly.",img:"Emhyr var Emreis% His Imperial Majesty.png"},
-{id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Abilities that restore a unit to the battlefield restore a randomly-chosen unit instead.",img:"Emhyr var Emreis% Invader of the North.png"},
+{id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Abilities that restore a unit to the battlefield restore a randomly-chosen unit instead — affects both players.",img:"Emhyr var Emreis% Invader of the North.png"},
 {id:"L09",name:"Emhyr var Emreis: The Relentless",faction:"nilfgaard",cardType:"Leader",ability:"Take a non-Hero card from opponent's discard and play it instantly.",img:"Emhyr var Emreis% The Relentless.png"},
 {id:"L10",name:"Emhyr var Emreis: The White Flame",faction:"nilfgaard",cardType:"Leader",ability:"Instantly cancels your opponent's Leader Ability.",img:"Emhyr var Emreis% The White Flame.png"},
 {id:"L11",name:"Foltest: King of Temeria",faction:"northern_realms",cardType:"Leader",ability:"Fog",img:"Foltest% King of Temeria.png"},
@@ -347,11 +346,9 @@ const LEADERS = [
 {id:"L18",name:"Francesca Findabair: Pureblood Elf",faction:"scoiatael",cardType:"Leader",ability:"Frost",img:"Francesca Findabair% Pureblood Elf.png"},
 {id:"L19",name:"Francesca Findabair: Queen of Dol Blathanna",faction:"scoiatael",cardType:"Leader",ability:"Destroys enemy's strongest Close Combat unit(s) if the combined strength of all their Close Combat units is 10 or more.",img:"Francesca Findabair% Queen of Dol Blathanna.png"},
 {id:"L20",name:"Francesca Findabair: The Beautiful",faction:"scoiatael",cardType:"Leader",ability:"Horn on Ranged",img:"Francesca Findabair% The Beautiful.png"},
-// PLACEHOLDER — Kareem confirmed Skellige has exactly 2 Leaders (Crach an Craite, King Bran) via blank leader-style
-// card art (no power circle), but didn't specify their actual abilities yet. Reusing two existing, already-implemented
-// leader mechanics below as safe placeholders. Flag these for Kareem to confirm/replace with the real ability text.
-{id:"L21",name:"Crach an Craite",faction:"skellige",cardType:"Leader",ability:"Horn on Close Combat",img:"Crach an Craite.png"},
-{id:"L22",name:"King Bran",faction:"skellige",cardType:"Leader",ability:"Draw extra card",img:"King Bran.png"}
+// CONFIRMED by Kareem (V7): Skellige's two Leaders (Crach an Craite, King Bran).
+{id:"L21",name:"Crach an Craite",faction:"skellige",cardType:"Leader",ability:"Shuffles all cards from each player's graveyard back into their decks.",img:"Crach an Craite.png"},
+{id:"L22",name:"King Bran",faction:"skellige",cardType:"Leader",ability:"Your units lose only half their Strength (rounded in their favor) when a Weather card is played, instead of dropping to 1.",img:"King Bran.png"}
 ];
 /* ------------------------- CARD INDEX / POOLS --------------------------- */
 
@@ -393,6 +390,17 @@ function imgSrc(card, base = IMAGE_BASE_URL) {
   const folder = FACTION_IMAGE_FOLDER[card.faction] || "";
   const path = folder ? folder + "/" + card.img : card.img;
   // Encode each path segment separately so real slashes in the folder name survive.
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return base + encoded;
+}
+
+// Every faction folder in the repo carries its own back.png. Neutral cards
+// are dealt from whichever faction the opponent is actually playing, so a
+// Neutral card in an opponent's hand should show THAT faction's back, not
+// a "neutral" one — callers pass the opponent's real faction key here.
+function backImgSrc(factionKey, base = IMAGE_BASE_URL) {
+  const folder = FACTION_IMAGE_FOLDER[factionKey] || FACTION_IMAGE_FOLDER.neutral;
+  const path = folder + "/back.png";
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   return base + encoded;
 }
@@ -440,6 +448,7 @@ function emptyBoard() {
     horns: { close: 0, ranged: 0, siege: 0 },
     mardroeme: { close: false, ranged: false, siege: false },
     specials: [],
+    halveWeather: false, // set true for a King Bran-led board — weather halves Strength on THIS board instead of flattening it to 1
   };
 }
 
@@ -482,7 +491,13 @@ function unitEffectivePower(cardId, board, row, spyDoubled) {
   // longer apply on top of that (that's the entire point of weather).
   // A card whose printed power is already 0 stays at 0 — weather can't
   // raise a unit's power, only cap it, so there's nothing to "reduce to 1".
-  if (board.weather[row]) return card.power === 0 ? 0 : 1;
+  if (board.weather[row]) {
+    if (card.power === 0) return 0;
+    // King Bran's passive: this board's units only lose half their Strength
+    // (rounded so the loss favors the unit) instead of being flattened to 1.
+    if (board.halveWeather) return Math.max(1, Math.ceil(card.power / 2));
+    return 1;
+  }
 
   let value = card.power;
 
@@ -834,12 +849,16 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
 /* ---------------------------- LEADER ENGINE ------------------------------
    20 of the 22 leaders are a once-per-game activated power the acting
    player triggers on their own turn (a "Use Leader Ability" button).
-   Two are passive instead and never call this function directly:
+   Three are passive instead and never produce a visible effect through
+   this function directly:
      - L01 Eredin Bréacc Glas: The Treacherous — handled inside the power
        engine itself (spyDoubled, see above).
      - L08 Emhyr var Emreis: Invader of the North — handled by setting
-       forceRandomRevive on that player at game setup, which the Medic
-       branch of resolvePlayCard already checks.
+       forceRandomRevive on BOTH players at game setup (it affects every
+       Medic-style revive in the match, not just its owner's), which the
+       Medic branch of resolvePlayCard already checks.
+     - L22 King Bran — handled by setting board.halveWeather on his own
+       board at game setup, which unitEffectivePower already checks.
    -------------------------------------------------------------------- */
 
 function leaderNeedsOptions(leaderId) {
@@ -991,15 +1010,14 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, ranged: p.board.horns.ranged + 1 } } }));
       break;
     }
-    // PLACEHOLDER — see header note: Skellige leader abilities aren't confirmed yet, reusing existing mechanics.
-    case "L21": { // Crach an Craite — Horn on Close Combat, instantly
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, close: p.board.horns.close + 1 } } }));
+    case "L21": { // Crach an Craite — shuffle both players' graveyards back into their decks
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, deck: shuffle([...p.deck, ...p.discard]), discard: [] }));
+      ns = withPlayer(ns, oppKey, (p) => ({ ...p, deck: shuffle([...p.deck, ...p.discard]), discard: [] }));
+      log.push(`Shuffles both graveyards back into their decks.`);
       break;
     }
-    case "L22": { // King Bran — Draw an extra card
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, ...p.deck.slice(0, 1)], deck: p.deck.slice(1) }));
-      break;
-    }
+    case "L22": break; // King Bran is passive — see board.halveWeather, set at game setup, like L01/L08.
+
     default: break;
   }
 
@@ -1237,8 +1255,15 @@ function gameReducer(state, action) {
 function initGame(p1cfg, p2cfg) {
   let p1 = dealHand(makePlayer(p1cfg));
   let p2 = dealHand(makePlayer(p2cfg));
-  if (p1cfg.leaderId === "L08") p1 = { ...p1, forceRandomRevive: true };
-  if (p2cfg.leaderId === "L08") p2 = { ...p2, forceRandomRevive: true };
+  // L08 Invader of the North affects Medic-style revives for BOTH players
+  // in the match, no matter which side is leading with it.
+  if (p1cfg.leaderId === "L08" || p2cfg.leaderId === "L08") {
+    p1 = { ...p1, forceRandomRevive: true };
+    p2 = { ...p2, forceRandomRevive: true };
+  }
+  // L22 King Bran only softens weather on his own board.
+  if (p1cfg.leaderId === "L22") p1 = { ...p1, board: { ...p1.board, halveWeather: true } };
+  if (p2cfg.leaderId === "L22") p2 = { ...p2, board: { ...p2.board, halveWeather: true } };
 
   // Scoia'tael faction ability: if exactly one side is Scoia'tael, that
   // player chooses who opens Round 1 — no coin toss needed. If both sides
@@ -1499,22 +1524,22 @@ const ABILITY_LABEL = {
 };
 
 const ABILITY_DESCRIPTIONS = {
-  muster: "Muster: when played, automatically searches your deck and hand for every other card in its Muster family and brings them all onto the battlefield alongside it, for free.",
-  medic: "Medic: when played, immediately revives one non-Hero, non-Special card from your discard pile and puts it onto the battlefield.",
-  decoy: "Decoy: swap this card for one of your own units already on the battlefield, returning that unit safely to your hand so you can replay it later (e.g. to reuse an ability).",
-  spy: "Spy: played onto your OPPONENT'S side of the battlefield instead of your own, but you immediately draw 2 cards from your deck as compensation.",
-  tightBond: "Tight Bond (Bond): this card's power multiplies by the number of copies of itself present in the same row — two copies double each other's power, three copies triple it, and so on.",
-  moraleBoost: "Morale Boost: adds +1 power to every OTHER card in the same row (not itself), stacking additively with every Morale Boost card present.",
-  horn: "Horn: doubles the total power of every unit in the row it affects (its own row for a unit-horn, or a chosen row for a special-card horn).",
-  weather: "Weather: freezes the matching row on BOTH players' sides down to 1 power each (0-power cards stay at 0), cancelling out Tight Bond, Morale Boost, and Horn bonuses until Clear Weather is played.",
-  clearWeather: "Clear Weather: instantly removes all active weather effects from every row, on both sides of the battlefield.",
-  scorchGlobal: "Scorch: destroys the single strongest non-Hero unit(s) across the ENTIRE battlefield — both players' sides — with ties all being destroyed together.",
-  scorchRow: "Scorch (Row): destroys the strongest non-Hero unit(s) in one specific row on the opponent's side of the battlefield.",
-  scorchRowThreshold: "Scorch (Threshold): destroys the strongest non-Hero unit(s) in a specific opponent row, but only if that row's total power is 10 or more.",
-  berserker: "Berserker: a Skellige unit that transforms into a stronger Vildkaarl form when a Mardroeme card is played in its row.",
-  mardroeme: "Mardroeme: transforms every Berserker unit present in the target row into its more powerful Transformed Vildkaarl form.",
-  summonAvenger: "Summon Avenger: when this card leaves the battlefield (destroyed or at round's end), it is automatically replaced by a stronger avenger unit.",
-  unsummonable: "This unit cannot be played directly from a hand or deck — it can only appear on the battlefield as a Summon Avenger replacement.",
+  muster: "Muster: this unit has kin scattered across your deck and hand. The moment it hits the battlefield, it calls out to them — every other card in its Muster family marches out to join it, all for free.",
+  medic: "Medic: a battlefield healer. On arrival, they rush to the graveyard and drag one fallen non-Hero, non-Special comrade back onto the battlefield, alive and ready to fight again.",
+  decoy: "Decoy: a body double. Swap it for one of your own units already fighting, and that unit slips quietly back into your hand unharmed — free to be played again later for another round of value.",
+  spy: "Spy: a double agent. They cross the battlefield and fight from your OPPONENT'S side instead of yours, but in exchange for the betrayal you immediately draw 2 fresh cards from your deck.",
+  tightBond: "Tight Bond (Bond): brothers-in-arms. This card's power multiplies by however many copies of itself stand in the same row beside it — two copies double each other, three copies triple, and so on.",
+  moraleBoost: "Morale Boost: a rousing warcry. Every OTHER card sharing its row gets +1 power (not itself), and the effect stacks additively with every other Morale Boost card in that row.",
+  horn: "Horn: a battle-horn's call. It doubles the total power of every unit standing in the row it sounds for — its own row for a unit-horn, or a row of your choosing for a special-card horn.",
+  weather: "Weather: a brutal storm rolls in and freezes the matching row on BOTH sides of the battlefield, crushing every unit there down to just 1 power each (0-power cards stay at 0) — Tight Bond, Morale Boost, and Horn all mean nothing until someone clears the skies.",
+  clearWeather: "Clear Weather: the storm breaks. Every active weather effect on every row, on both sides of the battlefield, lifts at once.",
+  scorchGlobal: "Scorch: a wave of fire sweeps the entire battlefield, incinerating the single strongest non-Hero unit(s) present — both players' sides are fair game, and ties all burn together.",
+  scorchRow: "Scorch (Row): fire rains down on one row of the opponent's side, incinerating whichever non-Hero unit(s) stand strongest there.",
+  scorchRowThreshold: "Scorch (Threshold): fire only rains down if the opponent's chosen row has built up enough combined power (10 or more) — then it incinerates that row's strongest non-Hero unit(s).",
+  berserker: "Berserker: a Skellige warrior teetering on the edge of a battle-rage, waiting for a Mardroeme card to unleash a far stronger Vildkaarl form.",
+  mardroeme: "Mardroeme: the battle-rage takes hold. Every Berserker standing in the target row transforms at once into its towering, more powerful Vildkaarl form.",
+  summonAvenger: "Summon Avenger: this fighter has sworn an oath — should they fall in battle or the round simply end, a stronger avenger rises in their place to finish the fight.",
+  unsummonable: "This unit cannot be played directly from a hand or deck — it can only step onto the battlefield as a Summon Avenger's replacement.",
 };
 
 function abilityDescriptionFor(card) {
@@ -1528,7 +1553,7 @@ function abilityDescriptionFor(card) {
   return "No special ability — a plain unit valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, fitWidth }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const hoverTimer = useRef(null);
@@ -1539,6 +1564,9 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const isSpecial = card.cardType === "Special";
   const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
+  const fitStyle = fitWidth
+    ? { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color, width: `${fitWidth}px`, height: `${fitWidth / CARD_ASPECT}px` }
+    : { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
 
   const clearHoverTimer = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
   const handleMouseEnter = () => {
@@ -1560,7 +1588,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (card.cardType === "Hero" ? " is-hero" : "") +
           (artStage === 2 ? " no-art" : "")
         }
-        style={{ "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color }}
+        style={fitStyle}
         onClick={disabled ? undefined : onClick}
         aria-disabled={disabled || undefined}
         onMouseEnter={handleMouseEnter}
@@ -1616,15 +1644,83 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   );
 }
 
-function CardBackStack({ count }) {
-  const shown = Math.min(count, 8);
+/* ---- Fit-to-screen sizing helpers ----------------------------------------
+   A row of cards (a hand, a board row, or a fan of opponent card-backs)
+   should always occupy the FULL width of its container with no leftover
+   empty space beside it, and should never force horizontal/vertical
+   scrolling. Below a squeeze threshold, cards simply stretch or shrink to
+   fill the row. Past the threshold, card width holds steady and the extra
+   cards instead overlap each other (like a hand of cards fanned out) so
+   everything still fits in the same footprint. */
+function useMeasuredWidth() {
+  const containerRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setContainerWidth(el.getBoundingClientRect().width);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [containerRef, containerWidth];
+}
+
+function fitCardMetrics(containerWidth, count, { gap = 6, maxWidth = 112, minWidth = 30, squeezeAfter = 14 } = {}) {
+  if (!containerWidth || count <= 0) return { width: maxWidth, overlap: 0 };
+  const naturalTotal = count * maxWidth + (count - 1) * gap;
+  if (naturalTotal <= containerWidth) {
+    // Room to spare — stretch cards to fill the row instead of leaving dead space beside them.
+    const stretched = (containerWidth - (count - 1) * gap) / count;
+    return { width: Math.min(stretched, maxWidth * 1.5), overlap: 0 };
+  }
+  if (count <= squeezeAfter) {
+    const width = Math.max(minWidth, (containerWidth - (count - 1) * gap) / count);
+    return { width, overlap: 0 };
+  }
+  // Past the threshold: freeze card width at what it'd be exactly AT the
+  // threshold, then overlap the extras so the whole hand still fits.
+  const widthAtThreshold = Math.max(minWidth, (containerWidth - (squeezeAfter - 1) * gap) / squeezeAfter);
+  const naturalAtCount = count * widthAtThreshold + (count - 1) * gap;
+  const overlap = naturalAtCount > containerWidth ? (naturalAtCount - containerWidth) / (count - 1) : 0;
+  return { width: widthAtThreshold, overlap };
+}
+
+function FitRow({ count, className, children, gap, maxWidth, minWidth, squeezeAfter }) {
+  const [containerRef, containerWidth] = useMeasuredWidth();
+  const { width, overlap } = fitCardMetrics(containerWidth, count, { gap, maxWidth, minWidth, squeezeAfter });
   return (
-    <div className="card-back-stack" aria-label={count + " cards in hand"}>
-      {Array.from({ length: shown }).map((_, i) => (
-        <div key={i} className="card-back" style={{ "--i": i }} />
-      ))}
-      <span className="hand-count">{count}</span>
+    <div ref={containerRef} className={className}>
+      {children(width, overlap)}
     </div>
+  );
+}
+
+// Opponent's hand, shown as their faction's card back laid down face-down
+// in front of them — like they've fanned their hand out on the table.
+// Neutral cards drawn into that hand still show the OPPONENT's real
+// faction back (there's no separate "neutral" back in the repo).
+function CardBackStack({ count, faction }) {
+  const [artStage, setArtStage] = useState(0);
+  const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
+  if (count <= 0) return <span className="hint">No cards left.</span>;
+  return (
+    <FitRow count={count} className="card-back-row" gap={4} maxWidth={70} minWidth={20} squeezeAfter={14}>
+      {(width, overlap) => Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="card-back-wrap"
+          style={{ width, height: width / CARD_ASPECT, marginLeft: i === 0 ? 0 : -overlap, zIndex: i }}
+        >
+          {src ? (
+            <img className="card-back-img" src={src} alt="Opponent card back" onError={() => setArtStage((s) => s + 1)} />
+          ) : (
+            <div className="card-back-fallback" />
+          )}
+        </div>
+      ))}
+    </FitRow>
   );
 }
 
@@ -1655,16 +1751,22 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
       <RowMarkers board={board} row={rowKey} />
       <div className="row-cards">
         {cardIds.length === 0 && <span className="row-empty">no units</span>}
-        {cardIds.map((id) => (
-          <CardTile
-            key={id}
-            card={cardById(id)}
-            size="sm"
-            onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
-            disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
-            justPlayed={id === flashId}
-          />
-        ))}
+        {cardIds.length > 0 && (
+          <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={76} minWidth={26} squeezeAfter={12}>
+            {(width, overlap) => cardIds.map((id, i) => (
+              <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
+                <CardTile
+                  card={cardById(id)}
+                  size="sm"
+                  fitWidth={width}
+                  onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
+                  disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
+                  justPlayed={id === flashId}
+                />
+              </div>
+            ))}
+          </FitRow>
+        )}
       </div>
     </div>
   );
@@ -1774,21 +1876,52 @@ function GameOverPanel({ state, onExit }) {
   );
 }
 
+const ABILITY_FILTERS = [
+  { key: "muster", label: "Muster", symbol: "\u2694" },
+  { key: "medic", label: "Medic", symbol: "\u271A" },
+  { key: "decoy", label: "Decoy", symbol: "\u21BB" },
+  { key: "spy", label: "Spy", symbol: "\u2694\uFE0E" },
+  { key: "tightBond", label: "Bond", symbol: "\u26D3" },
+  { key: "moraleBoost", label: "Morale", symbol: "\u2605" },
+  { key: "horn", label: "Horn", symbol: "\u{1F4EF}" },
+  { key: "weather", label: "Weather", symbol: "\u2601" },
+  { key: "clearWeather", label: "Clear Weather", symbol: "\u2600" },
+  { key: "scorch", label: "Scorch", symbol: "\u{1F525}", match: ["scorchGlobal", "scorchRow", "scorchRowThreshold"] },
+  { key: "berserker", label: "Berserker", symbol: "\u{1F43A}" },
+  { key: "mardroeme", label: "Mardroeme", symbol: "\u26A1" },
+  { key: "summonAvenger", label: "Avenger", symbol: "\u{1F6E1}" },
+];
+function cardMatchesAbilityFilter(card, filterKey) {
+  if (!filterKey) return true;
+  const group = ABILITY_FILTERS.find((f) => f.key === filterKey);
+  if (!group) return true;
+  return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
+}
+
 function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel }) {
   const [query, setQuery] = useState("");
+  const [abilityFilter, setAbilityFilter] = useState(null);
   const pool = useMemo(() => poolForFaction(faction), [faction]);
+  const availableFilterKeys = useMemo(() => new Set(pool.map((c) => c.ability).filter(Boolean)), [pool]);
+  const activeFilters = useMemo(
+    () => ABILITY_FILTERS.filter((f) => (f.match ? f.match.some((m) => availableFilterKeys.has(m)) : availableFilterKeys.has(f.key))),
+    [availableFilterKeys]
+  );
   const filtered = useMemo(
     () =>
       pool
         .filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
+        .filter((c) => cardMatchesAbilityFilter(c, abilityFilter))
         .slice()
         .sort((a, b) => {
           const pa = a.power ?? 0, pb = b.power ?? 0;
           if (pa !== pb) return pb - pa;
           return (a.name || "").localeCompare(b.name || "");
         }),
-    [pool, query]
+    [pool, query, abilityFilter]
   );
+  useEffect(() => { setAbilityFilter(null); }, [faction]);
+
   const leaders = useMemo(() => leadersForFaction(faction), [faction]);
   const count = selectedIds.length;
   const needsLeader = leaders.length > 0;
@@ -1836,6 +1969,27 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
+
+      <div className="ability-filter-row">
+        {activeFilters.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            title={f.label}
+            aria-label={`Filter: ${f.label}`}
+            className={"ability-filter-btn" + (abilityFilter === f.key ? " active" : "")}
+            onClick={() => setAbilityFilter(abilityFilter === f.key ? null : f.key)}
+          >
+            <span className="ability-filter-symbol">{f.symbol}</span>
+            <span className="ability-filter-label">{f.label}</span>
+          </button>
+        ))}
+        {abilityFilter && (
+          <button type="button" className="ability-filter-btn ability-filter-clear" onClick={() => setAbilityFilter(null)}>
+            Clear
+          </button>
+        )}
+      </div>
 
       <div className="pool-grid">
         {filtered.map((c) => (
@@ -2066,7 +2220,7 @@ function PlayBoard({
         )}
         <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} />
         <div className="hand-strip opp-hand">
-          <CardBackStack count={opp.hand.length} />
+          <CardBackStack count={opp.hand.length} faction={opp.faction} />
           <span className="deck-count-badge">Deck {opp.deck.length} · Discard {opp.discard.length}</span>
         </div>
       </div>
@@ -2109,18 +2263,23 @@ function PlayBoard({
             <button type="button" className="btn-link-discard" onClick={() => setShowDiscard(true)}>view</button>
           )}
         </span>
-        <div className="hand-scroll">
-          {sortedHand.map((id) => (
-            <CardTile
-              key={id}
-              card={cardById(id)}
-              size="md"
-              disabled={!canAct || !isMyTurn || me.passed || !!pending}
-              onClick={() => startPlay(id)}
-            />
-          ))}
-          {me.hand.length === 0 && <span className="hint">No cards left.</span>}
-        </div>
+        {me.hand.length === 0 ? (
+          <span className="hint">No cards left.</span>
+        ) : (
+          <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14}>
+            {(width, overlap) => sortedHand.map((id, i) => (
+              <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
+                <CardTile
+                  card={cardById(id)}
+                  size="md"
+                  fitWidth={width}
+                  disabled={!canAct || !isMyTurn || me.passed || !!pending}
+                  onClick={() => startPlay(id)}
+                />
+              </div>
+            ))}
+          </FitRow>
+        )}
       </div>
 
       {pending && (pending.kind === "agile" || pending.kind === "horn" || pending.kind === "mardroeme") && (
@@ -2686,7 +2845,12 @@ function OnlineGame({ onExit }) {
     transitionGuard.current.dealt = true;
     (async () => {
       const dealt = dealHand(mine);
-      const dealtWithLeaderMod = mine.leaderId === "L08" ? { ...dealt, forceRandomRevive: true } : dealt;
+      const theirLeader = theirs?.leaderId;
+      const dealtWithLeaderMod = (mine.leaderId === "L08" || theirLeader === "L08")
+        ? { ...dealt, forceRandomRevive: true }
+        : mine.leaderId === "L22"
+          ? { ...dealt, board: { ...dealt.board, halveWeather: true } }
+          : dealt;
       await writeJSON(playerKey(roomCode, role), dealtWithLeaderMod);
       setMine(dealtWithLeaderMod);
       const m = await readJSON(metaKey(roomCode));
@@ -2945,9 +3109,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-tile.is-disabled { opacity: 0.45; cursor: not-allowed; }
 .card-tile.is-faded { opacity: 0.5; }
 
-.card-back-stack { position: relative; display: flex; align-items: center; height: 60px; padding-left: 10px; }
-.card-back { position: absolute; left: calc(var(--i) * 8px); width: 40px; height: 56px; border-radius: 5px; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); border: 1px solid var(--gold-dim); }
-.hand-count { margin-left: calc(8px * 8 + 46px); font-family: var(--font-mono); color: var(--muted); font-size: 0.8rem; }
 
 /* ---- Deck builder ---- */
 .faction-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
@@ -2959,6 +3120,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .deck-count { font-family: var(--font-mono); margin-bottom: 8px; color: var(--gold); }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
+.ability-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ability-filter-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
+.ability-filter-btn:hover { border-color: var(--gold); transform: translateY(-1px); }
+.ability-filter-btn.active { background: var(--gold); color: #201603; border-color: var(--gold); font-weight: 600; }
+.ability-filter-symbol { font-size: 1rem; line-height: 1; }
+.ability-filter-clear { opacity: 0.8; font-style: italic; }
 .pool-grid { display: flex; flex-wrap: wrap; gap: 7px; max-height: 46vh; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--line); }
 .deckbuilder-footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
 .hint { color: var(--muted); font-size: 0.82rem; }
@@ -2984,9 +3151,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .log-list { overflow-y: auto; flex: 1; margin-bottom: 12px; font-size: 0.85rem; }
 .log-line { padding: 4px 0; border-bottom: 1px dashed var(--line); color: var(--muted); }
 
-/* ---- Play board ---- */
-.play-board { max-width: 900px; padding: 10px 10px 16px; }
-.top-bar { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg-panel-2); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; position: relative; }
+/* ---- Play board ----
+   Everything below is sized to fit one viewport with no scrolling: the
+   board is a flex column pinned to the viewport height, and every row of
+   cards (board rows, your hand, the opponent's card-back fan) uses FitRow
+   so cards stretch or shrink to the available width instead of wrapping
+   or overflowing. */
+.play-board {
+  max-width: 900px; margin: 0 auto; padding: 6px 8px 8px;
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 4px;
+  overflow: hidden; box-sizing: border-box;
+}
+.top-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--bg-panel-2); border: 1px solid var(--line); border-radius: 8px; position: relative; flex: 0 0 auto; }
 .tb-side { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }
 .tb-side-right { margin-left: auto; }
 .tb-center { flex: 1; text-align: center; }
@@ -2997,26 +3173,32 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .pip-filled { background: var(--gold); }
 .log-btn { position: absolute; right: 8px; top: 8px; }
 
-.board-half { position: relative; background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
-.player-board { display: flex; flex-direction: column; gap: 6px; }
-.board-row { border-left: 3px solid var(--row-accent); background: rgba(0,0,0,0.22); border-radius: 6px; padding: 6px 8px; }
-.row-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 4px; }
+.board-half { position: relative; background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; }
+.board-row { border-left: 3px solid var(--row-accent); background: rgba(0,0,0,0.22); border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.row-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
 .row-total { color: var(--gold); font-weight: 700; }
-.row-cards { display: flex; gap: 5px; flex-wrap: wrap; min-height: 60px; align-items: center; }
+.row-cards { display: flex; align-items: center; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.row-cards-fit { display: flex; width: 100%; align-items: center; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; }
 
-.leader-slot { display: flex; margin-bottom: 6px; }
-.leader-slot.mine { margin-top: 6px; margin-bottom: 0; }
+.leader-slot { display: flex; flex: 0 0 auto; }
+.leader-slot.mine { margin-top: 4px; }
 
-.mid-divider { display: flex; align-items: center; justify-content: space-between; padding: 6px 14px; margin: 4px 0; }
+.mid-divider { display: flex; align-items: center; justify-content: space-between; padding: 4px 14px; flex: 0 0 auto; }
 .mid-score { font-family: var(--font-mono); font-size: 1.3rem; display: flex; gap: 8px; align-items: baseline; }
 .mid-score .vs { color: var(--muted); font-size: 0.8rem; }
 
-.hand-strip { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+.hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; }
 .hand-strip.opp-hand { justify-content: flex-start; }
-.hand-scroll { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 10px; }
+.hand-fit { display: flex; width: 100%; align-items: flex-end; }
+.card-back-row { display: flex; width: 100%; align-items: center; }
+.card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
+.card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
 .deck-count-badge { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
 .my-hand { flex-direction: column; align-items: stretch; }
+
 
 /* ---- Online ---- */
 .online-lobby { text-align: center; }
