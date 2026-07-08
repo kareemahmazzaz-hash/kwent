@@ -53,7 +53,7 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 // image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
 // line dead-center) — see BOARD_HALF background rules below for how each
 // half crops its own 3-row half out of it via background-size/position.
-const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/boardl.png";
+const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/boardls.png";
 const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Neutral/bluecrown.png";
 const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Neutral/bluecrown.png";
 
