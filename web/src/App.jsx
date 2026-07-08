@@ -2301,9 +2301,13 @@ function PlayBoard({
           )}
           <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
           <div className="hand-strip opp-hand">
-            <CardBackStack count={opp.hand.length} faction={opp.faction} />
-            <DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} />
-            <DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} />
+            <div className="hand-strip-cards">
+              <CardBackStack count={opp.hand.length} faction={opp.faction} />
+            </div>
+            <div className="hand-strip-tools">
+              <DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} />
+              <DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} />
+            </div>
           </div>
         </div>
 
@@ -2339,23 +2343,25 @@ function PlayBoard({
           <DeckPile count={me.deck.length} faction={me.faction} cardWidth={50} />
           <DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={50} />
         </div>
-        {me.hand.length === 0 ? (
-          <span className="hint">No cards left.</span>
-        ) : (
-          <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
-            {(width, overlap) => sortedHand.map((id, i) => (
-              <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
-                <CardTile
-                  card={cardById(id)}
-                  size="md"
-                  fitWidth={width}
-                  disabled={!canAct || !isMyTurn || me.passed || !!pending}
-                  onClick={() => startPlay(id)}
-                />
-              </div>
-            ))}
-          </FitRow>
-        )}
+        <div className="hand-strip-cards">
+          {me.hand.length === 0 ? (
+            <span className="hint">No cards left.</span>
+          ) : (
+            <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
+              {(width, overlap) => sortedHand.map((id, i) => (
+                <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
+                  <CardTile
+                    card={cardById(id)}
+                    size="md"
+                    fitWidth={width}
+                    disabled={!canAct || !isMyTurn || me.passed || !!pending}
+                    onClick={() => startPlay(id)}
+                  />
+                </div>
+              ))}
+            </FitRow>
+          )}
+        </div>
       </div>
 
       {pending && (pending.kind === "agile" || pending.kind === "horn" || pending.kind === "mardroeme") && (
@@ -3270,6 +3276,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; overflow: hidden; }
 .hand-strip.opp-hand { justify-content: flex-start; flex: 0 0 82px; height: 82px; }
 .hand-strip.my-hand { flex: 0 0 140px; height: 140px; }
+.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.hand-strip.opp-hand .hand-strip-cards { height: 100%; }
 .hand-fit { display: flex; width: 100%; align-items: center; flex: 1 1 auto; min-height: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; }
 .card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
