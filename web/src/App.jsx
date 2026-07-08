@@ -54,6 +54,8 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 // line dead-center) — see BOARD_HALF background rules below for how each
 // half crops its own 3-row half out of it via background-size/position.
 const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/board.png";
+const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Neutral/bluecrown.png";
+const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Neutral/bluecrown.png";
 
 /* ----------------------------- META ------------------------------------ */
 
@@ -1745,6 +1747,80 @@ function CardBackStack({ count, faction }) {
   );
 }
 
+// A small face-down stack representing the draw deck. Shows a count
+// underneath, and disappears entirely once the deck is empty.
+function DeckPile({ count, faction, cardWidth = 50 }) {
+  const [artStage, setArtStage] = useState(0);
+  if (!count || count <= 0) return null;
+  const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
+  const cardHeight = cardWidth / CARD_ASPECT;
+  return (
+    <div className="deck-pile">
+      <div className="deck-pile-stack" style={{ width: cardWidth, height: cardHeight }}>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="deck-pile-card"
+            style={{ transform: `translate(${i * 2}px, ${-i * 2}px)`, zIndex: i }}
+          >
+            {src ? (
+              <img
+                className="card-back-img"
+                src={src}
+                alt="Deck"
+                onError={i === 0 ? () => setArtStage((s) => s + 1) : undefined}
+              />
+            ) : (
+              <div className="card-back-fallback" />
+            )}
+          </div>
+        ))}
+      </div>
+      <span className="deck-pile-count">{count}</span>
+    </div>
+  );
+}
+
+// The most recently discarded card, shown face-up for the viewer's own
+// discard pile (clickable to open the full DiscardPanel). Hidden entirely
+// when the discard pile is empty.
+function DiscardTopCard({ discard, onClick, cardWidth = 50 }) {
+  if (!discard || discard.length === 0) return null;
+  const topId = discard[discard.length - 1];
+  return (
+    <div className="discard-pile">
+      <CardTile card={cardById(topId)} fitWidth={cardWidth} onClick={onClick} disabled={!onClick} />
+    </div>
+  );
+}
+
+// Same idea, but for the opponent's discard — shown face-down since the
+// viewer shouldn't get free info about exactly which card it is.
+function DiscardTopBack({ discard, faction, cardWidth = 34 }) {
+  const [artStage, setArtStage] = useState(0);
+  if (!discard || discard.length === 0) return null;
+  const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
+  const cardHeight = cardWidth / CARD_ASPECT;
+  return (
+    <div className="discard-pile discard-pile-back" style={{ width: cardWidth, height: cardHeight }}>
+      {src ? (
+        <img className="card-back-img" src={src} alt="Discarded card" onError={() => setArtStage((s) => s + 1)} />
+      ) : (
+        <div className="card-back-fallback" />
+      )}
+    </div>
+  );
+}
+
+// Shown next to a leader card while that player's leader ability is still
+// available; disappears the moment it's been used.
+function LeaderUnusedBadge({ show }) {
+  const [artStage, setArtStage] = useState(0);
+  if (!show || artStage === 2) return null;
+  const src = artStage === 0 ? LEADER_UNUSED_ICON_URL : LEADER_UNUSED_ICON_FALLBACK_URL;
+  return <img className="leader-unused-badge" src={src} alt="Leader ability available" onError={() => setArtStage((s) => s + 1)} />;
+}
+
 function RowMarkers({ board, row }) {
   const weather = board.weather[row];
   const horns = board.horns[row] || 0;
@@ -1766,7 +1842,6 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
   return (
     <div className="board-row" style={{ "--row-accent": meta.color }}>
       <div className="row-label">
-        <span className="row-name">{meta.label}</span>
         <span className="row-total">{total}</span>
       </div>
       <RowMarkers board={board} row={rowKey} />
@@ -1811,7 +1886,7 @@ function RoundPips({ wins }) {
   );
 }
 
-function TopBar({ p1, p2, round, turnLabel, onShowLog }) {
+function TopBar({ p1, p2, round, turnLabel }) {
   return (
     <div className="top-bar">
       <div className="tb-side">
@@ -1825,21 +1900,6 @@ function TopBar({ p1, p2, round, turnLabel, onShowLog }) {
       <div className="tb-side tb-side-right">
         <RoundPips wins={p2.wins} />
         <span className="tb-name">{p2.name}</span>
-      </div>
-      <button type="button" className="btn btn-ghost btn-sm log-btn" onClick={onShowLog}>Log</button>
-    </div>
-  );
-}
-
-function LogPanel({ log, onClose }) {
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="log-panel" onClick={(e) => e.stopPropagation()}>
-        <h3>Game log</h3>
-        <div className="log-list">
-          {[...log].reverse().map((line, i) => <div key={i} className="log-line">{line}</div>)}
-        </div>
-        <button type="button" className="btn" onClick={onClose}>Close</button>
       </div>
     </div>
   );
@@ -2145,7 +2205,6 @@ function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
   isMyTurn, onPlayCard, onPass, onUseLeader, canAct, opponentThinking,
 }) {
-  const [showLog, setShowLog] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
   const me = state.players[viewerRole];
@@ -2218,6 +2277,7 @@ function PlayBoard({
   const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
 
   const decoyTargets = pending?.kind === "decoy" ? ROWS.flatMap((r) => me.board[r].filter((id) => cardById(id)?.cardType !== "Hero" && cardById(id)?.row)) : [];
+  const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
 
   return (
     <div className="screen play-board">
@@ -2226,14 +2286,13 @@ function PlayBoard({
         p2={{ name: viewerName, wins: state.roundWins[viewerRole] }}
         round={state.round}
         turnLabel={isMyTurn ? "Your turn" : `${opponentName}'s turn`}
-        onShowLog={() => setShowLog(true)}
       />
 
       <div className="board-frame">
         <div className="board-half opp-half">
           <div className="leader-slot">
             <CardTile card={oppLeader} size="xs" disabled />
-            {opp.leaderUsed && <span className="leader-used-tag">used</span>}
+            <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
           </div>
           {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
           {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
@@ -2243,24 +2302,16 @@ function PlayBoard({
           <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
           <div className="hand-strip opp-hand">
             <CardBackStack count={opp.hand.length} faction={opp.faction} />
-            <span className="deck-count-badge">Deck {opp.deck.length} · Discard {opp.discard.length}</span>
+            <DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} />
+            <DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} />
           </div>
         </div>
 
         <div className="mid-divider">
           <div className="mid-score">
-            <span>{boardTotal(opp.board, spyDoubled)}</span>
-            <span className="vs">vs</span>
-            <span>{boardTotal(me.board, spyDoubled)}</span>
+            <span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span>
+            <span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span>
           </div>
-          <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
-            {me.passed ? "You passed" : "Pass"}
-          </button>
-          {myLeader && (
-            <button type="button" className="btn btn-ghost btn-sm" disabled={!canAct || me.leaderUsed || me.leaderBlocked} onClick={startLeader}>
-              {me.leaderBlocked ? "Leader blocked" : me.leaderUsed ? "Leader used" : `Use Leader: ${myLeader.name.split(":")[0]}`}
-            </button>
-          )}
         </div>
 
         <div className="board-half my-half">
@@ -2274,19 +2325,20 @@ function PlayBoard({
             half="mine"
           />
           <div className="leader-slot mine">
-            <CardTile card={myLeader} size="xs" disabled />
-            {me.leaderUsed && <span className="leader-used-tag">used</span>}
+            <CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} />
+            <LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} />
           </div>
+          <button type="button" className="btn btn-pass pass-below-leader" disabled={!canAct || me.passed} onClick={onPass}>
+            {me.passed ? "You passed" : "Pass"}
+          </button>
         </div>
       </div>
 
       <div className="hand-strip my-hand">
-        <span className="deck-count-badge">
-          Deck {me.deck.length} · Discard {me.discard.length}
-          {me.discard.length > 0 && (
-            <button type="button" className="btn-link-discard" onClick={() => setShowDiscard(true)}>view</button>
-          )}
-        </span>
+        <div className="hand-strip-tools">
+          <DeckPile count={me.deck.length} faction={me.faction} cardWidth={50} />
+          <DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={50} />
+        </div>
         {me.hand.length === 0 ? (
           <span className="hint">No cards left.</span>
         ) : (
@@ -2375,7 +2427,6 @@ function PlayBoard({
         </div>
       )}
 
-      {showLog && <LogPanel log={state.log} onClose={() => setShowLog(false)} />}
       {showDiscard && <DiscardPanel cardIds={sortedMyDiscard} onClose={() => setShowDiscard(false)} />}
     </div>
   );
@@ -3169,12 +3220,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .banner-sub.big { font-size: 1.2rem; font-family: var(--font-display); color: var(--gold); }
 .pass-gate { cursor: pointer; }
 
-/* ---- Log panel ---- */
-.log-panel { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; width: min(92vw, 420px); max-height: 70vh; display: flex; flex-direction: column; }
-.log-panel h3 { font-family: var(--font-display); color: var(--gold); margin: 0 0 10px; }
-.log-list { overflow-y: auto; flex: 1; margin-bottom: 12px; font-size: 0.85rem; }
-.log-line { padding: 4px 0; border-bottom: 1px dashed var(--line); color: var(--muted); }
-
 /* ---- Play board ----
    Everything below is sized to fit one viewport with no scrolling: the
    board is a flex column pinned to the viewport height, and every row of
@@ -3195,7 +3240,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .round-pips { display: inline-flex; gap: 3px; }
 .pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--gold-dim); display: inline-block; }
 .pip-filled { background: var(--gold); }
-.log-btn { position: absolute; right: 8px; top: 8px; }
 
 /* board.png is the single full-board texture (both players' shelves +
    center divider) rendered once behind everything. Position/size it here
@@ -3207,29 +3251,39 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-half { position: relative; background: transparent; border: none; border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
 .player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background: transparent; border-radius: 6px; }
 .board-row { border-left: none; background: transparent; border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.row-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
+.row-label { display: flex; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
 
-.leader-slot { display: flex; flex: 0 0 auto; transform: translate(55px, 50px);}
+.leader-slot { display: flex; align-items: center; flex: 0 0 auto; transform: translate(55px, 50px);}
 .leader-slot.mine { margin-top: 4px; transform: translate(55px, -50px);}
+.leader-unused-badge { width: 18px; height: 18px; margin-left: 4px; align-self: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
-.mid-divider { display: flex; align-items: center; justify-content: space-between; padding: 4px 14px; flex: 0 0 auto; }
-.mid-score { font-family: var(--font-mono); font-size: 1.3rem; display: flex; gap: 8px; align-items: baseline; }
-.mid-score .vs { color: var(--muted); font-size: 0.8rem; }
+.mid-divider { display: flex; align-items: center; justify-content: center; padding: 4px 14px; flex: 0 0 auto; }
+.mid-score { font-family: var(--font-mono); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; }
+
+.pass-below-leader { align-self: center; margin-top: 2px; flex: 0 0 auto; }
 
 .hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; overflow: hidden; }
-.hand-strip.opp-hand { justify-content: flex-start; flex: 0 0 64px; height: 64px; }
+.hand-strip.opp-hand { justify-content: flex-start; flex: 0 0 82px; height: 82px; }
 .hand-strip.my-hand { flex: 0 0 140px; height: 140px; }
 .hand-fit { display: flex; width: 100%; align-items: center; flex: 1 1 auto; min-height: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; }
 .card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
-.deck-count-badge { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
 .my-hand { flex-direction: column; align-items: stretch; }
+
+.hand-strip-tools { display: flex; align-items: flex-end; gap: 10px; flex: 0 0 auto; }
+.deck-pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
+.deck-pile-stack { position: relative; flex: 0 0 auto; }
+.deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+.deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
+.discard-pile { flex: 0 0 auto; }
+.discard-pile-back { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
 
 /* ---- Online ---- */
@@ -3257,7 +3311,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-horn { color: var(--gold); border-color: var(--gold-dim); }
 .marker-mardroeme { color: #c98fd6; border-color: #7a4b8a; }
 
-.leader-used-tag { font-family: var(--font-mono); font-size: 0.55rem; color: var(--muted); align-self: center; margin-left: 4px; }
 .pending-hint { position: fixed; bottom: 90px; left: 0; right: 0; text-align: center; z-index: 41; background: rgba(0,0,0,0.75); padding: 6px; }
 
 /* ---- Coin flip ---- */
@@ -3318,12 +3371,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   font-size: 0.68rem; padding: 4px 10px; border-radius: 10px; animation: toast-fade 2.2s ease-in-out;
 }
 @keyframes toast-fade { 0% { opacity: 0; } 12% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; } }
-
-.btn-link-discard {
-  background: none; border: none; color: var(--gold); text-decoration: underline; font-family: var(--font-mono);
-  font-size: 0.65rem; cursor: pointer; padding: 0 0 0 6px;
-}
-.btn-link-discard:hover { color: var(--gold-dim); }
 `;
 
 /* ================================ APP ==================================== */
