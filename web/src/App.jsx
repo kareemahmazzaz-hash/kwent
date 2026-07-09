@@ -53,7 +53,7 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 // image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
 // line dead-center) — see BOARD_HALF background rules below for how each
 // half crops its own 3-row half out of it via background-size/position.
-const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/boardls.png";
+const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/board.png";
 const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Neutral/bluecrown.png";
 const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Neutral/bluecrown.png";
 
@@ -1840,7 +1840,7 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
   const cardIds = board[rowKey];
   const total = rowTotal(board, rowKey, spyDoubled);
   return (
-    <div className="board-row" style={{ "--row-accent": meta.color }}>
+    <div className={"board-row row-" + rowKey} style={{ "--row-accent": meta.color }}>
       <div className="row-label">
         <span className="row-total">{total}</span>
       </div>
@@ -2291,7 +2291,7 @@ function PlayBoard({
       <div className="board-frame">
         <div className="board-half opp-half">
           <div className="leader-slot">
-            <CardTile card={oppLeader} size="xs" disabled />
+            <CardTile card={oppLeader} size="xs" fitWidth={35} disabled />
             <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
           </div>
           {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
@@ -2300,10 +2300,12 @@ function PlayBoard({
             <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>
           )}
           <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
-          <div className="hand-strip opp-hand">
+          <div className="hand-strip opp-hand opp-hand-cards">
             <div className="hand-strip-cards">
               <CardBackStack count={opp.hand.length} faction={opp.faction} />
             </div>
+          </div>
+          <div className="hand-strip opp-hand opp-hand-tools">
             <div className="hand-strip-tools">
               <DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} />
               <DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} />
@@ -2329,20 +2331,22 @@ function PlayBoard({
             half="mine"
           />
           <div className="leader-slot mine">
-            <CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} />
+            <CardTile card={myLeader} size="xs" fitWidth={35} onClick={startLeader} disabled={myLeaderDisabled} />
             <LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} />
           </div>
           <button type="button" className="btn btn-pass pass-below-leader" disabled={!canAct || me.passed} onClick={onPass}>
             {me.passed ? "You passed" : "Pass"}
           </button>
+          <div className="hand-strip my-hand my-hand-tools">
+            <div className="hand-strip-tools">
+              <DeckPile count={me.deck.length} faction={me.faction} cardWidth={34} />
+              <DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={34} />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="hand-strip my-hand">
-        <div className="hand-strip-tools">
-          <DeckPile count={me.deck.length} faction={me.faction} cardWidth={50} />
-          <DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={50} />
-        </div>
+      <div className="hand-strip my-hand my-hand-cards">
         <div className="hand-strip-cards">
           {me.hand.length === 0 ? (
             <span className="hint">No cards left.</span>
@@ -3255,37 +3259,58 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center;
 }
 .board-half { position: relative; background: transparent; border: none; border-radius: 8px; padding: 6px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.board-half.opp-half { min-height: 250px; }
+.board-half.my-half { min-height: 270px; transform: translate(0px, -40px); }
 .player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background: transparent; border-radius: 6px; }
+.player-board-opp { transform: translate(115px, -178px); }
+.player-board-mine { transform: translateX(114px); }
 .board-row { border-left: none; background: transparent; border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .row-label { display: flex; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
+.player-board-opp .row-label, .player-board-mine .row-label { transform: translate(-5px, 19px); }
+.player-board-mine .row-siege .row-label { transform: translate(-5px, 21px); }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.player-board-opp .row-siege .row-cards { transform: translate(78px, -18px); }
+.player-board-opp .row-ranged .row-cards { transform: translate(78px, -17px); }
+.player-board-opp .row-close .row-cards { transform: translate(78px, -16px); }
+.player-board-mine .row-close .row-cards { transform: translate(78px, -12px); }
+.player-board-mine .row-ranged .row-cards { transform: translate(78px, -11px); }
+.player-board-mine .row-siege .row-cards { transform: translate(78px, -11px); }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
 
-.leader-slot { display: flex; align-items: center; flex: 0 0 auto; transform: translate(55px, 50px);}
-.leader-slot.mine { margin-top: 4px; transform: translate(55px, -50px);}
+.leader-slot { display: flex; align-items: center; flex: 0 0 auto; transform: translate(16px, 107px);}
+.leader-slot.mine { margin-top: 4px; transform: translate(17px, -114px);}
 .leader-unused-badge { width: 18px; height: 18px; margin-left: 4px; align-self: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
-.mid-divider { display: flex; align-items: center; justify-content: center; padding: 4px 14px; flex: 0 0 auto; }
+.mid-divider { display: flex; align-items: center; justify-content: center; padding: 4px 14px; flex: 0 0 auto; max-width: 25px; transform: translate(60px, -12px); }
 .mid-score { font-family: var(--font-mono); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; }
+.score-badge.score-opp { transform: translate(0px, -50px); }
+.score-badge.score-me { transform: translateY(48px); }
 
-.pass-below-leader { align-self: center; margin-top: 2px; flex: 0 0 auto; }
+.pass-below-leader { align-self: center; margin-top: 2px; flex: 0 0 auto; transform: translate(-390px, -50px); }
 
 .hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; flex: 0 0 auto; overflow: hidden; }
 .hand-strip.opp-hand { justify-content: flex-start; flex: 0 0 82px; height: 82px; }
 .hand-strip.my-hand { flex: 0 0 140px; height: 140px; }
-.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; }
-.hand-strip.opp-hand .hand-strip-cards { height: 100%; }
-.hand-fit { display: flex; width: 100%; align-items: center; flex: 1 1 auto; min-height: 0; }
-.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; }
+.hand-strip.opp-hand.opp-hand-cards { transform: translate(120px, -92px); }
+.hand-strip.opp-hand.opp-hand-tools { transform: translate(790px, -5px); }
+.hand-strip.my-hand.my-hand-tools { transform: translate(789px, -278px); }
+/* hand-strip-cards needs a definite height so the card row inside it (which
+   sizes itself off its own measured height) doesn't collapse to near-zero —
+   without this the hand cards render at a broken ~9px width. */
+.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; }
+.hand-strip.opp-hand.opp-hand-cards .hand-strip-cards { transform: translate(50px, 0px); max-height: 74px; max-width: 590px; }
+.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; flex: 1 1 auto; min-height: 125px; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 .card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
 .my-hand { flex-direction: column; align-items: stretch; }
 
 .hand-strip-tools { display: flex; align-items: flex-end; gap: 10px; flex: 0 0 auto; }
+.hand-strip.opp-hand.opp-hand-tools .deck-pile { min-height: 90px; transform: translate(-1px, 12px); }
 .deck-pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
