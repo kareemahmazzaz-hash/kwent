@@ -2294,7 +2294,7 @@ function PlayBoard({
 
       <div className="board-frame">
         <div className="board-slot slot-opp-leader">
-          <CardTile card={oppLeader} size="xs" fitWidth={35} disabled />
+          <CardTile card={oppLeader} size="xs" disabled />
           <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
         </div>
 
@@ -2343,7 +2343,7 @@ function PlayBoard({
         </div>
 
         <div className="board-slot slot-my-leader">
-          <CardTile card={myLeader} size="xs" fitWidth={35} onClick={startLeader} disabled={myLeaderDisabled} />
+          <CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} />
           <LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} />
         </div>
 
@@ -3285,7 +3285,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .slot-opp-leader     { top: 2%;  left: 1.5%; width: 6%;  height: 13%; }
 .slot-opp-status     { top: 1%;  left: 20%;  width: 50%; height: 8%; }
 .slot-opp-board      { top: 2%;  left: 10%;  width: 55%; height: 34%; flex-direction: column; }
-.slot-opp-hand-cards { top: 2%;  left: 68%;  width: 26%; height: 12%; }
+.slot-opp-hand-cards { top: 2%;  left: 24%;  width: 26%; height: 12%; }
 .slot-opp-hand-tools { top: 2%;  left: 88%;  width: 10%; height: 12%; }
 
 .slot-mid-score      { top: 44%; left: 46%;  width: 8%;  height: 12%; flex-direction: column; align-items: center; justify-content: center; }
@@ -3293,18 +3293,22 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .slot-my-board       { top: 52%; left: 10%;  width: 55%; height: 34%; flex-direction: column; }
 .slot-my-leader       { top: 88%; left: 1.5%; width: 6%;  height: 13%; }
 .slot-pass-button    { top: 88%; left: 10%;  width: 8%;  height: 6%; }
-.slot-my-hand-tools  { top: 76%; left: 88%;  width: 10%; height: 12%; }
+.slot-my-hand-tools  { top: 53%; left: 88%;  width: 10%; height: 12%; }
 .slot-my-hand-cards  { top: 76%; left: 20%;  width: 46%; height: 22%; }
+.slot-opp-leader .card-tile, .slot-my-leader .card-tile { width: 60%; height: 100%; }
 
 .player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background: transparent; border-radius: 6px; width: 100%; height: 100%; }
 .board-row { border-left: none; background: transparent; border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.row-label { display: flex; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
+.row-label { position: relative; display: flex; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
 .row-total { color: var(--gold); font-weight: 700; }
-.row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.row-cards { position: relative; display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
 .row-card-slot { position: relative; margin-left: var(--overlap, 0px); }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
+.player-board-opp .row-ranged .row-label { top: 43%; }
+.player-board-opp .row-close .row-label { top: 49%; }
+.player-board-mine .row-ranged .row-cards { top: -86%; }
 
 .leader-unused-badge { width: 18px; height: 18px; margin-left: 4px; align-self: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
@@ -3336,7 +3340,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.discard-pile { flex: 0 0 auto; }
+.discard-pile { position: relative; flex: 0 0 auto; top: 113%; left: -10.7%; }
 .discard-pile-back { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
 
