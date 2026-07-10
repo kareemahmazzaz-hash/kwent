@@ -1728,13 +1728,17 @@ function CardBackStack({ count, faction }) {
   const [artStage, setArtStage] = useState(0);
   const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
   if (count <= 0) return <span className="hint">No cards left.</span>;
+  // No JS-measured width/height here on purpose: these are identical face-down
+  // backs, not cards needing exact overlap math, so sizing is pure CSS
+  // (.card-back-wrap width % + aspect-ratio) — that way your DevTools %
+  // edits actually stick instead of getting stomped by an inline style.
   return (
-    <FitRow count={count} className="card-back-row" gap={4} maxWidth={70} minWidth={20} squeezeAfter={14} clampToHeight>
-      {(width, overlap) => Array.from({ length: count }).map((_, i) => (
+    <div className="card-back-row">
+      {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
           className="card-back-wrap"
-          style={{ width, height: width / CARD_ASPECT, marginLeft: i === 0 ? 0 : -overlap, zIndex: i }}
+          style={{ marginLeft: i === 0 ? 0 : undefined, zIndex: i }}
         >
           {src ? (
             <img className="card-back-img" src={src} alt="Opponent card back" onError={() => setArtStage((s) => s + 1)} />
@@ -1743,7 +1747,7 @@ function CardBackStack({ count, faction }) {
           )}
         </div>
       ))}
-    </FitRow>
+    </div>
   );
 }
 
@@ -1850,7 +1854,7 @@ function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flash
         {cardIds.length > 0 && (
           <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={96} minWidth={22} squeezeAfter={12} clampToHeight>
             {(width, overlap) => cardIds.map((id, i) => (
-              <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
+              <div key={id} className="row-card-slot" style={{ "--overlap": `${overlap}px` }}>
                 <CardTile
                   card={cardById(id)}
                   size="sm"
@@ -2363,7 +2367,7 @@ function PlayBoard({
             ) : (
               <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14}>
                 {(width, overlap) => sortedHand.map((id, i) => (
-                  <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
+                  <div key={id} className="hand-card-slot" style={{ "--overlap": `${overlap}px` }}>
                     <CardTile
                       card={cardById(id)}
                       size="md"
@@ -3298,6 +3302,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-cards { display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
+.row-card-slot { position: relative; margin-left: var(--overlap, 0px); }
+.row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
 
 .leader-unused-badge { width: 18px; height: 18px; margin-left: 4px; align-self: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
@@ -3311,8 +3317,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    without this the hand cards render at a broken ~9px width. */
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; width: 100%; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 125px; }
+.hand-card-slot { position: relative; margin-left: var(--overlap, 0px); }
+.hand-card-slot:first-child { margin-left: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
-.card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
+.card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; width: 14%; aspect-ratio: 0.537; margin-left: -6%; }
+.card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
 .my-hand { flex-direction: column; align-items: stretch; }
