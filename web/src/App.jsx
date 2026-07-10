@@ -2351,7 +2351,7 @@ function PlayBoard({
           {me.hand.length === 0 ? (
             <span className="hint">No cards left.</span>
           ) : (
-            <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
+            <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14}>
               {(width, overlap) => sortedHand.map((id, i) => (
                 <div key={id} style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: i, position: "relative" }}>
                   <CardTile
@@ -3302,7 +3302,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    without this the hand cards render at a broken ~9px width. */
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; }
 .hand-strip.opp-hand.opp-hand-cards .hand-strip-cards { transform: translate(50px, 0px); max-height: 74px; max-width: 590px; }
-.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; flex: 1 1 auto; min-height: 125px; }
+.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 125px; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 .card-back-wrap { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); flex: 0 0 auto; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
