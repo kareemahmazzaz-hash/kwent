@@ -3310,6 +3310,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .mid-score { font-family: var(--font-mono); display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; }
+.score-badge.score-opp { position: relative; top: -110%; }
+.score-badge.score-me { position: relative; top: 110%; }
 
 .hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; overflow: hidden; width: 100%; height: 100%; }
 /* hand-strip-cards needs a definite height so the card row inside it (which
@@ -3327,6 +3329,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .my-hand { flex-direction: column; align-items: stretch; }
 
 .hand-strip-tools { display: flex; align-items: flex-end; gap: 10px; flex: 0 0 auto; }
+.hand-strip.opp-hand.opp-hand-cards .hand-strip-cards { position: relative; bottom: 61%; }
+.hand-strip.opp-hand.opp-hand-tools .deck-pile { position: relative; width: 100%; height: 85%; top: -15%; }
+.hand-strip.my-hand.my-hand-tools .deck-pile { position: relative; width: 100%; height: 85%; top: -7%; }
 .deck-pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
