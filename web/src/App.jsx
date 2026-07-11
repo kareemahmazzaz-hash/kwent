@@ -3285,7 +3285,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .slot-opp-leader     { top: 2%;  left: 1.5%; width: 6%;  height: 13%; }
 .slot-opp-status     { top: 1%;  left: 20%;  width: 50%; height: 8%; }
 .slot-opp-board      { top: 2%;  left: 10%;  width: 55%; height: 34%; flex-direction: column; }
-.slot-opp-hand-cards { top: 2%;  left: 24%;  width: 26%; height: 12%; }
+.slot-opp-hand-cards { top: 2%;  left: 68%;  width: 26%; height: 12%; }
 .slot-opp-hand-tools { top: 2%;  left: 88%;  width: 10%; height: 12%; }
 
 .slot-mid-score      { top: 44%; left: 46%;  width: 8%;  height: 12%; flex-direction: column; align-items: center; justify-content: center; }
