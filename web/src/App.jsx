@@ -1753,7 +1753,7 @@ function CardBackStack({ count, faction }) {
 
 // A small face-down stack representing the draw deck. Shows a count
 // underneath, and disappears entirely once the deck is empty.
-function DeckPile({ count, faction, cardWidth = 50 }) {
+function DeckPile({ count, faction, cardWidth = 50, hideCount }) {
   const [artStage, setArtStage] = useState(0);
   if (!count || count <= 0) return null;
   const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
@@ -1780,9 +1780,17 @@ function DeckPile({ count, faction, cardWidth = 50 }) {
           </div>
         ))}
       </div>
-      <span className="deck-pile-count">{count}</span>
+      {!hideCount && <span className="deck-pile-count">{count}</span>}
     </div>
   );
+}
+
+// Standalone deck-count number — used when "deck" and "deck count" are two
+// separate grid cells (layout.xlsx splits them apart) instead of the count
+// living inside the deck-pile stack itself.
+function DeckCountCell({ count }) {
+  if (!count || count <= 0) return null;
+  return <span className="deck-count-standalone">{count}</span>;
 }
 
 // The most recently discarded card, shown face-up for the viewer's own
@@ -1825,58 +1833,73 @@ function LeaderUnusedBadge({ show }) {
   return <img className="leader-unused-badge" src={src} alt="Leader ability available" onError={() => setArtStage((s) => s + 1)} />;
 }
 
-function RowMarkers({ board, row }) {
-  const weather = board.weather[row];
-  const horns = board.horns[row] || 0;
-  const mardroeme = board.mardroeme[row];
-  if (!weather && !horns && !mardroeme) return null;
-  return (
-    <div className="row-markers">
-      {weather && <span className="marker marker-weather">❄ {weather.name}</span>}
-      {horns > 0 && <span className="marker marker-horn">🎺 ×{horns}</span>}
-      {mardroeme && <span className="marker marker-mardroeme">🍄 Mardroeme</span>}
-    </div>
-  );
-}
+// The board no longer groups siege/ranged/close into one PlayerBoard block —
+// each row is split into three independently-positioned grid cells (label,
+// horn/mardroeme markers, cards), matching layout.xlsx exactly. Weather is
+// shown once centrally (WeatherCenterCell) since it now hits both sides'
+// same row identically, so it isn't repeated per-row anymore.
 
-function BoardRow({ rowKey, board, spyDoubled, onClickCard, selectableIds, flashId }) {
-  const meta = ROW_META[rowKey];
-  const cardIds = board[rowKey];
+// "Row label" cell — just the row's power total.
+function RowLabelCell({ board, rowKey, spyDoubled }) {
   const total = rowTotal(board, rowKey, spyDoubled);
   return (
-    <div className={"board-row row-" + rowKey} style={{ "--row-accent": meta.color }}>
-      <div className="row-label">
-        <span className="row-total">{total}</span>
-      </div>
-      <RowMarkers board={board} row={rowKey} />
-      <div className="row-cards">
-        {cardIds.length === 0 && <span className="row-empty">no units</span>}
-        {cardIds.length > 0 && (
-          <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={96} minWidth={22} squeezeAfter={12} clampToHeight>
-            {(width, overlap) => cardIds.map((id, i) => (
-              <div key={id} className="row-card-slot" style={{ "--overlap": `${overlap}px` }}>
-                <CardTile
-                  card={cardById(id)}
-                  size="sm"
-                  fitWidth={width}
-                  onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
-                  disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
-                  justPlayed={id === flashId}
-                />
-              </div>
-            ))}
-          </FitRow>
-        )}
-      </div>
+    <div className="row-label">
+      <span className="row-total">{total}</span>
     </div>
   );
 }
 
-function PlayerBoard({ board, order, spyDoubled, onClickCard, selectableIds, flashId, half }) {
+// "Horn card" cell — horn count + mardroeme markers for that row (per side).
+function RowHornCell({ board, rowKey }) {
+  const horns = board.horns[rowKey] || 0;
+  const mardroeme = board.mardroeme[rowKey];
+  if (!horns && !mardroeme) return null;
   return (
-    <div className={"player-board" + (half ? " player-board-" + half : "")}>
-      {order.map((r) => (
-        <BoardRow key={r} rowKey={r} board={board} spyDoubled={spyDoubled} onClickCard={onClickCard} selectableIds={selectableIds} flashId={flashId} />
+    <div className="row-markers">
+      {horns > 0 && <span className="marker marker-horn">🎺 ×{horns}</span>}
+      {mardroeme && <span className="marker marker-mardroeme">🍄</span>}
+    </div>
+  );
+}
+
+// The row's actual cards (renamed from the old BoardRow's inline JSX).
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
+  const meta = ROW_META[rowKey];
+  const cardIds = board[rowKey];
+  return (
+    <div className={"row-cards row-" + rowKey} style={{ "--row-accent": meta.color }}>
+      {cardIds.length === 0 && <span className="row-empty">no units</span>}
+      {cardIds.length > 0 && (
+        <FitRow count={cardIds.length} className="row-cards-fit" gap={5} maxWidth={96} minWidth={22} squeezeAfter={12} clampToHeight>
+          {(width, overlap) => cardIds.map((id, i) => (
+            <div key={id} className="row-card-slot" style={{ "--overlap": `${overlap}px` }}>
+              <CardTile
+                card={cardById(id)}
+                size="sm"
+                fitWidth={width}
+                onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
+                disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
+                justPlayed={id === flashId}
+              />
+            </div>
+          ))}
+        </FitRow>
+      )}
+    </div>
+  );
+}
+
+// Central "weather cards" cell — weather now hits both boards' same row
+// identically, so this reads off either side's board.weather (they're kept
+// in sync) instead of showing a per-side/per-row marker.
+function WeatherCenterCell({ board }) {
+  const rows = ["siege", "ranged", "close"];
+  const active = rows.filter((r) => board.weather[r]);
+  if (active.length === 0) return <span className="hint weather-clear">Clear skies</span>;
+  return (
+    <div className="weather-center-list">
+      {active.map((r) => (
+        <span key={r} className="marker marker-weather">❄ {ROW_META[r].label}: {board.weather[r].name}</span>
       ))}
     </div>
   );
@@ -2293,12 +2316,13 @@ function PlayBoard({
       />
 
       <div className="board-frame">
-        <div className="board-slot slot-opp-leader">
-          <CardTile card={oppLeader} size="xs" disabled />
-          <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
+        <div className="board-slot slot-opp-hand hand-strip opp-hand opp-hand-cards">
+          <div className="hand-strip-cards">
+            <CardBackStack count={opp.hand.length} faction={opp.faction} />
+          </div>
         </div>
 
-        <div className="board-slot slot-opp-status">
+        <div className="board-slot slot-opp-pass-status">
           {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
           {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
           {flash.opp && (
@@ -2306,46 +2330,81 @@ function PlayBoard({
           )}
         </div>
 
-        <div className="board-slot slot-opp-board">
-          <PlayerBoard board={opp.board} order={["siege", "ranged", "close"]} spyDoubled={spyDoubled} flashId={flash.opp} half="opp" />
+        <div className="board-slot slot-opp-leader">
+          <CardTile card={oppLeader} size="xs" disabled />
+        </div>
+        <div className="board-slot slot-opp-leader-badge">
+          <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
         </div>
 
-        <div className="board-slot slot-opp-hand-cards hand-strip opp-hand opp-hand-cards">
-          <div className="hand-strip-cards">
-            <CardBackStack count={opp.hand.length} faction={opp.faction} />
-          </div>
-        </div>
+        <div className="board-slot slot-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></div>
+        <div className="board-slot slot-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} /></div>
+        <div className="board-slot slot-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} /></div>
 
-        <div className="board-slot slot-opp-hand-tools hand-strip opp-hand opp-hand-tools">
-          <div className="hand-strip-tools">
-            <DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} />
-            <DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} />
-          </div>
-        </div>
+        <div className="board-slot slot-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></div>
+        <div className="board-slot slot-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} /></div>
 
-        <div className="board-slot slot-mid-score mid-divider">
-          <div className="mid-score">
-            <span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span>
-            <span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span>
-          </div>
-        </div>
+        <div className="board-slot slot-opp-name"><span className="side-name">{opponentName}</span></div>
+        <div className="board-slot slot-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></div>
+        <div className="board-slot slot-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} hideCount /></div>
 
-        <div className="board-slot slot-my-board">
-          <PlayerBoard
+        <div className="board-slot slot-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-opp-close-horn"><RowHornCell board={opp.board} rowKey="close" /></div>
+        <div className="board-slot slot-opp-close-row"><RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} /></div>
+
+        <div className="board-slot slot-weather-center"><WeatherCenterCell board={me.board} /></div>
+        <div className="board-slot slot-opp-deck-count"><DeckCountCell count={opp.deck.length} /></div>
+
+        <div className="board-slot slot-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-my-close-horn"><RowHornCell board={me.board} rowKey="close" /></div>
+        <div className="board-slot slot-my-close-row">
+          <RowCardsCell
             board={me.board}
-            order={["close", "ranged", "siege"]}
-            spyDoubled={spyDoubled}
+            rowKey="close"
             onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
             selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
             flashId={flash.me}
-            half="mine"
+          />
+        </div>
+
+        <div className="board-slot slot-my-name"><span className="side-name">{viewerName}</span></div>
+        <div className="board-slot slot-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></div>
+        <div className="board-slot slot-my-deck"><DeckPile count={me.deck.length} faction={me.faction} cardWidth={34} hideCount /></div>
+
+        <div className="board-slot slot-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" /></div>
+        <div className="board-slot slot-my-ranged-row">
+          <RowCardsCell
+            board={me.board}
+            rowKey="ranged"
+            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+            flashId={flash.me}
           />
         </div>
 
         <div className="board-slot slot-my-leader">
           <CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} />
+        </div>
+        <div className="board-slot slot-my-deck-count"><DeckCountCell count={me.deck.length} /></div>
+
+        <div className="board-slot slot-my-leader-badge">
           <LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} />
         </div>
+        <div className="board-slot slot-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></div>
+        <div className="board-slot slot-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></div>
+        <div className="board-slot slot-my-siege-row">
+          <RowCardsCell
+            board={me.board}
+            rowKey="siege"
+            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+            flashId={flash.me}
+          />
+        </div>
+        <div className="board-slot slot-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={34} /></div>
 
         <div className="board-slot slot-pass-button">
           <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
@@ -2353,14 +2412,7 @@ function PlayBoard({
           </button>
         </div>
 
-        <div className="board-slot slot-my-hand-tools hand-strip my-hand my-hand-tools">
-          <div className="hand-strip-tools">
-            <DeckPile count={me.deck.length} faction={me.faction} cardWidth={34} />
-            <DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={34} />
-          </div>
-        </div>
-
-        <div className="board-slot slot-my-hand-cards hand-strip my-hand my-hand-cards">
+        <div className="board-slot slot-my-hand hand-strip my-hand my-hand-cards">
           <div className="hand-strip-cards">
             {me.hand.length === 0 ? (
               <span className="hint">No cards left.</span>
@@ -2382,6 +2434,7 @@ function PlayBoard({
           </div>
         </div>
       </div>
+
 
       {pending && (pending.kind === "agile" || pending.kind === "horn" || pending.kind === "mardroeme") && (
         <div className="overlay" onClick={() => setPending(null)}>
@@ -3267,55 +3320,82 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .pip-filled { background: var(--gold); }
 
 /* boardls.png is the single full-board texture (both players' shelves +
-   center divider) rendered once behind everything. .board-frame is locked
-   to the image's real aspect ratio so it scales as one solid block on any
-   screen — never stretched, never cropped. Every piece of board UI is a
-   .board-slot: position: absolute + top/left/width/height in %, which is
-   relative to .board-frame's own box, so slots scale proportionally with
-   it on any screen size. PLACEHOLDER positions below — drag each into
-   place in DevTools (edit top/left/width/height, not transform) and send
-   back the final % values. */
+   center divider) rendered once behind everything. .board-frame is a
+   14-column x 16-row CSS Grid — this shape and every slot's grid-row /
+   grid-column below come straight from the merged cells in layout.xlsx, so
+   the DOM structure mirrors that spreadsheet cell-for-cell. Nudge a slot by
+   editing its grid-row/grid-column (not transform) in DevTools and send
+   back the final values. */
 .board-frame {
   position: relative; width: 100%; margin: 0 auto;
   aspect-ratio: 956.8 / 460.28;
+  display: grid; grid-template-columns: repeat(14, 1fr); grid-template-rows: repeat(16, 1fr);
   background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center;
 }
-.board-slot { position: absolute; display: flex; }
+.board-slot { display: flex; min-width: 0; min-height: 0; }
 
-.slot-opp-leader     { top: 2%;  left: 1.5%; width: 6%;  height: 13%; }
-.slot-opp-status     { top: 1%;  left: 20%;  width: 50%; height: 8%; }
-.slot-opp-board      { top: 2%;  left: 10%;  width: 55%; height: 34%; flex-direction: column; }
-.slot-opp-hand-cards { top: 2%;  left: 68%;  width: 26%; height: 12%; }
-.slot-opp-hand-tools { top: 2%;  left: 88%;  width: 10%; height: 12%; }
+.slot-opp-hand         { grid-row: 1 / 2;  grid-column: 1 / 15; }
+.slot-opp-pass-status  { grid-row: 2 / 3;  grid-column: 1 / 4; }
+.slot-opp-leader       { grid-row: 3 / 6;  grid-column: 2 / 3; }
+.slot-opp-siege-label  { grid-row: 3 / 5;  grid-column: 4 / 5; }
+.slot-opp-siege-horn   { grid-row: 3 / 5;  grid-column: 5 / 7; }
+.slot-opp-siege-row    { grid-row: 3 / 5;  grid-column: 7 / 14; }
+.slot-opp-leader-badge { grid-row: 4 / 5;  grid-column: 3 / 4; }
+.slot-opp-discard      { grid-row: 4 / 6;  grid-column: 14 / 15; }
+.slot-opp-ranged-label { grid-row: 5 / 7;  grid-column: 4 / 5; }
+.slot-opp-ranged-horn  { grid-row: 5 / 7;  grid-column: 5 / 7; }
+.slot-opp-ranged-row   { grid-row: 5 / 7;  grid-column: 7 / 14; }
+.slot-opp-name         { grid-row: 6 / 8;  grid-column: 1 / 3; }
+.slot-opp-score        { grid-row: 6 / 8;  grid-column: 3 / 4; }
+.slot-opp-deck         { grid-row: 6 / 8;  grid-column: 14 / 15; }
+.slot-opp-close-label  { grid-row: 7 / 9;  grid-column: 4 / 5; }
+.slot-opp-close-horn   { grid-row: 7 / 9;  grid-column: 5 / 7; }
+.slot-opp-close-row    { grid-row: 7 / 9;  grid-column: 7 / 14; }
+.slot-weather-center   { grid-row: 8 / 10; grid-column: 1 / 4; }
+.slot-opp-deck-count   { grid-row: 8 / 9;  grid-column: 14 / 15; }
+.slot-my-close-label   { grid-row: 9 / 11; grid-column: 4 / 5; }
+.slot-my-close-horn    { grid-row: 9 / 11; grid-column: 5 / 7; }
+.slot-my-close-row     { grid-row: 9 / 11; grid-column: 7 / 14; }
+.slot-my-name          { grid-row: 10 / 12; grid-column: 1 / 3; }
+.slot-my-score         { grid-row: 10 / 12; grid-column: 3 / 4; }
+.slot-my-deck          { grid-row: 10 / 12; grid-column: 14 / 15; }
+.slot-my-ranged-label  { grid-row: 11 / 13; grid-column: 4 / 5; }
+.slot-my-ranged-horn   { grid-row: 11 / 13; grid-column: 5 / 7; }
+.slot-my-ranged-row    { grid-row: 11 / 13; grid-column: 7 / 14; }
+.slot-my-leader        { grid-row: 12 / 15; grid-column: 2 / 3; }
+.slot-my-deck-count    { grid-row: 12 / 13; grid-column: 14 / 15; }
+.slot-my-leader-badge  { grid-row: 13 / 14; grid-column: 3 / 4; }
+.slot-my-siege-label   { grid-row: 13 / 15; grid-column: 4 / 5; }
+.slot-my-siege-horn    { grid-row: 13 / 15; grid-column: 5 / 7; }
+.slot-my-siege-row     { grid-row: 13 / 15; grid-column: 7 / 14; }
+.slot-my-discard       { grid-row: 13 / 15; grid-column: 14 / 15; }
+.slot-pass-button      { grid-row: 15 / 16; grid-column: 1 / 4; }
+.slot-my-hand          { grid-row: 16 / 17; grid-column: 1 / 15; }
 
-.slot-mid-score      { top: 44%; left: 46%;  width: 8%;  height: 12%; flex-direction: column; align-items: center; justify-content: center; }
-
-.slot-my-board       { top: 52%; left: 10%;  width: 55%; height: 34%; flex-direction: column; }
-.slot-my-leader       { top: 88%; left: 1.5%; width: 6%;  height: 13%; }
-.slot-pass-button    { top: 88%; left: 10%;  width: 8%;  height: 6%; }
-.slot-my-hand-tools  { top: 53%; left: 88%;  width: 10%; height: 12%; }
-.slot-my-hand-cards  { top: 76%; left: 20%;  width: 46%; height: 22%; }
 .slot-opp-leader .card-tile, .slot-my-leader .card-tile { width: 60%; height: 100%; }
 
-.player-board { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-height: 0; background: transparent; border-radius: 6px; width: 100%; height: 100%; }
-.board-row { border-left: none; background: transparent; border-radius: 6px; padding: 4px 8px; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.row-label { position: relative; display: flex; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 2px; flex: 0 0 auto; }
+/* Row label / horn / cards cells now stand alone as grid slots instead of
+   being nested inside a shared .player-board / .board-row column. */
+.row-label { position: relative; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
-.row-cards { position: relative; display: flex; align-items: stretch; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.row-markers { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
+.marker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
+.marker-weather { color: #8fd0ff; }
+.marker-horn { color: var(--gold); }
+.marker-mardroeme { color: #d98cff; }
+.row-cards { position: relative; display: flex; align-items: stretch; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
 .row-cards-fit { display: flex; width: 100%; height: 100%; align-items: center; }
 .row-card-slot { position: relative; margin-left: var(--overlap, 0px); }
 .row-card-slot:first-child { margin-left: 0; }
-.row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; }
-.player-board-opp .row-ranged .row-label { top: 43%; }
-.player-board-opp .row-close .row-label { top: 49%; }
-.player-board-mine .row-ranged .row-cards { top: -86%; }
+.row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
-.leader-unused-badge { width: 18px; height: 18px; margin-left: 4px; align-self: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.leader-unused-badge { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
-.mid-score { font-family: var(--font-mono); display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
-.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; }
-.score-badge.score-opp { position: relative; top: -110%; }
-.score-badge.score-me { position: relative; top: 110%; }
+.side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; align-self: center; }
+.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; align-self: center; margin: auto; }
+
+.weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; }
+.weather-clear { align-self: center; margin: auto; opacity: 0.6; }
 
 .hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; overflow: hidden; width: 100%; height: 100%; }
 /* hand-strip-cards needs a definite height so the card row inside it (which
@@ -3332,16 +3412,14 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
 .my-hand { flex-direction: column; align-items: stretch; }
 
-.hand-strip-tools { display: flex; align-items: flex-end; gap: 10px; flex: 0 0 auto; }
-.hand-strip.opp-hand.opp-hand-cards .hand-strip-cards { position: relative; bottom: 61%; }
-.hand-strip.opp-hand.opp-hand-tools .deck-pile { position: relative; width: 100%; height: 85%; top: -15%; }
-.hand-strip.my-hand.my-hand-tools .deck-pile { position: relative; width: 100%; height: 85%; top: -7%; }
-.deck-pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
+.deck-pile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; flex: 0 0 auto; margin: auto; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.discard-pile { position: relative; flex: 0 0 auto; top: 113%; left: -10.7%; }
+.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); align-self: center; margin: auto; }
+.discard-pile { position: relative; flex: 0 0 auto; margin: auto; }
 .discard-pile-back { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+
 
 
 /* ---- Online ---- */
