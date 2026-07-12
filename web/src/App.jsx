@@ -2315,124 +2315,193 @@ function PlayBoard({
       />
 
       <div className="board-frame">
-        <div className="board-slot slot-opp-hand hand-strip opp-hand opp-hand-cards">
-          <div className="hand-strip-cards">
-            <CardBackStack count={opp.hand.length} faction={opp.faction} />
-          </div>
-        </div>
+        <table className="board-table">
+          <colgroup>
+            <col style={{ width: "3%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "4%" }} />
+            <col style={{ width: "55%" }} />
+            <col style={{ width: "18%" }} />
+          </colgroup>
+          <tbody>
+            {/* Row 1: opp hand */}
+            <tr>
+              <td colSpan={8} className="cell-opp-hand">
+                <div className="hand-strip-cards">
+                  <CardBackStack count={opp.hand.length} faction={opp.faction} />
+                </div>
+              </td>
+            </tr>
 
-        <div className="board-slot slot-opp-pass-status">
-          {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
-          {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
-          {flash.opp && (
-            <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>
-          )}
-        </div>
+            {/* Row 2: opp pass status + 5 empty */}
+            <tr>
+              <td colSpan={3} className="cell-opp-pass-status">
+                {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
+                {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
+                {flash.opp && <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>}
+              </td>
+              <td></td><td></td><td></td><td></td><td></td>
+            </tr>
 
-        <div className="board-slot slot-opp-leader">
-          <CardTile card={oppLeader} size="xs" disabled />
-        </div>
-        <div className="board-slot slot-opp-leader-badge">
-          <LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} />
-        </div>
+            {/* Row 3: leader (rowspan3), siege label/horn/row, blank filler */}
+            <tr>
+              <td></td>
+              <td rowSpan={3} className="cell-opp-leader"><CardTile card={oppLeader} size="xs" disabled /></td>
+              <td></td>
+              <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
+              <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} /></td>
+              <td></td>
+            </tr>
 
-        <div className="board-slot slot-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></div>
-        <div className="board-slot slot-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} /></div>
-        <div className="board-slot slot-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} /></div>
+            {/* Row 4: leader badge, opp discard (rowspan2) */}
+            <tr>
+              <td></td>
+              <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} /></td>
+              <td rowSpan={2} className="cell-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} cardWidth={34} /></td>
+            </tr>
 
-        <div className="board-slot slot-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></div>
-        <div className="board-slot slot-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} /></div>
+            {/* Row 5: leader (last row, blank), ranged label/horn/row */}
+            <tr>
+              <td></td>
+              <td></td>
+              <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} /></td>
+            </tr>
 
-        <div className="board-slot slot-opp-name"><span className="side-name">{opponentName}</span></div>
-        <div className="board-slot slot-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></div>
-        <div className="board-slot slot-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} hideCount /></div>
+            {/* Row 6: name, score, deck */}
+            <tr>
+              <td rowSpan={2} colSpan={2} className="cell-opp-name"><span className="side-name">{opponentName}</span></td>
+              <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></td>
+              <td rowSpan={2} className="cell-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} cardWidth={34} hideCount /></td>
+            </tr>
 
-        <div className="board-slot slot-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-opp-close-horn"><RowHornCell board={opp.board} rowKey="close" /></div>
-        <div className="board-slot slot-opp-close-row"><RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} /></div>
+            {/* Row 7: close label/horn/row */}
+            <tr>
+              <td rowSpan={2} className="cell-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-close-horn"><RowHornCell board={opp.board} rowKey="close" /></td>
+              <td rowSpan={2} className="cell-opp-close-row"><RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} /></td>
+            </tr>
 
-        <div className="board-slot slot-weather-center"><WeatherCenterCell board={me.board} /></div>
-        <div className="board-slot slot-opp-deck-count"><DeckCountCell count={opp.deck.length} /></div>
+            {/* Row 8: weather center, opp deck count */}
+            <tr>
+              <td colSpan={3} rowSpan={2} className="cell-weather-center"><WeatherCenterCell board={me.board} /></td>
+              <td className="cell-opp-deck-count"><DeckCountCell count={opp.deck.length} /></td>
+            </tr>
 
-        <div className="board-slot slot-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-my-close-horn"><RowHornCell board={me.board} rowKey="close" /></div>
-        <div className="board-slot slot-my-close-row">
-          <RowCardsCell
-            board={me.board}
-            rowKey="close"
-            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
-            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
-            flashId={flash.me}
-          />
-        </div>
+            {/* Row 9: my close label/horn/row, blank filler */}
+            <tr>
+              <td rowSpan={2} className="cell-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-close-horn"><RowHornCell board={me.board} rowKey="close" /></td>
+              <td rowSpan={2} className="cell-my-close-row">
+                <RowCardsCell
+                  board={me.board}
+                  rowKey="close"
+                  onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+                  selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+                  flashId={flash.me}
+                />
+              </td>
+              <td></td>
+            </tr>
 
-        <div className="board-slot slot-my-name"><span className="side-name">{viewerName}</span></div>
-        <div className="board-slot slot-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></div>
-        <div className="board-slot slot-my-deck"><DeckPile count={me.deck.length} faction={me.faction} cardWidth={34} hideCount /></div>
+            {/* Row 10: my name, score, blank filler */}
+            <tr>
+              <td rowSpan={2} colSpan={2} className="cell-my-name"><span className="side-name">{viewerName}</span></td>
+              <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></td>
+              <td></td>
+            </tr>
 
-        <div className="board-slot slot-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" /></div>
-        <div className="board-slot slot-my-ranged-row">
-          <RowCardsCell
-            board={me.board}
-            rowKey="ranged"
-            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
-            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
-            flashId={flash.me}
-          />
-        </div>
+            {/* Row 11: my ranged label/horn/row, my deck */}
+            <tr>
+              <td rowSpan={2} className="cell-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" /></td>
+              <td rowSpan={2} className="cell-my-ranged-row">
+                <RowCardsCell
+                  board={me.board}
+                  rowKey="ranged"
+                  onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+                  selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+                  flashId={flash.me}
+                />
+              </td>
+              <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} cardWidth={34} hideCount /></td>
+            </tr>
 
-        <div className="board-slot slot-my-leader">
-          <CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} />
-        </div>
-        <div className="board-slot slot-my-deck-count"><DeckCountCell count={me.deck.length} /></div>
+            {/* Row 12: my leader (rowspan3) starts */}
+            <tr>
+              <td></td>
+              <td rowSpan={3} className="cell-my-leader"><CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} /></td>
+              <td></td>
+            </tr>
 
-        <div className="board-slot slot-my-leader-badge">
-          <LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} />
-        </div>
-        <div className="board-slot slot-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></div>
-        <div className="board-slot slot-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></div>
-        <div className="board-slot slot-my-siege-row">
-          <RowCardsCell
-            board={me.board}
-            rowKey="siege"
-            onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
-            selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
-            flashId={flash.me}
-          />
-        </div>
-        <div className="board-slot slot-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={34} /></div>
+            {/* Row 13: my leader badge, siege label/horn/row, my deck count */}
+            <tr>
+              <td></td>
+              <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} /></td>
+              <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></td>
+              <td rowSpan={2} className="cell-my-siege-row">
+                <RowCardsCell
+                  board={me.board}
+                  rowKey="siege"
+                  onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
+                  selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
+                  flashId={flash.me}
+                />
+              </td>
+              <td className="cell-my-deck-count"><DeckCountCell count={me.deck.length} /></td>
+            </tr>
 
-        <div className="board-slot slot-pass-button">
-          <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
-            {me.passed ? "You passed" : "Pass"}
-          </button>
-        </div>
+            {/* Row 14: my leader (last row, blank), my discard (rowspan2) */}
+            <tr>
+              <td></td>
+              <td></td>
+              <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} cardWidth={34} /></td>
+            </tr>
 
-        <div className="board-slot slot-my-hand hand-strip my-hand my-hand-cards">
-          <div className="hand-strip-cards">
-            {me.hand.length === 0 ? (
-              <span className="hint">No cards left.</span>
-            ) : (
-              <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
-                {(width, overlap) => sortedHand.map((id, i) => (
-                  <div key={id} className="hand-card-slot" style={{ "--overlap": `${overlap}px` }}>
-                    <CardTile
-                      card={cardById(id)}
-                      size="md"
-                      fitWidth={width}
-                      disabled={!canAct || !isMyTurn || me.passed || !!pending}
-                      onClick={() => startPlay(id)}
-                    />
-                  </div>
-                ))}
-              </FitRow>
-            )}
-          </div>
-        </div>
+            {/* Row 15: pass button + 4 empty */}
+            <tr>
+              <td colSpan={3} className="cell-pass-button">
+                <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
+                  {me.passed ? "You passed" : "Pass"}
+                </button>
+              </td>
+              <td></td><td></td><td></td><td></td>
+            </tr>
+
+            {/* Row 16: my hand */}
+            <tr>
+              <td colSpan={8} className="cell-my-hand">
+                <div className="hand-strip-cards">
+                  {me.hand.length === 0 ? (
+                    <span className="hint">No cards left.</span>
+                  ) : (
+                    <FitRow count={sortedHand.length} className="hand-fit" gap={6} maxWidth={112} minWidth={34} squeezeAfter={14} clampToHeight>
+                      {(width, overlap) => sortedHand.map((id, i) => (
+                        <div key={id} className="hand-card-slot" style={{ "--overlap": `${overlap}px` }}>
+                          <CardTile
+                            card={cardById(id)}
+                            size="md"
+                            fitWidth={width}
+                            disabled={!canAct || !isMyTurn || me.passed || !!pending}
+                            onClick={() => startPlay(id)}
+                          />
+                        </div>
+                      ))}
+                    </FitRow>
+                  )}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+
 
 
       {pending && (pending.kind === "agile" || pending.kind === "horn" || pending.kind === "mardroeme") && (
@@ -3325,56 +3394,32 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    the DOM structure mirrors that spreadsheet cell-for-cell. Nudge a slot by
    editing its grid-row/grid-column (not transform) in DevTools and send
    back the final values. */
+/* boardls.png sits as the table's own background (border-collapse means the
+   image shows through every cell seam) so the DOM is a literal <table>
+   mirroring the layout.xlsx / hand-authored HTML structure cell-for-cell —
+   rowSpan/colSpan in the JSX must match that HTML exactly. Nudge a cell by
+   adjusting its <col> width % (for column width) — row heights are locked
+   equal (16 even rows) since board rows have no independent height lever
+   in a table; if a specific row needs to be taller/shorter later we'll
+   split that into its own <colgroup>-less concern via CSS on that row's
+   <tr> instead. */
 .board-frame {
   position: relative; width: 100%; margin: 0 auto;
   aspect-ratio: 956.8 / 460.28;
-  display: grid; grid-template-columns: repeat(14, 1fr); grid-template-rows: repeat(16, 1fr);
+}
+.board-table {
+  width: 100%; height: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
   background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center;
 }
-.board-slot { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.board-table tr { height: 6.25%; } /* 1/16 each, 16 rows total */
+.board-table td, .board-table th { padding: 0; margin: 0; border: none; overflow: hidden; vertical-align: top; }
 
-.slot-opp-hand         { grid-row: 1 / 2;  grid-column: 1 / 15; }
-.slot-opp-pass-status  { grid-row: 2 / 3;  grid-column: 1 / 4; }
-.slot-opp-leader       { grid-row: 3 / 6;  grid-column: 2 / 3; }
-.slot-opp-siege-label  { grid-row: 3 / 5;  grid-column: 4 / 5; }
-.slot-opp-siege-horn   { grid-row: 3 / 5;  grid-column: 5 / 7; }
-.slot-opp-siege-row    { grid-row: 3 / 5;  grid-column: 7 / 14; }
-.slot-opp-leader-badge { grid-row: 4 / 5;  grid-column: 3 / 4; }
-.slot-opp-discard      { grid-row: 4 / 6;  grid-column: 14 / 15; }
-.slot-opp-ranged-label { grid-row: 5 / 7;  grid-column: 4 / 5; }
-.slot-opp-ranged-horn  { grid-row: 5 / 7;  grid-column: 5 / 7; }
-.slot-opp-ranged-row   { grid-row: 5 / 7;  grid-column: 7 / 14; }
-.slot-opp-name         { grid-row: 6 / 8;  grid-column: 1 / 3; }
-.slot-opp-score        { grid-row: 6 / 8;  grid-column: 3 / 4; }
-.slot-opp-deck         { grid-row: 6 / 8;  grid-column: 14 / 15; }
-.slot-opp-close-label  { grid-row: 7 / 9;  grid-column: 4 / 5; }
-.slot-opp-close-horn   { grid-row: 7 / 9;  grid-column: 5 / 7; }
-.slot-opp-close-row    { grid-row: 7 / 9;  grid-column: 7 / 14; }
-.slot-weather-center   { grid-row: 8 / 10; grid-column: 1 / 4; }
-.slot-opp-deck-count   { grid-row: 8 / 9;  grid-column: 14 / 15; }
-.slot-my-close-label   { grid-row: 9 / 11; grid-column: 4 / 5; }
-.slot-my-close-horn    { grid-row: 9 / 11; grid-column: 5 / 7; }
-.slot-my-close-row     { grid-row: 9 / 11; grid-column: 7 / 14; }
-.slot-my-name          { grid-row: 10 / 12; grid-column: 1 / 3; }
-.slot-my-score         { grid-row: 10 / 12; grid-column: 3 / 4; }
-.slot-my-deck          { grid-row: 10 / 12; grid-column: 14 / 15; }
-.slot-my-ranged-label  { grid-row: 11 / 13; grid-column: 4 / 5; }
-.slot-my-ranged-horn   { grid-row: 11 / 13; grid-column: 5 / 7; }
-.slot-my-ranged-row    { grid-row: 11 / 13; grid-column: 7 / 14; }
-.slot-my-leader        { grid-row: 12 / 15; grid-column: 2 / 3; }
-.slot-my-deck-count    { grid-row: 12 / 13; grid-column: 14 / 15; }
-.slot-my-leader-badge  { grid-row: 13 / 14; grid-column: 3 / 4; }
-.slot-my-siege-label   { grid-row: 13 / 15; grid-column: 4 / 5; }
-.slot-my-siege-horn    { grid-row: 13 / 15; grid-column: 5 / 7; }
-.slot-my-siege-row     { grid-row: 13 / 15; grid-column: 7 / 14; }
-.slot-my-discard       { grid-row: 13 / 15; grid-column: 14 / 15; }
-.slot-pass-button      { grid-row: 15 / 16; grid-column: 1 / 4; }
-.slot-my-hand          { grid-row: 16 / 17; grid-column: 1 / 15; }
+.cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 60%; height: 100%; margin: auto; }
 
-.slot-opp-leader .card-tile, .slot-my-leader .card-tile { width: 60%; height: 100%; }
-
-/* Row label / horn / cards cells now stand alone as grid slots instead of
-   being nested inside a shared .player-board / .board-row column. */
+/* Row label / horn / cards cells are plain <td> content now — no wrapper
+   div needed, the <td> itself is the positioned box. */
 .row-label { position: relative; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-markers { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
@@ -3388,18 +3433,16 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
-.leader-unused-badge { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.leader-unused-badge { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: auto; }
 
-.side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; align-self: center; }
-.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; align-self: center; margin: auto; }
+.side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
-.weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; }
+.cell-weather-center { display: flex; }
+.weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; margin: auto; }
 .weather-clear { align-self: center; margin: auto; opacity: 0.6; }
 
-.hand-strip { display: flex; align-items: center; gap: 10px; padding: 4px 4px; overflow: hidden; width: 100%; height: 100%; }
-/* hand-strip-cards needs a definite height so the card row inside it (which
-   sizes itself off its own measured height) doesn't collapse to near-zero —
-   without this the hand cards render at a broken ~9px width. */
+.cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; width: 100%; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
 .hand-card-slot { position: relative; margin-left: var(--overlap, 0px); }
@@ -3409,15 +3452,16 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
-.my-hand { flex-direction: column; align-items: stretch; }
 
 .deck-pile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; flex: 0 0 auto; margin: auto; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); align-self: center; margin: auto; }
+.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .discard-pile { position: relative; flex: 0 0 auto; margin: auto; }
 .discard-pile-back { position: relative; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+
+.cell-pass-button { display: flex; align-items: center; justify-content: center; }
 
 
 
@@ -3439,12 +3483,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-tile.no-art .card-art { display: none; }
 .card-tile-inner { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
 .card-tile.is-hero { border-left-color: var(--gold) !important; box-shadow: 0 0 0 1px var(--gold), 0 2px 4px rgba(0,0,0,0.4); }
-
-.row-markers { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-.marker { font-family: var(--font-mono); font-size: 0.6rem; padding: 1px 6px; border-radius: 10px; background: rgba(0,0,0,0.35); border: 1px solid var(--line); color: var(--parchment); }
-.marker-weather { color: #9fd0e8; border-color: #4a7a94; }
-.marker-horn { color: var(--gold); border-color: var(--gold-dim); }
-.marker-mardroeme { color: #c98fd6; border-color: #7a4b8a; }
 
 .pending-hint { position: fixed; bottom: 90px; left: 0; right: 0; text-align: center; z-index: 41; background: rgba(0,0,0,0.75); padding: 6px; }
 
