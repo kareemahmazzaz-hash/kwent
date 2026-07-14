@@ -53,9 +53,12 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 // image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
 // line dead-center) — see BOARD_HALF background rules below for how each
 // half crops its own 3-row half out of it via background-size/position.
-const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Neutral/boardls.png";
-const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Neutral/bluecrown.png";
-const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Neutral/bluecrown.png";
+const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Board/board.jpg";
+const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Board/bluecrown.jpg";
+const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/bluecrown.jpg";
+// Board/*.jpg cell textures (leader frames, row/horn shelves, deck/discard
+// frames, weather frame, badge plaques) — filenames have spaces, hence %20.
+const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
 
 /* ----------------------------- META ------------------------------------ */
 
@@ -1765,7 +1768,17 @@ function LeaderUnusedBadge({ show }) {
 // shown once centrally (WeatherCenterCell) since it now hits both sides'
 // same row identically, so it isn't repeated per-row anymore.
 
-// "Row label" cell — just the row's power total.
+// Background texture layer for a close-row/close-horn cell — sits behind
+// the live RowCardsCell/RowHornCell content (via z-index) and is shrunk to
+// leave a gap on the side facing the weather divider. Uses position:absolute
+// + height:% rather than margin:%, since margin percentages resolve against
+// the CONTAINING BLOCK'S WIDTH even for vertical margins (a real CSS quirk,
+// not a bug) — height% correctly resolves against the td's height instead.
+function RowBgFill({ src, anchor }) {
+  return <div className={"row-bg-fill row-bg-fill-" + anchor} style={{ backgroundImage: src }} />;
+}
+
+
 function RowLabelCell({ board, rowKey, spyDoubled }) {
   const total = rowTotal(board, rowKey, spyDoubled);
   return (
@@ -2305,8 +2318,14 @@ function PlayBoard({
             {/* Row 7: close label/horn/row */}
             <tr>
               <td rowSpan={2} className="cell-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-opp-close-horn"><RowHornCell board={opp.board} rowKey="close" /></td>
-              <td rowSpan={2} className="cell-opp-close-row"><RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-close-horn">
+                <RowBgFill src={boardImg("opp close horn")} anchor="top" />
+                <RowHornCell board={opp.board} rowKey="close" />
+              </td>
+              <td rowSpan={2} className="cell-opp-close-row">
+                <RowBgFill src={boardImg("opp close")} anchor="top" />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} />
+              </td>
             </tr>
 
             {/* Row 8: weather center, opp deck count */}
@@ -2318,8 +2337,12 @@ function PlayBoard({
             {/* Row 9: my close label/horn/row, blank filler */}
             <tr>
               <td rowSpan={2} className="cell-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-my-close-horn"><RowHornCell board={me.board} rowKey="close" /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-close-horn">
+                <RowBgFill src={boardImg("my close horn")} anchor="bottom" />
+                <RowHornCell board={me.board} rowKey="close" />
+              </td>
               <td rowSpan={2} className="cell-my-close-row">
+                <RowBgFill src={boardImg("my close")} anchor="bottom" />
                 <RowCardsCell
                   board={me.board}
                   rowKey="close"
@@ -3342,16 +3365,60 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 60%; height: 100%; margin: auto; }
 
+/* ===== Board/*.jpg cell textures =====
+   Portrait/icon assets (leader art, weather icon, deck/discard backs) are
+   meant to be seen whole, not cropped — background-size:contain shows the
+   full image, centered, letterboxed inside the cell. Row/horn shelf and
+   badge-plaque textures are meant to fill the cell edge-to-edge, so they
+   use cover (crops as needed, never stretches/distorts). */
+.cell-opp-leader        { background-image: ${boardImg("opp leader")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-my-leader          { background-image: ${boardImg("my leader")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-opp-leader-badge   { background-image: ${boardImg("opp badge")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-my-leader-badge    { background-image: ${boardImg("my badge")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-siege-horn     { background-image: ${boardImg("opp siege horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-my-siege-horn      { background-image: ${boardImg("my siege horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-siege-row      { background-image: ${boardImg("opp siege")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-my-siege-row       { background-image: ${boardImg("my siege")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-ranged-horn    { background-image: ${boardImg("opp range horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-my-ranged-horn     { background-image: ${boardImg("my range horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-ranged-row     { background-image: ${boardImg("opp range")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-my-ranged-row      { background-image: ${boardImg("my range")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-deck           { background-image: ${boardImg("opp deck")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-my-deck            { background-image: ${boardImg("my deck")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-opp-discard        { background-image: ${boardImg("opp discard")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-my-discard         { background-image: ${boardImg("my discard")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+
+/* Close-row/close-horn cells get their texture from a background layer
+   div (RowBgFill) instead of a direct td background, so the image can be
+   shrunk with a tunable gap facing the weather divider. See RowBgFill
+   comment above for why height:% is used instead of margin:%. */
+.cell-opp-close-row, .cell-opp-close-horn,
+.cell-my-close-row, .cell-my-close-horn {
+  position: relative;
+}
+.row-bg-fill {
+  position: absolute;
+  left: 0; width: 100%;
+  height: 82%;   /* tune me — smaller % = bigger gap */
+  z-index: 0;
+  box-sizing: border-box;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.row-bg-fill-top { top: 0; }       /* opp side — gap falls at the bottom, toward the weather divider */
+.row-bg-fill-bottom { bottom: 0; } /* my side — gap falls at the top, toward the weather divider */
+
 /* Row label / horn / cards cells are plain <td> content now — no wrapper
    div needed, the <td> itself is the positioned box. */
 .row-label { position: relative; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
-.row-markers { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
+.row-markers { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
 .marker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
 .marker-weather { color: #8fd0ff; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
-.row-cards { position: relative; display: flex; align-items: stretch; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
+.row-cards { position: relative; z-index: 1; display: flex; align-items: stretch; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
 .row-card-slot { position: relative; height: 100%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
@@ -3361,7 +3428,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
-.cell-weather-center { display: flex; }
+.cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; margin: auto; }
 .weather-clear { align-self: center; margin: auto; opacity: 0.6; }
 
