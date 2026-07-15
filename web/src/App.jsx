@@ -2281,10 +2281,10 @@ function PlayBoard({
               <td></td><td></td><td></td><td></td><td></td>
             </tr>
 
-            {/* Row 3: leader (rowspan3), siege label/horn/row, blank filler */}
+            {/* Row 3: leader (rowspan3, shifted to col1), siege label/horn/row, blank filler */}
             <tr>
-              <td></td>
               <td rowSpan={3} className="cell-opp-leader"><CardTile card={oppLeader} size="xs" disabled /></td>
+              <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
@@ -2292,10 +2292,10 @@ function PlayBoard({
               <td></td>
             </tr>
 
-            {/* Row 4: leader badge, opp discard (rowspan2) */}
+            {/* Row 4: leader badge (shifted to col2), opp discard (rowspan2) */}
             <tr>
-              <td></td>
               <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} /></td>
+              <td></td>
               <td rowSpan={2} className="cell-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} /></td>
             </tr>
 
@@ -2377,17 +2377,17 @@ function PlayBoard({
               <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
 
-            {/* Row 12: my leader (rowspan3) starts */}
+            {/* Row 12: my leader (rowspan3, shifted to col1) starts */}
             <tr>
-              <td></td>
               <td rowSpan={3} className="cell-my-leader"><CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} /></td>
+              <td></td>
               <td></td>
             </tr>
 
-            {/* Row 13: my leader badge, siege label/horn/row, my deck count */}
+            {/* Row 13: my leader badge (shifted to col2), siege label/horn/row, my deck count */}
             <tr>
-              <td></td>
               <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} /></td>
+              <td></td>
               <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></td>
               <td rowSpan={2} className="cell-my-siege-row">
@@ -3424,6 +3424,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
 .leader-unused-badge { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: auto; }
+.cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
 .side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
