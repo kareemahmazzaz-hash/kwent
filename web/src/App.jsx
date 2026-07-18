@@ -2328,14 +2328,15 @@ function PlayBoard({
               </td>
             </tr>
 
-            {/* Row 8: weather center, opp deck count */}
+            {/* Row 8: opp deck count (weather now rendered as an overlay outside the table, see below) */}
             <tr>
-              <td colSpan={3} rowSpan={2} className="cell-weather-center"><WeatherCenterCell board={me.board} /></td>
+              <td></td><td></td><td></td>
               <td className="cell-opp-deck-count"><DeckCountCell count={opp.deck.length} /></td>
             </tr>
 
-            {/* Row 9: my close label/horn/row, blank filler */}
+            {/* Row 9: my close label/horn/row, 3 leading + 1 trailing blank filler */}
             <tr>
+              <td></td><td></td><td></td>
               <td rowSpan={2} className="cell-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-close-horn">
                 <RowBgFill src={boardImg("my close horn")} anchor="bottom" />
@@ -2354,14 +2355,14 @@ function PlayBoard({
               <td></td>
             </tr>
 
-            {/* Row 10: my name, score, blank filler */}
+            {/* Row 10: my name, score, my deck (moved up one row) */}
             <tr>
               <td rowSpan={2} colSpan={2} className="cell-my-name"><span className="side-name">{viewerName}</span></td>
               <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></td>
-              <td></td>
+              <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
 
-            {/* Row 11: my ranged label/horn/row, my deck */}
+            {/* Row 11: my ranged label/horn/row, blank filler */}
             <tr>
               <td rowSpan={2} className="cell-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" /></td>
@@ -2374,17 +2375,18 @@ function PlayBoard({
                   flashId={flash.me}
                 />
               </td>
-              <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
+              <td></td>
             </tr>
 
-            {/* Row 12: my leader (rowspan3, shifted to col1) starts */}
+            {/* Row 12: my leader (rowspan3, shifted to col1) starts, my deck count (moved up one row) */}
             <tr>
               <td rowSpan={3} className="cell-my-leader"><CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} /></td>
               <td></td>
               <td></td>
+              <td className="cell-my-deck-count"><DeckCountCell count={me.deck.length} /></td>
             </tr>
 
-            {/* Row 13: my leader badge (shifted to col2), siege label/horn/row, my deck count */}
+            {/* Row 13: my leader badge (shifted to col2), siege label/horn/row, my discard (moved up one row) */}
             <tr>
               <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} /></td>
               <td></td>
@@ -2399,51 +2401,57 @@ function PlayBoard({
                   flashId={flash.me}
                 />
               </td>
-              <td className="cell-my-deck-count"><DeckCountCell count={me.deck.length} /></td>
-            </tr>
-
-            {/* Row 14: my leader (last row, blank), my discard (rowspan2) */}
-            <tr>
-              <td></td>
-              <td></td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
             </tr>
 
-            {/* Row 15: pass button + 4 empty */}
+            {/* Row 14: my leader (last row, blank) */}
             <tr>
-              <td colSpan={3} className="cell-pass-button">
+              <td></td>
+              <td></td>
+              <td></td>
+            </tr>
+
+            {/* Row 15: spacer row */}
+            <tr>
+              <td></td><td></td><td></td><td></td><td></td><td></td>
+            </tr>
+
+            {/* Row 16: pass button, positioned via inline style */}
+            <tr>
+              <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-30% 0 0 85%" }}>
                 <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
                   {me.passed ? "You passed" : "Pass"}
                 </button>
               </td>
-              <td></td><td></td><td></td><td></td>
-            </tr>
-
-            {/* Row 16: my hand */}
-            <tr>
-              <td colSpan={8} className="cell-my-hand">
-                <div className="hand-strip-cards">
-                  {me.hand.length === 0 ? (
-                    <span className="hint">No cards left.</span>
-                  ) : (
-                    <div className="hand-fit">
-                      {sortedHand.map((id) => (
-                        <div key={id} className="hand-card-slot">
-                          <CardTile
-                            card={cardById(id)}
-                            size="fit"
-                            disabled={!canAct || !isMyTurn || me.passed || !!pending}
-                            onClick={() => startPlay(id)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </td>
             </tr>
           </tbody>
         </table>
+
+        {/* Weather is now an absolutely-positioned overlay on .board-frame
+            instead of a table cell, so it isn't constrained by the table's
+            colspan/rowspan grid occupancy. */}
+        <div className="weather-overlay"><WeatherCenterCell board={me.board} /></div>
+
+        {/* My hand is rendered outside the table (sibling of .board-table)
+            instead of inside a table cell. */}
+        <div className="hand-strip-cards">
+          {me.hand.length === 0 ? (
+            <span className="hint">No cards left.</span>
+          ) : (
+            <div className="hand-fit">
+              {sortedHand.map((id) => (
+                <div key={id} className="hand-card-slot">
+                  <CardTile
+                    card={cardById(id)}
+                    size="fit"
+                    disabled={!canAct || !isMyTurn || me.passed || !!pending}
+                    onClick={() => startPlay(id)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
 
@@ -3320,7 +3328,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    (board rows, your hand, the opponent's card-back fan, deck/discard
    piles) is sized with plain %/aspect-ratio CSS — no JS measurement. */
 .play-board {
-  max-width: 900px; margin: 0 auto; padding: 6px 8px 8px;
+  max-width: 70%; margin: 0 auto; padding: 6px 8px 8px;
   height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 4px;
   overflow: hidden; box-sizing: border-box;
 }
@@ -3363,7 +3371,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-table tr { height: 6.25%; } /* 1/16 each, 16 rows total */
 .board-table td, .board-table th { padding: 0; margin: 0; border: none; overflow: hidden; vertical-align: top; }
 
-.cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 60%; height: 100%; margin: auto; }
+.cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 100%; margin: auto; }
 
 /* ===== Board/*.jpg cell textures =====
    Portrait/icon assets (leader art, weather icon, deck/discard backs) are
@@ -3383,10 +3391,10 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .cell-my-ranged-horn     { background-image: ${boardImg("my range horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
 .cell-opp-ranged-row     { background-image: ${boardImg("opp range")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
 .cell-my-ranged-row      { background-image: ${boardImg("my range")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
-.cell-opp-deck           { background-image: ${boardImg("opp deck")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.cell-my-deck            { background-image: ${boardImg("my deck")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.cell-opp-discard        { background-image: ${boardImg("opp discard")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.cell-my-discard         { background-image: ${boardImg("my discard")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.cell-opp-deck           { background-image: ${boardImg("opp deck")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
+.cell-my-deck            { background-image: ${boardImg("my deck")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
+.cell-opp-discard        { background-image: ${boardImg("opp discard")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
+.cell-my-discard         { background-image: ${boardImg("my discard")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
 
 /* Close-row/close-horn cells get their texture from a background layer
    div (RowBgFill) instead of a direct td background, so the image can be
@@ -3399,7 +3407,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-bg-fill {
   position: absolute;
   left: 0; width: 100%;
-  height: 82%;   /* tune me — smaller % = bigger gap */
+  height: 89%;   /* tune me — smaller % = bigger gap */
   z-index: 0;
   box-sizing: border-box;
   background-size: cover;
@@ -3411,7 +3419,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* Row label / horn / cards cells are plain <td> content now — no wrapper
    div needed, the <td> itself is the positioned box. */
-.row-label { position: relative; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
+.row-label { position: relative; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-markers { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
 .marker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
@@ -3423,32 +3431,49 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
-.leader-unused-badge { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: auto; }
+.leader-unused-badge { width: 100%; height: 80%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -35% 3%; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
-.side-name { font-family: var(--font-display); font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.side-name { font-family: var(--font-display); font-size: 60%; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; margin: auto; }
-.weather-clear { align-self: center; margin: auto; opacity: 0.6; }
+.weather-clear { display: flex; justify-content: center; align-self: center; margin: 25% 0 0 0; opacity: 0.6; }
+
+/* Weather overlay: absolutely positioned on .board-frame instead of a td
+   background, so it can be placed/sized independently of the table's
+   colspan/rowspan grid occupancy. */
+.weather-overlay {
+  position: absolute;
+  top: 40%;
+  left: 0.5%;
+  width: 10%;
+  height: 15%;
+  background-image: ${boardImg("weather")};
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  pointer-events: none;
+  z-index: 1;
+}
 
 .cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
-.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; width: 100%; }
+.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 100%; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
-.hand-card-slot { position: relative; height: 100%; width: 8%; flex: 0 0 auto; margin-left: -1%; }
+.hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
-.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
-.card-back-wrap { position: relative; height: 100%; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; }
+.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; margin-top: -11%; }
 .card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
 
-.deck-pile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; flex: 0 0 auto; margin: auto; height: 100%; }
-.deck-pile-stack { position: relative; flex: 0 0 auto; height: 85%; width: auto; aspect-ratio: 0.537 / 1; }
+.deck-pile { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; flex: 0 0 auto; margin: 0 0 0 8%; height: 100%; }
+.deck-pile-stack { position: relative; flex: 0 0 auto; height: 90%; width: auto; aspect-ratio: 0.537 / 1; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
 .discard-pile { position: relative; flex: 0 0 auto; margin: auto; height: 100%; }
 .discard-pile-back { position: relative; height: 100%; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
