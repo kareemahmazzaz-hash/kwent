@@ -2262,23 +2262,23 @@ function PlayBoard({
             <col style={{ width: "18%" }} />
           </colgroup>
           <tbody>
-            {/* Row 1: opp hand */}
+            {/* Row 1: 3 empty (col1-3), opp hand (col4-8, rowspan2) */}
             <tr>
-              <td colSpan={8} className="cell-opp-hand">
+              <td colSpan={3}></td>
+              <td colSpan={5} rowSpan={2} className="cell-opp-hand">
                 <div className="hand-strip-cards">
                   <CardBackStack count={opp.hand.length} faction={opp.faction} />
                 </div>
               </td>
             </tr>
 
-            {/* Row 2: opp pass status + 5 empty */}
+            {/* Row 2: opp pass status (col1-3); col4-8 covered by row1 rowspan */}
             <tr>
               <td colSpan={3} className="cell-opp-pass-status">
                 {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
                 {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
                 {flash.opp && <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>}
               </td>
-              <td></td><td></td><td></td><td></td><td></td>
             </tr>
 
             {/* Row 3: leader (rowspan3, shifted to col1), siege label/horn/row, blank filler */}
