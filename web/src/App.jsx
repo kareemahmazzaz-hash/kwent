@@ -2275,7 +2275,7 @@ function PlayBoard({
             {/* Row 2: opp pass status (col1-3); col4-8 covered by row1 rowspan */}
             <tr>
               <td colSpan={3} className="cell-opp-pass-status">
-                {opp.passed && <div className="passed-banner">{opponentName} passed</div>}
+                {opp.passed && <div className="passed-banner">Passed</div>}
                 {!opp.passed && opponentThinking && <div className="passed-banner thinking-banner">{opponentName} is thinking…</div>}
                 {flash.opp && <div className="last-played-toast">{opponentName} played {cardById(flash.opp)?.name}</div>}
               </td>
@@ -3383,8 +3383,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    use cover (crops as needed, never stretches/distorts). */
 .cell-opp-leader        { background-image: ${boardImg("opp leader")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .cell-my-leader          { background-image: ${boardImg("my leader")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.cell-opp-leader-badge   { background-image: ${boardImg("opp badge")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
-.cell-my-leader-badge    { background-image: ${boardImg("my badge")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
+.cell-opp-leader-badge   { background-image: ${boardImg("opp badge")}; background-size: auto 70%; background-repeat: no-repeat; background-position: left; }
+.cell-my-leader-badge    { background-image: ${boardImg("my badge")}; background-size: auto 70%; background-repeat: no-repeat; background-position: left; }
 .cell-opp-siege-horn     { background-image: ${boardImg("opp siege horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
 .cell-my-siege-horn      { background-image: ${boardImg("my siege horn")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
 .cell-opp-siege-row      { background-image: ${boardImg("opp siege")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
@@ -3428,12 +3428,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-weather { color: #8fd0ff; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
-.row-cards { position: relative; z-index: 1; display: flex; align-items: stretch; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
-.row-card-slot { position: relative; height: 100%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
+.row-cards { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
+.row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
-.leader-unused-badge { width: 100%; height: 70%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -65% 3%; }
+.leader-unused-badge { width: 75%; height: 75%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -40% 3%; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
 .side-name { font-family: var(--font-display); font-size: 60%; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
@@ -3476,7 +3476,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
 .deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
-.discard-pile { position: relative; flex: 0 0 auto; margin: auto; height: 100%; }
+.discard-pile { display: flex; position: relative; flex: 0 0 auto; margin: 0; height: 100%; width: 48%; justify-content: center; }
 .discard-pile-back { position: relative; height: 100%; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
 .cell-pass-button { display: flex; align-items: center; justify-content: center; }
@@ -3551,7 +3551,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-tile.card-just-played { animation: card-flash 1.1s ease-in-out 2; z-index: 2; }
 
 .passed-banner {
-  position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5;
+  position: absolute; top: 6%; left: 5.5%; z-index: 5;
   background: rgba(120, 20, 20, 0.85); border: 1px solid var(--gold-dim); color: #f4ecd8;
   font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.04em; padding: 3px 12px; border-radius: 12px;
 }
