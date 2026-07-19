@@ -3369,7 +3369,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   background-image: url('${BOARD_TEXTURE_URL}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center;
 }
 .board-table tr { height: 6.25%; } /* 1/16 each, 16 rows total */
-.board-table td, .board-table th { height: 100%; padding: 0; margin: 0; border: none; overflow: hidden; vertical-align: top; }
+.board-table td, .board-table th { height: 6.25%; padding: 0; margin: 0; border: none; overflow: hidden; vertical-align: top; }
+.board-table td[rowspan="2"] { height: 12.5%; }
+.board-table td[rowspan="3"] { height: 18.75%; }
 
 .cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 65%; margin: 30% 0 0 17%; }
 
