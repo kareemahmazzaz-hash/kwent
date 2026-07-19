@@ -2252,20 +2252,20 @@ function PlayBoard({
       <div className="board-frame">
         <table className="board-table">
           <colgroup>
-            <col style={{ width: "3%" }} />
-            <col style={{ width: "8%" }} />
+            <col style={{ width: "10%" }} />
             <col style={{ width: "4%" }} />
+            <col style={{ width: "12%" }} />
             <col style={{ width: "4%" }} />
+            <col style={{ width: "12%" }} />
             <col style={{ width: "4%" }} />
-            <col style={{ width: "4%" }} />
-            <col style={{ width: "55%" }} />
-            <col style={{ width: "18%" }} />
+            <col style={{ width: "150%" }} />
+            <col style={{ width: "20%" }} />
           </colgroup>
           <tbody>
             {/* Row 1: 3 empty (col1-3), opp hand (col4-8, rowspan2) */}
             <tr>
               <td colSpan={3}></td>
-              <td colSpan={5} rowSpan={2} className="cell-opp-hand">
+              <td colSpan={5} rowSpan={2} className="cell-opp-hand" style={{ width: "4100%" }}>
                 <div className="hand-strip-cards">
                   <CardBackStack count={opp.hand.length} faction={opp.faction} />
                 </div>
@@ -3371,7 +3371,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-table tr { height: 6.25%; } /* 1/16 each, 16 rows total */
 .board-table td, .board-table th { padding: 0; margin: 0; border: none; overflow: hidden; vertical-align: top; }
 
-.cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 100%; margin: auto; }
+.cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 65%; margin: 30% 0 0 17%; }
 
 /* ===== Board/*.jpg cell textures =====
    Portrait/icon assets (leader art, weather icon, deck/discard backs) are
@@ -3431,7 +3431,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
-.leader-unused-badge { width: 100%; height: 80%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -35% 3%; }
+.leader-unused-badge { width: 100%; height: 70%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -65% 3%; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
 .side-name { font-family: var(--font-display); font-size: 60%; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
@@ -3463,8 +3463,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
-.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; }
-.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; margin-top: -11%; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; margin-left: 10%; }
+.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; margin-top: -12%; }
 .card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
