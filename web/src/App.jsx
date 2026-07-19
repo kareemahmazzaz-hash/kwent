@@ -1940,7 +1940,7 @@ function cardMatchesAbilityFilter(card, filterKey) {
   return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
 }
 
-function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel }) {
+function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize }) {
   const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
   const pool = useMemo(() => poolForFaction(faction), [faction]);
@@ -2003,7 +2003,14 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         )}
       </div>
 
-      <div className="deck-count">Selected: <strong>{count}</strong> / {DECK_SIZE} minimum</div>
+      <div className="deck-count">
+        Selected: <strong>{count}</strong> / {DECK_SIZE} minimum
+        {onRandomize && (
+          <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
+            🎲 Random deck
+          </button>
+        )}
+      </div>
 
       <input
         className="search-input"
@@ -2568,6 +2575,18 @@ function Home({ onSelect, onlineAvailable }) {
 
 /* ============================ HOTSEAT MODE ============================= */
 
+function randomDeckIds(faction) {
+  const pool = poolForFaction(faction);
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, DECK_SIZE).map((c) => c.id);
+}
+
+function randomLeaderId(faction) {
+  const leaders = leadersForFaction(faction);
+  if (!leaders.length) return null;
+  return leaders[Math.floor(Math.random() * leaders.length)].id;
+}
+
 function useDeckBuilderState() {
   const [faction, setFaction] = useState(FACTIONS[0]);
   const [selected, setSelected] = useState([]);
@@ -2580,7 +2599,11 @@ function useDeckBuilderState() {
     setSelected([]);
     setLeaderId(null);
   }
-  return { faction, setFaction: changeFaction, selected, toggle, leaderId, setLeaderId };
+  function randomize() {
+    setSelected(randomDeckIds(faction));
+    setLeaderId(randomLeaderId(faction));
+  }
+  return { faction, setFaction: changeFaction, selected, toggle, leaderId, setLeaderId, randomize };
 }
 
 function HotseatGame({ onExit }) {
@@ -2608,7 +2631,7 @@ function HotseatGame({ onExit }) {
   if (step === "deck1") {
     return <DeckBuilder playerLabel="Player 1" faction={builder1.faction} onFactionChange={builder1.setFaction}
       lockFaction={false} selectedIds={builder1.selected} onToggleCard={builder1.toggle}
-      leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} />;
+      leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} onRandomize={builder1.randomize} />;
   }
   if (step === "gateTo2") {
     return <PassDeviceGate name="Player 2" onContinue={() => setStep("deck2")} />;
@@ -2616,7 +2639,7 @@ function HotseatGame({ onExit }) {
   if (step === "deck2") {
     return <DeckBuilder playerLabel="Player 2" faction={builder2.faction} onFactionChange={builder2.setFaction}
       lockFaction={false} selectedIds={builder2.selected} onToggleCard={builder2.toggle}
-      leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} />;
+      leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} onRandomize={builder2.randomize} />;
   }
   if (!state) return null;
 
@@ -2810,7 +2833,7 @@ function AIGame({ onExit }) {
   if (step === "deck") {
     return <DeckBuilder playerLabel="You" faction={builder.faction} onFactionChange={builder.setFaction}
       lockFaction={false} selectedIds={builder.selected} onToggleCard={builder.toggle}
-      leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} />;
+      leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} onRandomize={builder.randomize} />;
   }
   if (!state) return null;
 
@@ -3090,6 +3113,7 @@ function OnlineGame({ onExit }) {
           selectedIds={builder.selected} onToggleCard={builder.toggle}
           leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId}
           onConfirm={confirmDeckOnline}
+          onRandomize={builder.randomize}
         />
       </>
     );
@@ -3295,7 +3319,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .section-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--gold-dim); display: block; margin-bottom: 6px; }
 .leader-picker { margin-bottom: 14px; }
 .leader-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.deck-count { font-family: var(--font-mono); margin-bottom: 8px; color: var(--gold); }
+.deck-count { font-family: var(--font-mono); margin-bottom: 8px; color: var(--gold); display: flex; align-items: center; gap: 10px; }
+.random-deck-btn { margin-left: 4px; }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
 .ability-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .ability-filter-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
