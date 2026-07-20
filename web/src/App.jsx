@@ -3386,6 +3386,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-frame {
   position: relative; width: 100%; margin: 0 auto;
   aspect-ratio: 956.8 / 460.28;
+  container-type: size;
 }
 .board-table {
   width: 100%; height: 100%;
@@ -3420,7 +3421,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .cell-my-ranged-row      { background-image: ${boardImg("my range")}; background-size: cover; background-repeat: no-repeat; background-position: center; }
 .cell-opp-deck           { background-image: ${boardImg("opp deck")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
 .cell-my-deck            { background-image: ${boardImg("my deck")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
-.cell-opp-discard        { background-image: ${boardImg("opp discard")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
+.cell-opp-discard        { background-image: ${boardImg("opp discard")}; background-size: contain; background-repeat: no-repeat; background-position: left; position: relative; }
 .cell-my-discard         { background-image: ${boardImg("my discard")}; background-size: contain; background-repeat: no-repeat; background-position: left; }
 
 /* Close-row/close-horn cells get their texture from a background layer
@@ -3502,7 +3503,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
 .deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
 .discard-pile { display: flex; position: relative; flex: 0 0 auto; margin: 0; height: 100%; width: 48%; justify-content: center; }
-.discard-pile-back { position: relative; height: 100%; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+.discard-pile-back { position: absolute; top: 50%; right: 5.5%; transform: translateY(-50%); height: 12cqh; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
 .cell-pass-button { display: flex; align-items: center; justify-content: center; }
 
