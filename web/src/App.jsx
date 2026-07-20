@@ -3473,7 +3473,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-weather { color: #8fd0ff; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
-.horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 120%; height: 150%; margin: 15% 0 0 -5%; }
+.horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
+.horn-card-slot .card-tile { height: 150%; width: 120%; margin: 15% 0 0 -5%; }
 .weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; height: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: flex-start; width: 100%; height: 100%; overflow: hidden; }
 
@@ -3491,6 +3492,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .row-cards.row-close.row-weathered::before   { background-color: rgba(150, 200, 235, 0.28); }  /* frost — light blue */
 .row-cards.row-ranged.row-weathered::before  { background-color: rgba(55, 58, 62, 0.4); }       /* fog — dark grey */
 .row-cards.row-siege.row-weathered::before   { background-color: rgba(180, 195, 215, 0.28); }   /* rain — light grey-blue */
+/* Close rows draw their board texture through a separate RowBgFill layer
+   clipped to 89% height (leaving a gap toward the weather divider) instead
+   of a full-bleed td background like ranged/siege — match that footprint
+   so the frost tint doesn't spill into the untextured gap. */
+.cell-opp-close-row .row-cards.row-weathered::before { top: 0; bottom: auto; height: 89%; }
+.cell-my-close-row .row-cards.row-weathered::before { top: auto; bottom: 0; height: 89%; }
 
 .row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
