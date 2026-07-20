@@ -1839,10 +1839,16 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
 function WeatherCenterCell({ board }) {
   const rows = ["siege", "ranged", "close"];
   const activeCardIds = [...new Set(rows.filter((r) => board.weather[r] && board.weather[r].cardId).map((r) => board.weather[r].cardId))];
-  if (activeCardIds.length === 0) return <span className="hint weather-clear">Clear skies</span>;
+  // Skellige Storm is Fog + Rain combined (it weathers Ranged & Siege at once),
+  // so show those two component cards instead of the storm card itself.
+  const displayCardIds = [...new Set(activeCardIds.flatMap((cid) => {
+    const c = cardById(cid);
+    return c && c.name.startsWith("Skellige Storm") ? ["c063", "c074"] : [cid];
+  }))];
+  if (displayCardIds.length === 0) return <span className="hint weather-clear">Clear skies</span>;
   return (
     <div className="weather-center-list">
-      {activeCardIds.map((cid) => (
+      {displayCardIds.map((cid) => (
         <div key={cid} className="weather-card-slot">
           <CardTile card={cardById(cid)} size="fit" />
         </div>
