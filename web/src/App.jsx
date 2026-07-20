@@ -125,7 +125,7 @@ const CARDS = [
 {id:"c025",name:"Harpy",faction:"monsters",power:2.0,row:"agile",cardType:"Basic",ability:null,abilityMeta:{},img:"Harpy.png"},
 {id:"c026",name:"Ice Giant",faction:"monsters",power:5.0,row:"siege",cardType:"Basic",ability:null,abilityMeta:{},img:"Ice Giant.png"},
 {id:"c027",name:"Imlerith",faction:"monsters",power:10.0,row:"close",cardType:"Hero",ability:null,abilityMeta:{},img:"Imlerith.png"},
-{id:"c028",name:"Kayran",faction:"monsters",power:8.0,row:"ranged",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Kayran.png"},
+{id:"c028",name:"Kayran",faction:"monsters",power:8.0,row:"agile",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Kayran.png"},
 {id:"c029",name:"Leshen",faction:"monsters",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Leshen.png"},
 {id:"c030",name:"Nekker (1)",faction:"monsters",power:2.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Nekker1.png"},
 {id:"c031",name:"Nekker (2)",faction:"monsters",power:2.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Nekker2.png"},
@@ -3477,6 +3477,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .horn-card-slot .card-tile { height: 150%; width: 120%; margin: 15% 0 0 -5%; }
 .weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; height: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: flex-start; width: 100%; height: 100%; overflow: hidden; }
+.row-cards.row-close { display: flex; align-items: flex-end; }
+.row-cards.row-ranged, .row-cards.row-siege { display: flex; align-items: center; }
 
 /* Weather hue overlays — tint the row background when its weather is
    active (frost on close, fog on ranged, rain on siege). Applied as a
