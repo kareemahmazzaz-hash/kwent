@@ -1815,8 +1815,9 @@ function RowHornCell({ board, rowKey }) {
 function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
+  const weathered = !!board.weather[rowKey];
   return (
-    <div className={"row-cards row-" + rowKey} style={{ "--row-accent": meta.color }}>
+    <div className={"row-cards row-" + rowKey + (weathered ? " row-weathered" : "")} style={{ "--row-accent": meta.color }}>
       {cardIds.length === 0 && <span className="row-empty">no units</span>}
       {cardIds.length > 0 && cardIds.map((id) => (
         <div key={id} className="row-card-slot">
@@ -3472,9 +3473,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-weather { color: #8fd0ff; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
-.horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
-.weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
+.horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 120%; height: 150%; margin: 15% 0 0 -5%; }
+.weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
+
+/* Weather hue overlays — tint the row background when its weather is
+   active (frost on close, fog on ranged, rain on siege). Painted as a
+   background-color under the cards (row-cards is already position:relative
+   with its own z-index, so this sits behind the card slots). */
+.row-cards.row-close.row-weathered   { background-color: rgba(150, 200, 235, 0.28); }  /* frost — light blue */
+.row-cards.row-ranged.row-weathered  { background-color: rgba(55, 58, 62, 0.4); }       /* fog — dark grey */
+.row-cards.row-siege.row-weathered   { background-color: rgba(180, 195, 215, 0.28); }   /* rain — light grey-blue */
+
 .row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
@@ -3486,7 +3496,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.weather-center-list { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; margin: auto; }
+.weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; margin: 13% auto auto auto; flex-direction: row; }
 .weather-clear { display: flex; justify-content: center; align-self: center; margin: 25% 0 0 0; opacity: 0.6; }
 
 /* Weather overlay: absolutely positioned on .board-frame instead of a td
@@ -3597,7 +3607,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .card-tile.card-just-played { animation: card-flash 1.1s ease-in-out 2; z-index: 2; }
 
 .passed-banner {
-  position: absolute; top: 6%; left: 5.5%; z-index: 5;
+  position: absolute; top: 6%; left: 2.5%; z-index: 5;
   background: rgba(120, 20, 20, 0.85); border: 1px solid var(--gold-dim); color: #f4ecd8;
   font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.04em; padding: 3px 12px; border-radius: 12px;
 }
