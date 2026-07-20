@@ -3474,16 +3474,23 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
 .horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 120%; height: 150%; margin: 15% 0 0 -5%; }
-.weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; }
-.row-cards { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
+.weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; height: 100%; }
+.row-cards { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: flex-start; width: 100%; height: 100%; overflow: hidden; }
 
 /* Weather hue overlays — tint the row background when its weather is
-   active (frost on close, fog on ranged, rain on siege). Painted as a
-   background-color under the cards (row-cards is already position:relative
-   with its own z-index, so this sits behind the card slots). */
-.row-cards.row-close.row-weathered   { background-color: rgba(150, 200, 235, 0.28); }  /* frost — light blue */
-.row-cards.row-ranged.row-weathered  { background-color: rgba(55, 58, 62, 0.4); }       /* fog — dark grey */
-.row-cards.row-siege.row-weathered   { background-color: rgba(180, 195, 215, 0.28); }   /* rain — light grey-blue */
+   active (frost on close, fog on ranged, rain on siege). Applied as a
+   ::before layer so it paints behind the card slots (which follow it in
+   DOM order) instead of washing over the card artwork itself. */
+.row-cards.row-weathered::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.row-cards.row-close.row-weathered::before   { background-color: rgba(150, 200, 235, 0.28); }  /* frost — light blue */
+.row-cards.row-ranged.row-weathered::before  { background-color: rgba(55, 58, 62, 0.4); }       /* fog — dark grey */
+.row-cards.row-siege.row-weathered::before   { background-color: rgba(180, 195, 215, 0.28); }   /* rain — light grey-blue */
 
 .row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
@@ -3496,7 +3503,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
-.weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; margin: 13% auto auto auto; flex-direction: row; }
+.weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; height: 67%; margin: 13% auto auto auto; flex-direction: row; }
 .weather-clear { display: flex; justify-content: center; align-self: center; margin: 25% 0 0 0; opacity: 0.6; }
 
 /* Weather overlay: absolutely positioned on .board-frame instead of a td
