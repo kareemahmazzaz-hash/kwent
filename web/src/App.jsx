@@ -337,9 +337,9 @@ const CARDS = [
 ];
 const LEADERS = [
 {id:"L01",name:"Eredin Br\u00e9acc Glas: The Treacherous",faction:"monsters",cardType:"Leader",ability:"Doubles the strength of all Spy cards (affects both players).",img:"Eredin Br\u00e9acc Glas% The Treacherous.png"},
-{id:"L02",name:"Eredin: Bringer of Death",faction:"monsters",cardType:"Leader",ability:"Dicard 2 draw 1",img:"Eredin% Bringer of Death.png"},
+{id:"L02",name:"Eredin: Bringer of Death",faction:"monsters",cardType:"Leader",ability:"Medic",img:"Eredin% Bringer of Death.png"},
 {id:"L03",name:"Eredin: Commander of the Red Riders",faction:"monsters",cardType:"Leader",ability:"Horn Close Combat",img:"Eredin% Commander of the Red Riders.png"},
-{id:"L04",name:"Eredin: Destroyer of Worlds",faction:"monsters",cardType:"Leader",ability:"Medic",img:"Eredin% Destroyer of Worlds.png"},
+{id:"L04",name:"Eredin: Destroyer of Worlds",faction:"monsters",cardType:"Leader",ability:"Discard 2 draw 1",img:"Eredin% Destroyer of Worlds.png"},
 {id:"L05",name:"Eredin: King of the Wild Hunt",faction:"monsters",cardType:"Leader",ability:"Pick any weather",img:"Eredin% King of the Wild Hunt.png"},
 {id:"L06",name:"Emhyr var Emreis: Emperor of Nilfgaard",faction:"nilfgaard",cardType:"Leader",ability:"Look at 3 Opp Cards",img:"Emhyr var Emreis% Emperor of Nilfgaard.png"},
 {id:"L07",name:"Emhyr var Emreis: His Imperial Majesty",faction:"nilfgaard",cardType:"Leader",ability:"Pick a Torrential Rain card directly from your deck and play it instantly.",img:"Emhyr var Emreis% His Imperial Majesty.png"},
@@ -874,7 +874,7 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
    -------------------------------------------------------------------- */
 
 function leaderNeedsOptions(leaderId) {
-  return leaderId === "L02" || leaderId === "L09"; // L02: discard 2, pick which. L09: pick a card from opp discard.
+  return leaderId === "L04" || leaderId === "L09"; // L04: discard 2, pick which. L09: pick a card from opp discard.
 }
 
 function resolveLeaderAbility(state, actingKey, options = {}) {
@@ -888,7 +888,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
   const log = [`${actor.name} activates ${leader.name}: ${leader.ability}`];
 
   switch (actor.leaderId) {
-    case "L02": { // Discard 2, draw 1
+    case "L04": { // Discard 2, draw 1
       const discardIds = (options.discardIds || []).filter((id) => actor.hand.includes(id)).slice(0, 2);
       ns = withPlayer(ns, actingKey, (p) => {
         const drawn = p.deck.slice(0, 1);
@@ -910,7 +910,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       }
       break;
     }
-    case "L04": { // Medic effect, instantly (as if a Medic unit were played, minus the body)
+    case "L02": { // Medic effect, instantly (as if a Medic unit were played, minus the body)
       const eligible = actor.discard.filter((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
       if (eligible.length) {
         const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (options.reviveId && eligible.includes(options.reviveId) ? options.reviveId : eligible[0]);
@@ -1472,7 +1472,7 @@ function computeAIAction(state, aiKey) {
 
   // Simple heuristic: fire the leader ability on the AI's first turn of the game.
   if (me.leaderId && !me.leaderUsed && !me.leaderBlocked && state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0) {
-    const options = me.leaderId === "L02" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
+    const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
     return { type: "USE_LEADER", player: aiKey, options };
   }
 
@@ -2249,7 +2249,7 @@ function PlayBoard({
   const confirmMedic = (reviveId) => { onPlayCard(pending.cardId, { reviveId }); setPending(null); };
 
   const startLeader = () => {
-    if (me.leaderId === "L02") return setPending({ kind: "leaderDiscard2", selected: [] });
+    if (me.leaderId === "L04") return setPending({ kind: "leaderDiscard2", selected: [] });
     if (me.leaderId === "L09" && opp.discard.some((id) => cardById(id)?.cardType !== "Hero")) return setPending({ kind: "leaderPickDiscard" });
     if (me.leaderId === "L05") {
       const seen = new Set();
