@@ -456,6 +456,7 @@ function emptyBoard() {
     close: [], ranged: [], siege: [],
     weather: { close: null, ranged: null, siege: null },
     horns: { close: 0, ranged: 0, siege: 0 },
+    hornCards: { close: [], ranged: [], siege: [] }, // cardIds of true Horn specials (not Dandelion) played per row, for display
     mardroeme: { close: false, ranged: false, siege: false },
     specials: [],
     halveWeather: false, // set true for a King Bran-led board — weather halves Strength on THIS board instead of flattening it to 1
@@ -701,12 +702,12 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       const rows = Array.isArray(card.abilityMeta.row) ? card.abilityMeta.row : [card.abilityMeta.row];
       ns = withPlayer(ns, actingKey, (p) => {
         const weather = { ...p.board.weather };
-        rows.forEach((r) => { weather[r] = { name: card.name }; });
+        rows.forEach((r) => { weather[r] = { name: card.name, cardId }; });
         return { ...p, board: { ...p.board, weather, specials: [...p.board.specials, { cardId, label: card.name }] } };
       });
       ns = withPlayer(ns, oppKey, (p) => {
         const weather = { ...p.board.weather };
-        rows.forEach((r) => { weather[r] = { name: card.name }; });
+        rows.forEach((r) => { weather[r] = { name: card.name, cardId }; });
         return { ...p, board: { ...p.board, weather } };
       });
       log.push(`${actor.name} plays ${card.name}, freezing both sides' ${rows.map((r) => ROW_META[r].label).join(" & ")} row to 1 power.`);
@@ -728,7 +729,8 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       const row = card.row || options.chosenRow; // Dandelion has a fixed row; Commander's Horn needs a choice
       ns = withPlayer(ns, actingKey, (p) => {
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
-        return { ...p, board: { ...board, horns: { ...board.horns, [row]: (board.horns[row] || 0) + 1 } } };
+        const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
+        return { ...p, board: { ...board, horns: { ...board.horns, [row]: (board.horns[row] || 0) + 1 }, hornCards } };
       });
       log.push(`${actor.name} plays ${card.name}, doubling their ${ROW_META[row].label} row.`);
       break;
@@ -919,7 +921,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       break;
     }
     case "L05": { // Horn on Close Combat, instantly
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, close: p.board.horns.close + 1 } } }));
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, close: p.board.horns.close + 1 }, hornCards: { ...p.board.hornCards, close: [...p.board.hornCards.close, "c049"] } } }));
       break;
     }
     case "L06": { // Look at 3 opponent cards (from their deck)
@@ -955,8 +957,8 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       break;
     }
     case "L11": { // Fog — Impenetrable Fog on both sides' Ranged row
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, ranged: { name: leader.name } } } }));
-      ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, ranged: { name: leader.name } } } }));
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, ranged: { name: leader.name, cardId: "c063" } } } }));
+      ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, ranged: { name: leader.name, cardId: "c063" } } } }));
       break;
     }
     case "L12": { // Clear Weather, instantly — affects both sides, since weather itself now does
@@ -973,7 +975,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       break;
     }
     case "L14": { // Horn on Siege, instantly
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, siege: p.board.horns.siege + 1 } } }));
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, siege: p.board.horns.siege + 1 }, hornCards: { ...p.board.hornCards, siege: [...p.board.hornCards.siege, "c049"] } } }));
       break;
     }
     case "L15": { // Scorch Siege if total >= 10
@@ -1004,8 +1006,8 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       break;
     }
     case "L18": { // Frost — Biting Frost on both sides' Close Combat row
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, close: { name: leader.name } } } }));
-      ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, close: { name: leader.name } } } }));
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, close: { name: leader.name, cardId: "c042" } } } }));
+      ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: { ...p.board, weather: { ...p.board.weather, close: { name: leader.name, cardId: "c042" } } } }));
       break;
     }
     case "L19": { // Francesca: Queen of Dol Blathanna — scorch Close Combat if total >= 10
@@ -1017,7 +1019,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       break;
     }
     case "L20": { // Horn on Ranged, instantly
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, ranged: p.board.horns.ranged + 1 } } }));
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, ranged: p.board.horns.ranged + 1 }, hornCards: { ...p.board.hornCards, ranged: [...p.board.hornCards.ranged, "c049"] } } }));
       break;
     }
     case "L21": { // Crach an Craite — shuffle both players' graveyards back into their decks
@@ -1788,14 +1790,22 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
   );
 }
 
-// "Horn card" cell — horn count + mardroeme markers for that row (per side).
+// "Horn card" cell — shows the actual Commander's Horn card art (per row,
+// per side) plus mardroeme markers. Dandelion doubles a row too, but since
+// it's a normal row unit (not a special), it never lands in hornCards —
+// its own card art already sits in the row itself, so this cell stays
+// empty for it, exactly like the request specifies.
 function RowHornCell({ board, rowKey }) {
-  const horns = board.horns[rowKey] || 0;
+  const hornCardIds = board.hornCards?.[rowKey] || [];
   const mardroeme = board.mardroeme[rowKey];
-  if (!horns && !mardroeme) return null;
+  if (!hornCardIds.length && !mardroeme) return null;
   return (
     <div className="row-markers">
-      {horns > 0 && <span className="marker marker-horn">🎺 ×{horns}</span>}
+      {hornCardIds.map((id, i) => (
+        <div key={id + "-" + i} className="horn-card-slot">
+          <CardTile card={cardById(id)} size="fit" />
+        </div>
+      ))}
       {mardroeme && <span className="marker marker-mardroeme">🍄</span>}
     </div>
   );
@@ -1828,12 +1838,14 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
 // in sync) instead of showing a per-side/per-row marker.
 function WeatherCenterCell({ board }) {
   const rows = ["siege", "ranged", "close"];
-  const active = rows.filter((r) => board.weather[r]);
-  if (active.length === 0) return <span className="hint weather-clear">Clear skies</span>;
+  const activeCardIds = [...new Set(rows.filter((r) => board.weather[r] && board.weather[r].cardId).map((r) => board.weather[r].cardId))];
+  if (activeCardIds.length === 0) return <span className="hint weather-clear">Clear skies</span>;
   return (
     <div className="weather-center-list">
-      {active.map((r) => (
-        <span key={r} className="marker marker-weather">❄ {ROW_META[r].label}: {board.weather[r].name}</span>
+      {activeCardIds.map((cid) => (
+        <div key={cid} className="weather-card-slot">
+          <CardTile card={cardById(cid)} size="fit" />
+        </div>
       ))}
     </div>
   );
@@ -3454,6 +3466,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-weather { color: #8fd0ff; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
+.horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
+.weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 100%; overflow: hidden; }
 .row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
@@ -3503,7 +3517,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
 .deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
 .discard-pile { display: flex; position: relative; flex: 0 0 auto; margin: 0; height: 100%; width: 48%; justify-content: center; }
-.discard-pile-back { position: absolute; top: 50%; right: 5.5%; transform: translateY(-50%); height: 12cqh; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+.discard-pile-back { position: absolute; top: 50%; right: 59.5%; transform: translateY(-50%); height: 12cqh; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
 .cell-pass-button { display: flex; align-items: center; justify-content: center; }
 
