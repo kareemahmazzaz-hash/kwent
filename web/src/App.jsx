@@ -338,9 +338,9 @@ const CARDS = [
 const LEADERS = [
 {id:"L01",name:"Eredin Br\u00e9acc Glas: The Treacherous",faction:"monsters",cardType:"Leader",ability:"Doubles the strength of all Spy cards (affects both players).",img:"Eredin Br\u00e9acc Glas% The Treacherous.png"},
 {id:"L02",name:"Eredin: Bringer of Death",faction:"monsters",cardType:"Leader",ability:"Dicard 2 draw 1",img:"Eredin% Bringer of Death.png"},
-{id:"L03",name:"Eredin: Commander of the Red Riders",faction:"monsters",cardType:"Leader",ability:"Pick any weather",img:"Eredin% Commander of the Red Riders.png"},
+{id:"L03",name:"Eredin: Commander of the Red Riders",faction:"monsters",cardType:"Leader",ability:"Horn Close Combat",img:"Eredin% Commander of the Red Riders.png"},
 {id:"L04",name:"Eredin: Destroyer of Worlds",faction:"monsters",cardType:"Leader",ability:"Medic",img:"Eredin% Destroyer of Worlds.png"},
-{id:"L05",name:"Eredin: King of the Wild Hunt",faction:"monsters",cardType:"Leader",ability:"Horn Close Combat",img:"Eredin% King of the Wild Hunt.png"},
+{id:"L05",name:"Eredin: King of the Wild Hunt",faction:"monsters",cardType:"Leader",ability:"Pick any weather",img:"Eredin% King of the Wild Hunt.png"},
 {id:"L06",name:"Emhyr var Emreis: Emperor of Nilfgaard",faction:"nilfgaard",cardType:"Leader",ability:"Look at 3 Opp Cards",img:"Emhyr var Emreis% Emperor of Nilfgaard.png"},
 {id:"L07",name:"Emhyr var Emreis: His Imperial Majesty",faction:"nilfgaard",cardType:"Leader",ability:"Pick a Torrential Rain card directly from your deck and play it instantly.",img:"Emhyr var Emreis% His Imperial Majesty.png"},
 {id:"L08",name:"Emhyr var Emreis: Invader of the North",faction:"nilfgaard",cardType:"Leader",ability:"Every revive ability, on both sides, brings back a random unit instead of a chosen one.",img:"Emhyr var Emreis% Invader of the North.png"},
@@ -901,7 +901,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       });
       break;
     }
-    case "L03": { // Pick any weather card from deck, play instantly
+    case "L05": { // Pick any weather card from deck, play instantly
       const weatherCards = actor.deck.filter((id) => cardById(id)?.ability === "weather");
       if (weatherCards.length) {
         const pick = options.weatherId && weatherCards.includes(options.weatherId) ? options.weatherId : weatherCards[0];
@@ -920,7 +920,7 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       }
       break;
     }
-    case "L05": { // Horn on Close Combat, instantly
+    case "L03": { // Horn on Close Combat, instantly
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, horns: { ...p.board.horns, close: p.board.horns.close + 1 }, hornCards: { ...p.board.hornCards, close: [...p.board.hornCards.close, "c049"] } } }));
       break;
     }
@@ -2251,6 +2251,18 @@ function PlayBoard({
   const startLeader = () => {
     if (me.leaderId === "L02") return setPending({ kind: "leaderDiscard2", selected: [] });
     if (me.leaderId === "L09" && opp.discard.some((id) => cardById(id)?.cardType !== "Hero")) return setPending({ kind: "leaderPickDiscard" });
+    if (me.leaderId === "L05") {
+      const seen = new Set();
+      const options = [];
+      me.deck.forEach((id) => {
+        const c = cardById(id);
+        if (c && c.ability === "weather") {
+          const key = c.name.replace(/\s*\(\d+\)$/, "");
+          if (!seen.has(key)) { seen.add(key); options.push(id); }
+        }
+      });
+      if (options.length) return setPending({ kind: "leaderPickWeather", options });
+    }
     onUseLeader({});
   };
   const toggleDiscardPick = (id) => {
@@ -2262,6 +2274,7 @@ function PlayBoard({
   };
   const confirmLeaderDiscard = () => { onUseLeader({ discardIds: pending.selected }); setPending(null); };
   const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
+  const confirmLeaderPickWeather = (weatherId) => { onUseLeader({ weatherId }); setPending(null); };
 
   const decoyTargets = pending?.kind === "decoy" ? ROWS.flatMap((r) => me.board[r].filter((id) => cardById(id)?.cardType !== "Hero" && cardById(id)?.row)) : [];
   const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
@@ -2533,6 +2546,19 @@ function PlayBoard({
             <div className="pool-grid">
               {opp.discard.filter((id) => cardById(id)?.cardType !== "Hero").map((id) => (
                 <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPick(id)} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pending?.kind === "leaderPickWeather" && (
+        <div className="overlay" onClick={() => setPending(null)}>
+          <div className="round-banner" onClick={(e) => e.stopPropagation()}>
+            <div className="ribbon">CHOOSE A WEATHER CARD</div>
+            <div className="pool-grid">
+              {pending.options.map((id) => (
+                <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPickWeather(id)} />
               ))}
             </div>
           </div>
