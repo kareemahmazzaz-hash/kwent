@@ -3478,6 +3478,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; height: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: flex-start; width: 100%; height: 100%; overflow: hidden; }
 .row-cards.row-close { display: flex; align-items: flex-end; }
+.cell-opp-close-row .row-cards.row-close { align-items: flex-start; }
 .row-cards.row-ranged, .row-cards.row-siege { display: flex; align-items: center; }
 
 /* Weather hue overlays — tint the row background when its weather is
