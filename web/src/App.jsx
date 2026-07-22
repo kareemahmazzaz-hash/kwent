@@ -2316,8 +2316,9 @@ function PlayBoard({
   const cancelDecoyOnStrayClick = () => { if (pending?.kind === "decoy") setPending(null); };
 
   return (
-    <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
+    <>
       {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
+      <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <TopBar
         p1={{ name: opponentName, wins: state.roundWins[opponentRole] }}
         p2={{ name: viewerName, wins: state.roundWins[viewerRole] }}
@@ -2615,7 +2616,8 @@ function PlayBoard({
       )}
 
       {showDiscard && <DiscardPanel cardIds={sortedMyDiscard} onClose={() => setShowDiscard(false)} />}
-    </div>
+      </div>
+    </>
   );
 }
 
