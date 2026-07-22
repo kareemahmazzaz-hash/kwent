@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { dbGet, dbSet } from "./firebase.js";
 
 /* =======================================================================
    KWENT PROTOTYPE — v3 (Hotseat + vs AI focus; Online kept but deferred to v4)
@@ -3025,21 +3026,10 @@ function metaKey(code) { return "kwent:" + code + ":meta"; }
 function playerKey(code, role) { return "kwent:" + code + ":" + role; }
 
 async function readJSON(key) {
-  try {
-    const res = await window.storage.get(key, true);
-    if (!res) return null;
-    return JSON.parse(res.value);
-  } catch (e) {
-    return null;
-  }
+  return dbGet(key);
 }
 async function writeJSON(key, value) {
-  try {
-    await window.storage.set(key, JSON.stringify(value), true);
-    return true;
-  } catch (e) {
-    return false;
-  }
+  return dbSet(key, value);
 }
 
 const EMPTY_META = {
@@ -3174,7 +3164,7 @@ function OnlineGame({ onExit }) {
     return (
       <div className="screen online-lobby">
         <h2 className="screen-title">Online</h2>
-        <p className="mulligan-hint">Prototype-grade online play: no server validation, just shared storage polling every ~1.5s. Keep both tabs open.</p>
+        <p className="mulligan-hint">Prototype-grade online play: no server validation, just a shared database polled every ~1.5s. Keep both tabs open.</p>
         <div className="lobby-actions">
           <button type="button" className="btn btn-gold btn-lg" onClick={hostGame}>Host a game</button>
           <div className="join-row">
@@ -3724,7 +3714,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 export default function App() {
   const [mode, setMode] = useState(null);
   const [resetKey, setResetKey] = useState(0);
-  const onlineAvailable = typeof window !== "undefined" && !!window.storage;
+  const onlineAvailable = true; // backed by Firebase Realtime Database now
 
   function exitToMenu() {
     setMode(null);
