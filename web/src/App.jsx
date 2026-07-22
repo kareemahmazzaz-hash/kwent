@@ -3343,6 +3343,11 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
   box-sizing: border-box;
   padding: 0;
   position: relative;
+  z-index: 0; /* Forces .gwent-root to form its own stacking context so
+                 .table-backdrop's negative z-index is scoped locally and
+                 actually sits behind gwent-root's content, instead of
+                 gwent-root (a positioned element) outranking it in an
+                 ancestor stacking context and hiding it entirely. */
   overflow-x: hidden;
 }
 .gwent-root *, .gwent-root *::before, .gwent-root *::after { box-sizing: border-box; }
