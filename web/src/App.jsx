@@ -327,7 +327,7 @@ const CARDS = [
 {id:"c208",name:"Clan Drummond Shield Maiden (3)",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan Drummond Shield Maiden3.png"},
 {id:"c209",name:"Clan Heymaey Skald",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Heymaey Skald.png"},
 {id:"c210",name:"Clan Tordarroch Armorsmith",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Tordarroch Armorsmith.png"},
-{id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Donar an Hindar.png"},
+{id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Donar an Hindar.png"},
 {id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"ranged",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Draig Bon-Dhu.png"},
 {id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Hero",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
 {id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Hjalmar.png"},
@@ -3029,8 +3029,48 @@ function AIGame({ onExit }) {
 function metaKey(code) { return "kwent:" + code + ":meta"; }
 function playerKey(code, role) { return "kwent:" + code + ":" + role; }
 
+/* Firebase Realtime Database has no real concept of an empty array or a
+   null leaf value — writing either one is treated as deleting that key.
+   So any field that starts out as [] (board.specials, board.hornCards.*,
+   discard, etc.) or null (board.weather.*) comes back from the database
+   as `undefined` once it round-trips, even though the local reducer always
+   guarantees an array/object there. Downstream code (e.g. PlayBoard's
+   flash-tracking effect, which does board.specials.map(...) unconditionally)
+   assumes the reducer's shape and crashes on that undefined — this is what
+   caused the online-only white screen right after mulligan. Patch the
+   shape back into every player object the instant it comes off the wire. */
+function normalizePlayer(p) {
+  if (!p) return p;
+  const b = p.board || {};
+  return {
+    ...p,
+    hand: p.hand || [],
+    deck: p.deck || [],
+    discard: p.discard || [],
+    board: {
+      ...emptyBoard(),
+      ...b,
+      close: b.close || [],
+      ranged: b.ranged || [],
+      siege: b.siege || [],
+      specials: b.specials || [],
+      weather: { close: null, ranged: null, siege: null, ...(b.weather || {}) },
+      horns: { close: 0, ranged: 0, siege: 0, ...(b.horns || {}) },
+      hornCards: {
+        close: (b.hornCards && b.hornCards.close) || [],
+        ranged: (b.hornCards && b.hornCards.ranged) || [],
+        siege: (b.hornCards && b.hornCards.siege) || [],
+      },
+      mardroeme: { close: false, ranged: false, siege: false, ...(b.mardroeme || {}) },
+    },
+  };
+}
+
 async function readJSON(key) {
   return dbGet(key);
+}
+async function readPlayerJSON(key) {
+  return normalizePlayer(await dbGet(key));
 }
 async function writeJSON(key, value) {
   return dbSet(key, value);
@@ -3066,8 +3106,8 @@ function OnlineGame({ onExit }) {
     if (pollRef.current) clearInterval(pollRef.current);
     const tick = async () => {
       const m = await readJSON(metaKey(code));
-      const mineData = await readJSON(playerKey(code, myRole));
-      const theirData = await readJSON(playerKey(code, myRole === "p1" ? "p2" : "p1"));
+      const mineData = await readPlayerJSON(playerKey(code, myRole));
+      const theirData = await readPlayerJSON(playerKey(code, myRole === "p1" ? "p2" : "p1"));
       if (m) setMeta(m);
       if (mineData) setMine(mineData);
       setTheirs(theirData);
@@ -3139,8 +3179,8 @@ function OnlineGame({ onExit }) {
   // shared reducer, write all three keys back, and update local state.
   async function applyAction(action) {
     const m = await readJSON(metaKey(roomCode));
-    const mineNow = await readJSON(playerKey(roomCode, role));
-    const theirsNow = await readJSON(playerKey(roomCode, oppRole));
+    const mineNow = await readPlayerJSON(playerKey(roomCode, role));
+    const theirsNow = await readPlayerJSON(playerKey(roomCode, oppRole));
     if (!m || !mineNow || !theirsNow) return;
     const full = composeState(m, mineNow, theirsNow, role, oppRole);
     const ns = gameReducer(full, action);
