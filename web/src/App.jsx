@@ -1600,7 +1600,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const clearHoverTimer = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
   const handleMouseEnter = () => {
     clearHoverTimer();
-    hoverTimer.current = setTimeout(() => setZoomed(true), 3000);
+    hoverTimer.current = setTimeout(() => setZoomed(true), 2000);
   };
   const handleMouseLeave = () => { clearHoverTimer(); }; // only cancels a pending (not-yet-triggered) zoom; an already-open zoom stays open until the person clicks away
 
@@ -2153,7 +2153,11 @@ function CoinFlipPanel({ coinFlip, myKey, oppName, myName, isMyCallTurn, onCall,
         <h2 className="screen-title">Coin toss</h2>
         <p className="mulligan-hint">{caller === myKey ? "You" : oppName} called <strong>{call}</strong>.</p>
         <div className={"coin" + (resolved ? " coin-landed" : "")} />
-        <button type="button" className="btn btn-gold btn-lg" onClick={onFlip}>Flip the coin</button>
+        {onFlip ? (
+          <button type="button" className="btn btn-gold btn-lg" onClick={onFlip}>Flip the coin</button>
+        ) : (
+          <p className="hint">Waiting for {oppName} to flip…</p>
+        )}
       </div>
     );
   }
@@ -3235,8 +3239,12 @@ function OnlineGame({ onExit }) {
       return <div className="screen online-lobby"><p className="mulligan-hint">Waiting for the host to call heads or tails…</p></div>;
     }
     if (!resolved) {
-      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={caller} myName={caller === role ? myName : oppName} oppName={caller === role ? oppName : myName}
-        onFlip={() => applyAction({ type: "COIN_FLIP" })} />;
+      // Only the non-caller flips — otherwise both clients could each roll their
+      // own independent Math.random() result and briefly disagree before the
+      // database catches up.
+      const iAmCaller = caller === role;
+      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={caller} myName={iAmCaller ? myName : oppName} oppName={iAmCaller ? oppName : myName}
+        onFlip={iAmCaller ? undefined : () => applyAction({ type: "COIN_FLIP" })} />;
     }
     if (starter === role) {
       return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={role} myName={myName} oppName={oppName}
