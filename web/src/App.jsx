@@ -60,6 +60,24 @@ const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/bluecro
 // frames, weather frame, badge plaques) — filenames have spaces, hence %20.
 const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
 
+// The `backgrounds` folder names files by faction matchup, e.g.
+// "me_nilfgaardian-opp_scoia'tael.jpg". Its faction keys don't match the
+// internal faction codes used elsewhere in state (e.g. "nilfgaard",
+// "northern_realms"), so this table translates state faction -> filename key.
+const FACTION_TO_BG_KEY = {
+  monsters: "monster",
+  nilfgaard: "nilfgaardian",
+  northern_realms: "northern",
+  scoiatael: "scoia'tael",
+  skellige: "skellige",
+};
+const tableBackdropSrc = (myFaction, oppFaction) => {
+  const me = FACTION_TO_BG_KEY[myFaction];
+  const opp = FACTION_TO_BG_KEY[oppFaction];
+  if (!me || !opp) return null;
+  return `${IMAGE_BASE_URL}backgrounds/${encodeURIComponent(`me_${me}-opp_${opp}.jpg`)}`;
+};
+
 /* ----------------------------- META ------------------------------------ */
 
 const FACTION_META = {
@@ -2231,10 +2249,18 @@ function PlayBoard({
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
 
+  // Computed unconditionally (not just while pending) so it can also gate
+  // whether Decoy is playable from hand at all — Decoy needs at least one
+  // of your own non-Hero row units on the board to swap with.
+  const decoyTargets = ROWS.flatMap((r) => me.board[r].filter((id) => cardById(id)?.cardType !== "Hero" && cardById(id)?.row));
+
   const startPlay = (id) => {
     const card = cardById(id);
     if (card.row === "agile") return setPending({ kind: "agile", cardId: id });
-    if (card.ability === "decoy") return setPending({ kind: "decoy", cardId: id });
+    if (card.ability === "decoy") {
+      if (!decoyTargets.length) return; // nothing on board to swap with — not playable
+      return setPending({ kind: "decoy", cardId: id });
+    }
     if (card.ability === "horn" && !card.row) return setPending({ kind: "horn", cardId: id });
     if (card.ability === "mardroeme" && !card.row) return setPending({ kind: "mardroeme", cardId: id });
     if (card.ability === "medic" && !me.forceRandomRevive) {
@@ -2276,11 +2302,22 @@ function PlayBoard({
   const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
   const confirmLeaderPickWeather = (weatherId) => { onUseLeader({ weatherId }); setPending(null); };
 
-  const decoyTargets = pending?.kind === "decoy" ? ROWS.flatMap((r) => me.board[r].filter((id) => cardById(id)?.cardType !== "Hero" && cardById(id)?.row)) : [];
   const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
 
+  const backdropSrc = tableBackdropSrc(me.faction, opp.faction);
+
+  // While Decoy is pending, clicking anywhere that isn't a valid target
+  // cancels it — same "click away to back out" behavior as the other
+  // pending choices (agile row / horn / mardroeme / medic), which use a
+  // dedicated overlay. Decoy's targets are live board cards rather than
+  // modal buttons, so instead this listens on the whole screen and relies
+  // on valid-target clicks already calling confirmDecoy (harmless if this
+  // also fires afterward, since cancelling an already-cleared pending is a no-op).
+  const cancelDecoyOnStrayClick = () => { if (pending?.kind === "decoy") setPending(null); };
+
   return (
-    <div className="screen play-board">
+    <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
+      {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url('${backdropSrc}')` }} />}
       <TopBar
         p1={{ name: opponentName, wins: state.roundWins[opponentRole] }}
         p2={{ name: viewerName, wins: state.roundWins[viewerRole] }}
@@ -2483,7 +2520,7 @@ function PlayBoard({
                   <CardTile
                     card={cardById(id)}
                     size="fit"
-                    disabled={!canAct || !isMyTurn || me.passed || !!pending}
+                    disabled={!canAct || !isMyTurn || me.passed || !!pending || (cardById(id)?.ability === "decoy" && !decoyTargets.length)}
                     onClick={() => startPlay(id)}
                   />
                 </div>
@@ -2509,7 +2546,7 @@ function PlayBoard({
       )}
 
       {pending?.kind === "decoy" && (
-        <div className="hint pending-hint">Pick one of your own units on the board to swap with Decoy.</div>
+        <div className="hint pending-hint">Pick one of your own units on the board to swap with Decoy. Click anywhere else to cancel.</div>
       )}
 
       {pending?.kind === "medic" && (
@@ -3308,6 +3345,18 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 }
 .gwent-root *, .gwent-root *::before, .gwent-root *::after { box-sizing: border-box; }
 html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
+
+/* Faction-matchup background image, rendered behind everything else in
+   .gwent-root. Fixed + inset:0 so it fills the full viewport even though
+   .screen itself is a narrow centered column. */
+.table-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
 
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
