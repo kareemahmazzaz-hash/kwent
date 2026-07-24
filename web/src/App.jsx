@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { dbGet, dbSet } from "./firebase.js";
+import { dbGet, dbSet, dbUpdate, dbListen } from "./firebase.js";
 
 /* =======================================================================
    KWENT PROTOTYPE — v3 (Hotseat + vs AI focus; Online kept but deferred to v4)
@@ -122,7 +122,7 @@ const CARDS = [
 {id:"c003",name:"Arachas (2)",faction:"monsters",power:4.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Arachas2.png"},
 {id:"c004",name:"Arachas (3)",faction:"monsters",power:4.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Arachas3.png"},
 {id:"c005",name:"Botchling",faction:"monsters",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Botchling.png"},
-{id:"c006",name:"Celaeno Harpy",faction:"monsters",power:2.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Celaeno Harpy.png"},
+{id:"c006",name:"Celaeno Harpy",faction:"monsters",power:2.0,row:"agile",cardType:"Basic",ability:null,abilityMeta:{},img:"Celaeno Harpy.png"},
 {id:"c007",name:"Cockatrice",faction:"monsters",power:2.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Cockatrice.png"},
 {id:"c008",name:"Crone: Brewess",faction:"monsters",power:6.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Crone% Brewess.png"},
 {id:"c009",name:"Crone: Weavess",faction:"monsters",power:6.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Crone% Weavess.png"},
@@ -441,6 +441,29 @@ function shuffle(arr) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+/* ============================ SAVED DECKS =============================
+   Persisted locally in the browser (per-device, not synced online) so
+   players can build a deck once and reuse it across sessions. */
+const SAVED_DECKS_KEY = "kwentSavedDecks";
+
+function loadSavedDecks() {
+  try {
+    const raw = localStorage.getItem(SAVED_DECKS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistSavedDecks(decks) {
+  try {
+    localStorage.setItem(SAVED_DECKS_KEY, JSON.stringify(decks));
+  } catch (e) {
+    // Storage unavailable (private browsing, quota, etc.) — fail silently.
+  }
 }
 
 function makeRoomCode() {
@@ -822,12 +845,32 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       }
       if (reviveId) {
         const reviveCard = cardById(reviveId);
-        ns = withPlayer(ns, actingKey, (p) => ({
-          ...p,
-          discard: p.discard.filter((id) => id !== reviveId),
-          board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
-        }));
-        log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} from the discard pile.`);
+        if (reviveCard.ability === "spy") {
+          // Reviving a Spy through Medic plays it exactly like a normal Spy:
+          // it goes on the OPPONENT's side, and the medic's controller still
+          // draws the usual 2 cards for it.
+          ns = withPlayer(ns, oppKey, (p) => ({
+            ...p,
+            board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
+          }));
+          ns = withPlayer(ns, actingKey, (p) => {
+            const drawn = p.deck.slice(0, 2);
+            return {
+              ...p,
+              discard: p.discard.filter((id) => id !== reviveId),
+              deck: p.deck.slice(2),
+              hand: [...p.hand, ...drawn],
+            };
+          });
+          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
+        } else {
+          ns = withPlayer(ns, actingKey, (p) => ({
+            ...p,
+            discard: p.discard.filter((id) => id !== reviveId),
+            board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
+          }));
+          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} from the discard pile.`);
+        }
       } else {
         log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
       }
@@ -934,8 +977,17 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       if (eligible.length) {
         const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (options.reviveId && eligible.includes(options.reviveId) ? options.reviveId : eligible[0]);
         const reviveCard = cardById(reviveId);
-        ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== reviveId), board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
-        log.push(`Revives ${reviveCard.name} from the discard pile.`);
+        if (reviveCard.ability === "spy") {
+          ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
+          ns = withPlayer(ns, actingKey, (p) => {
+            const drawn = p.deck.slice(0, 2);
+            return { ...p, discard: p.discard.filter((id) => id !== reviveId), deck: p.deck.slice(2), hand: [...p.hand, ...drawn] };
+          });
+          log.push(`Revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
+        } else {
+          ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== reviveId), board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
+          log.push(`Revives ${reviveCard.name} from the discard pile.`);
+        }
       }
       break;
     }
@@ -1978,9 +2030,11 @@ function cardMatchesAbilityFilter(card, filterKey) {
   return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
 }
 
-function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize }) {
+function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck }) {
   const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
+  const [deckName, setDeckName] = useState("");
+  const [selectedSavedDeck, setSelectedSavedDeck] = useState("");
   const pool = useMemo(() => poolForFaction(faction), [faction]);
   const availableFilterKeys = useMemo(() => new Set(pool.map((c) => c.ability).filter(Boolean)), [pool]);
   const activeFilters = useMemo(
@@ -2049,6 +2103,57 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
           </button>
         )}
       </div>
+
+      {onSaveDeck && (
+        <div className="saved-decks-row">
+          <input
+            className="search-input deck-name-input"
+            placeholder="Deck name…"
+            value={deckName}
+            onChange={(e) => setDeckName(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={!deckName.trim() || count < 1}
+            onClick={() => { if (onSaveDeck(deckName)) setDeckName(""); }}
+          >
+            💾 Save deck
+          </button>
+          {savedDecks && savedDecks.length > 0 && (
+            <>
+              <select
+                className="search-input saved-deck-select"
+                value={selectedSavedDeck}
+                onChange={(e) => setSelectedSavedDeck(e.target.value)}
+              >
+                <option value="">Load saved deck…</option>
+                {savedDecks.map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.name} ({FACTION_META[d.faction]?.label || d.faction})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={!selectedSavedDeck}
+                onClick={() => onLoadDeck(selectedSavedDeck)}
+              >
+                Load
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                disabled={!selectedSavedDeck}
+                onClick={() => { onDeleteDeck(selectedSavedDeck); setSelectedSavedDeck(""); }}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <input
         className="search-input"
@@ -2680,6 +2785,7 @@ function useDeckBuilderState() {
   const [faction, setFaction] = useState(FACTIONS[0]);
   const [selected, setSelected] = useState([]);
   const [leaderId, setLeaderId] = useState(null);
+  const [savedDecks, setSavedDecks] = useState(() => loadSavedDecks());
   function toggle(id) {
     setSelected((sel) => sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
   }
@@ -2692,7 +2798,34 @@ function useDeckBuilderState() {
     setSelected(randomDeckIds(faction));
     setLeaderId(randomLeaderId(faction));
   }
-  return { faction, setFaction: changeFaction, selected, toggle, leaderId, setLeaderId, randomize };
+  // Saves (or overwrites, if the name matches an existing save) the current
+  // faction/leader/card selection to localStorage. Returns true on success
+  // so the caller can e.g. clear a name input.
+  function saveDeck(name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return false;
+    const entry = { name: trimmed, faction, leaderId, deckIds: selected, savedAt: Date.now() };
+    const next = [...savedDecks.filter((d) => d.name !== trimmed), entry];
+    setSavedDecks(next);
+    persistSavedDecks(next);
+    return true;
+  }
+  function loadDeck(name) {
+    const found = savedDecks.find((d) => d.name === name);
+    if (!found) return;
+    setFaction(found.faction);
+    setSelected(found.deckIds);
+    setLeaderId(found.leaderId);
+  }
+  function deleteDeck(name) {
+    const next = savedDecks.filter((d) => d.name !== name);
+    setSavedDecks(next);
+    persistSavedDecks(next);
+  }
+  return {
+    faction, setFaction: changeFaction, selected, toggle, leaderId, setLeaderId, randomize,
+    savedDecks, saveDeck, loadDeck, deleteDeck,
+  };
 }
 
 function HotseatGame({ onExit }) {
@@ -2720,7 +2853,8 @@ function HotseatGame({ onExit }) {
   if (step === "deck1") {
     return <DeckBuilder playerLabel="Player 1" faction={builder1.faction} onFactionChange={builder1.setFaction}
       lockFaction={false} selectedIds={builder1.selected} onToggleCard={builder1.toggle}
-      leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} onRandomize={builder1.randomize} />;
+      leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} onRandomize={builder1.randomize}
+      savedDecks={builder1.savedDecks} onSaveDeck={builder1.saveDeck} onLoadDeck={builder1.loadDeck} onDeleteDeck={builder1.deleteDeck} />;
   }
   if (step === "gateTo2") {
     return <PassDeviceGate name="Player 2" onContinue={() => setStep("deck2")} />;
@@ -2728,7 +2862,8 @@ function HotseatGame({ onExit }) {
   if (step === "deck2") {
     return <DeckBuilder playerLabel="Player 2" faction={builder2.faction} onFactionChange={builder2.setFaction}
       lockFaction={false} selectedIds={builder2.selected} onToggleCard={builder2.toggle}
-      leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} onRandomize={builder2.randomize} />;
+      leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} onRandomize={builder2.randomize}
+      savedDecks={builder2.savedDecks} onSaveDeck={builder2.saveDeck} onLoadDeck={builder2.loadDeck} onDeleteDeck={builder2.deleteDeck} />;
   }
   if (!state) return null;
 
@@ -2922,7 +3057,8 @@ function AIGame({ onExit }) {
   if (step === "deck") {
     return <DeckBuilder playerLabel="You" faction={builder.faction} onFactionChange={builder.setFaction}
       lockFaction={false} selectedIds={builder.selected} onToggleCard={builder.toggle}
-      leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} onRandomize={builder.randomize} />;
+      leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} onRandomize={builder.randomize}
+      savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck} />;
   }
   if (!state) return null;
 
@@ -3028,6 +3164,7 @@ function AIGame({ onExit }) {
 
 function metaKey(code) { return "kwent:" + code + ":meta"; }
 function playerKey(code, role) { return "kwent:" + code + ":" + role; }
+function presenceKey(code, role) { return "kwent:" + code + ":presence:" + role; }
 
 /* Firebase Realtime Database has no real concept of an empty array or a
    null leaf value — writing either one is treated as deleting that key.
@@ -3087,6 +3224,9 @@ function composeState(meta, mine, theirs, role, oppRole) {
   return { ...meta, players: { [role]: mine, [oppRole]: theirs } };
 }
 
+const HEARTBEAT_INTERVAL_MS = 4000;
+const DISCONNECT_FORFEIT_MS = 15000;
+
 function OnlineGame({ onExit }) {
   const [phase, setPhase] = useState("choose"); // choose, deckbuild, waiting-deck, synced
   const [role, setRole] = useState(null); // p1 (host) | p2 (guest)
@@ -3096,34 +3236,79 @@ function OnlineGame({ onExit }) {
   const [meta, setMeta] = useState(null);
   const [mine, setMine] = useState(null);
   const [theirs, setTheirs] = useState(null);
+  const [oppDisconnected, setOppDisconnected] = useState(false);
   const builder = useDeckBuilderState();
-  const pollRef = useRef(null);
+  const listenersRef = useRef([]);
   const transitionGuard = useRef({});
+  const heartbeatRef = useRef(null);
+  const watchdogRef = useRef(null);
+  const theirLastSeenRef = useRef(null);
+  const forfeitFiredRef = useRef(false);
 
   const oppRole = role === "p1" ? "p2" : "p1";
 
-  const startPolling = useCallback((code, myRole) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    const tick = async () => {
-      const m = await readJSON(metaKey(code));
-      const mineData = await readPlayerJSON(playerKey(code, myRole));
-      const theirData = await readPlayerJSON(playerKey(code, myRole === "p1" ? "p2" : "p1"));
-      if (m) setMeta(m);
-      if (mineData) setMine(mineData);
-      setTheirs(theirData);
-    };
-    tick();
-    pollRef.current = setInterval(tick, 1500);
+  // Real-time subscriptions: each key pushes updates the instant the server
+  // sees a change, instead of waiting on a fixed polling interval.
+  const startListening = useCallback((code, myRole) => {
+    listenersRef.current.forEach((unsub) => unsub());
+    const otherRole = myRole === "p1" ? "p2" : "p1";
+    listenersRef.current = [
+      dbListen(metaKey(code), (m) => { if (m) setMeta(m); }),
+      dbListen(playerKey(code, myRole), (p) => { if (p) setMine(normalizePlayer(p)); }),
+      dbListen(playerKey(code, otherRole), (p) => { setTheirs(p ? normalizePlayer(p) : null); }),
+      dbListen(presenceKey(code, otherRole), (ts) => { theirLastSeenRef.current = ts; if (ts) setOppDisconnected(false); }),
+    ];
   }, []);
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => { listenersRef.current.forEach((unsub) => unsub()); }, []);
+
+  // Heartbeat: while in an active room, ping our own presence key every few
+  // seconds so the opponent's client can tell we're still connected.
+  useEffect(() => {
+    if (!roomCode || !role) return;
+    const ping = () => writeJSON(presenceKey(roomCode, role), Date.now());
+    ping();
+    heartbeatRef.current = setInterval(ping, HEARTBEAT_INTERVAL_MS);
+    return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
+  }, [roomCode, role]);
+
+  // Watchdog: once we've seen the opponent's presence at least once, if it
+  // goes stale for DISCONNECT_FORFEIT_MS, whoever notices first forfeits
+  // them by writing straight to meta (no need to run it through the reducer).
+  useEffect(() => {
+    if (!roomCode || !role) return;
+    forfeitFiredRef.current = false;
+    watchdogRef.current = setInterval(() => {
+      const lastSeen = theirLastSeenRef.current;
+      if (!lastSeen) return; // opponent hasn't connected yet — nothing to watch
+      const staleFor = Date.now() - lastSeen;
+      setOppDisconnected(staleFor > DISCONNECT_FORFEIT_MS);
+      if (staleFor <= DISCONNECT_FORFEIT_MS) return;
+      if (forfeitFiredRef.current) return;
+      if (!meta || meta.phase === "gameEnd") return;
+      forfeitFiredRef.current = true;
+      (async () => {
+        const freshMeta = await readJSON(metaKey(roomCode));
+        if (!freshMeta || freshMeta.phase === "gameEnd") return;
+        const newMeta = {
+          ...freshMeta,
+          phase: "gameEnd",
+          gameWinner: role,
+          log: [...freshMeta.log, `${oppRole === "p1" ? "Host" : "Guest"} disconnected for over 15s — forfeit.`],
+        };
+        await writeJSON(metaKey(roomCode), newMeta);
+        setMeta(newMeta);
+      })();
+    }, 2000);
+    return () => { if (watchdogRef.current) clearInterval(watchdogRef.current); };
+  }, [roomCode, role, meta, oppRole]);
 
   async function hostGame() {
     const code = makeRoomCode();
     await writeJSON(metaKey(code), { ...EMPTY_META, log: ["Room " + code + " created."], createdAt: Date.now() });
     setRoomCode(code);
     setRole("p1");
-    startPolling(code, "p1");
+    startListening(code, "p1");
     setPhase("deckbuild");
   }
 
@@ -3135,7 +3320,7 @@ function OnlineGame({ onExit }) {
     setJoinError("");
     setRoomCode(code);
     setRole("p2");
-    startPolling(code, "p2");
+    startListening(code, "p2");
     setPhase("deckbuild");
   }
 
@@ -3178,16 +3363,21 @@ function OnlineGame({ onExit }) {
   // Generic action dispatcher: compose full state fresh from storage, run the
   // shared reducer, write all three keys back, and update local state.
   async function applyAction(action) {
-    const m = await readJSON(metaKey(roomCode));
-    const mineNow = await readPlayerJSON(playerKey(roomCode, role));
-    const theirsNow = await readPlayerJSON(playerKey(roomCode, oppRole));
+    const [m, mineNow, theirsNow] = await Promise.all([
+      readJSON(metaKey(roomCode)),
+      readPlayerJSON(playerKey(roomCode, role)),
+      readPlayerJSON(playerKey(roomCode, oppRole)),
+    ]);
     if (!m || !mineNow || !theirsNow) return;
     const full = composeState(m, mineNow, theirsNow, role, oppRole);
     const ns = gameReducer(full, action);
     const { players, ...newMeta } = ns;
-    await writeJSON(metaKey(roomCode), newMeta);
-    await writeJSON(playerKey(roomCode, role), players[role]);
-    await writeJSON(playerKey(roomCode, oppRole), players[oppRole]);
+    const ok = await dbUpdate({
+      [metaKey(roomCode)]: newMeta,
+      [playerKey(roomCode, role)]: players[role],
+      [playerKey(roomCode, oppRole)]: players[oppRole],
+    });
+    if (!ok) return;
     setMeta(newMeta);
     setMine(players[role]);
     setTheirs(players[oppRole]);
@@ -3208,7 +3398,7 @@ function OnlineGame({ onExit }) {
     return (
       <div className="screen online-lobby">
         <h2 className="screen-title">Online</h2>
-        <p className="mulligan-hint">Prototype-grade online play: no server validation, just a shared database polled every ~1.5s. Keep both tabs open.</p>
+        <p className="mulligan-hint">Prototype-grade online play: no server validation, real-time synced via a shared database. Keep both tabs open.</p>
         <div className="lobby-actions">
           <button type="button" className="btn btn-gold btn-lg" onClick={hostGame}>Host a game</button>
           <div className="join-row">
@@ -3232,6 +3422,7 @@ function OnlineGame({ onExit }) {
           leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId}
           onConfirm={confirmDeckOnline}
           onRandomize={builder.randomize}
+          savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
         />
       </>
     );
@@ -3310,18 +3501,25 @@ function OnlineGame({ onExit }) {
   if (meta.phase === "play") {
     if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
     return (
-      <PlayBoard
-        state={composeState(meta, mine, theirs, role, oppRole)}
-        viewerRole={role}
-        opponentRole={oppRole}
-        viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
-        opponentName={role === "p1" ? "Guest" : "Host"}
-        isMyTurn={meta.turn === role}
-        canAct={meta.turn === role}
-        onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
-        onPass={() => applyAction({ type: "PASS", player: role })}
-        onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
-      />
+      <>
+        {oppDisconnected && (
+          <div className="disconnect-banner">
+            {(oppRole === "p1" ? "Host" : "Guest")} has disconnected — forfeiting the game if they don't reconnect…
+          </div>
+        )}
+        <PlayBoard
+          state={composeState(meta, mine, theirs, role, oppRole)}
+          viewerRole={role}
+          opponentRole={oppRole}
+          viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
+          opponentName={role === "p1" ? "Guest" : "Host"}
+          isMyTurn={meta.turn === role}
+          canAct={meta.turn === role}
+          onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
+          onPass={() => applyAction({ type: "PASS", player: role })}
+          onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
+        />
+      </>
     );
   }
 
@@ -3469,6 +3667,17 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .ability-filter-clear { opacity: 0.8; font-style: italic; }
 .pool-grid { display: flex; flex-wrap: wrap; gap: 7px; max-height: 46vh; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--line); }
 .deckbuilder-footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.saved-decks-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.deck-name-input { max-width: 180px; }
+.saved-deck-select { max-width: 220px; }
+.btn-danger { background: #6b1f1f; border-color: #8a2b2b; color: #f1d9d9; }
+.btn-danger:hover:not(:disabled) { background: #822828; }
+.disconnect-banner {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  background: #6b1f1f; color: #f6dede; border: 1px solid #a33; border-radius: 8px;
+  padding: 8px 16px; font-size: 0.85rem; font-weight: 600; z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
 .hint { color: var(--muted); font-size: 0.82rem; }
 .hint.error { color: #e08a8a; }
 
