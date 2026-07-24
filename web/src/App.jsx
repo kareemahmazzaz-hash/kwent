@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { dbGet, dbSet, dbUpdate, dbListen } from "./firebase.js";
+import { dbGet, dbSet, dbUpdate, dbListen, setNetBackend } from "./net.js";
+import { setLanServerUrl, getLastHello } from "./lan.js";
 
 /* =======================================================================
    KWENT PROTOTYPE — v3 (Hotseat + vs AI focus; Online kept but deferred to v4)
@@ -3242,12 +3243,21 @@ function composeState(meta, mine, theirs, role, oppRole) {
 const HEARTBEAT_INTERVAL_MS = 4000;
 const DISCONNECT_FORFEIT_MS = 15000;
 
+// LAN mode reuses whatever host:port served the page itself — both players
+// load index.html from the same lan-server, so its address is already
+// exactly the WebSocket relay address. No manual IP entry needed.
+function lanWsUrl() {
+  return (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
+}
+
 function OnlineGame({ onExit }) {
   const [phase, setPhase] = useState("choose"); // choose, deckbuild, waiting-deck, synced
   const [role, setRole] = useState(null); // p1 (host) | p2 (guest)
   const [roomCode, setRoomCode] = useState("");
   const [joinInput, setJoinInput] = useState("");
   const [joinError, setJoinError] = useState("");
+  const [netMode, setNetMode] = useState("internet"); // "internet" | "lan"
+  const [lanStatus, setLanStatus] = useState("idle"); // idle, connecting, error
   const [meta, setMeta] = useState(null);
   const [mine, setMine] = useState(null);
   const [theirs, setTheirs] = useState(null);
@@ -3318,7 +3328,26 @@ function OnlineGame({ onExit }) {
     return () => { if (watchdogRef.current) clearInterval(watchdogRef.current); };
   }, [roomCode, role, meta, oppRole]);
 
+  // Connects to whichever backend is currently selected before any db call
+  // is made. For LAN, both players loaded this page from the lan-server
+  // itself, so its own address doubles as the relay address.
+  async function connectBackend() {
+    setNetBackend(netMode);
+    if (netMode !== "lan") return true;
+    setLanStatus("connecting");
+    try {
+      await setLanServerUrl(lanWsUrl());
+      setLanStatus("idle");
+      return true;
+    } catch (e) {
+      setLanStatus("error");
+      setJoinError("Could not reach the LAN server. Is node server.js still running?");
+      return false;
+    }
+  }
+
   async function hostGame() {
+    if (!(await connectBackend())) return;
     const code = makeRoomCode();
     await writeJSON(metaKey(code), { ...EMPTY_META, log: ["Room " + code + " created."], createdAt: Date.now() });
     setRoomCode(code);
@@ -3328,6 +3357,7 @@ function OnlineGame({ onExit }) {
   }
 
   async function joinGame() {
+    if (!(await connectBackend())) return;
     const code = joinInput.trim().toUpperCase();
     if (!code) return;
     const m = await readJSON(metaKey(code));
@@ -3410,10 +3440,38 @@ function OnlineGame({ onExit }) {
   }, [metaPhase, metaRound]);
 
   if (phase === "choose") {
+    const lastHello = getLastHello();
     return (
       <div className="screen online-lobby">
         <h2 className="screen-title">Online</h2>
-        <p className="mulligan-hint">Prototype-grade online play: no server validation, real-time synced via a shared database. Keep both tabs open.</p>
+        <div className="net-mode-toggle" style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
+          <button
+            type="button"
+            className={"btn btn-sm" + (netMode === "internet" ? " btn-gold" : "")}
+            onClick={() => setNetMode("internet")}
+          >
+            Internet
+          </button>
+          <button
+            type="button"
+            className={"btn btn-sm" + (netMode === "lan" ? " btn-gold" : "")}
+            onClick={() => setNetMode("lan")}
+          >
+            LAN (no internet)
+          </button>
+        </div>
+        {netMode === "internet" ? (
+          <p className="mulligan-hint">Prototype-grade online play: no server validation, real-time synced via a shared database. Keep both tabs open.</p>
+        ) : (
+          <p className="mulligan-hint">
+            LAN mode: one player runs the local server (see lan-server/README.md in the repo), then both
+            players open that server's address in a browser on the same network — no internet needed.
+            {lastHello && lastHello.addresses && lastHello.addresses.length > 0 && (
+              <> Server address{lastHello.addresses.length > 1 ? "es" : ""}: <strong>{lastHello.addresses.map((a) => `${a}:${lastHello.port}`).join(", ")}</strong></>
+            )}
+          </p>
+        )}
+        {lanStatus === "connecting" && <p className="mulligan-hint">Connecting to LAN server…</p>}
         <div className="lobby-actions">
           <button type="button" className="btn btn-gold btn-lg" onClick={hostGame}>Host a game</button>
           <div className="join-row">
@@ -3559,7 +3617,7 @@ function OnlineGame({ onExit }) {
         <div className="round-banner gameover">
           <div className="ribbon">GAME OVER</div>
           <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
-          <button type="button" className="btn btn-gold" onClick={onExit}>Back to menu</button>
+          <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
         </div>
       </div>
     );
