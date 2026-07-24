@@ -1639,7 +1639,8 @@ function abilityDescriptionFor(card) {
 function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
-  const hoverTimer = useRef(null);
+  const isHovered = useRef(false);
+  const touchTimer = useRef(null);
   if (!card) return null;
   const fmeta = FACTION_META[card.faction] || FACTION_META.neutral;
   const rmeta = ROW_META[card.row];
@@ -1649,12 +1650,26 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
   const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
 
-  const clearHoverTimer = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
-  const handleMouseEnter = () => {
-    clearHoverTimer();
-    hoverTimer.current = setTimeout(() => setZoomed(true), 2000);
+  const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
+  // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
+  const handleMouseEnter = () => { isHovered.current = true; };
+  const handleMouseLeave = () => { isHovered.current = false; };
+  // Touch devices have no keyboard, so keep a long-press as the equivalent trigger.
+  const handleTouchStart = () => {
+    clearTouchTimer();
+    touchTimer.current = setTimeout(() => setZoomed(true), 500);
   };
-  const handleMouseLeave = () => { clearHoverTimer(); }; // only cancels a pending (not-yet-triggered) zoom; an already-open zoom stays open until the person clicks away
+  const handleTouchEnd = () => { clearTouchTimer(); };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.key === "i" || e.key === "I") && isHovered.current && !zoomed) {
+        setZoomed(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [zoomed]);
 
   return (
     <>
@@ -1674,8 +1689,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         aria-disabled={disabled || undefined}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        onTouchStart={handleMouseEnter}
-        onTouchEnd={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
         {src ? (
           <img
