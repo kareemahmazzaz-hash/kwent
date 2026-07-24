@@ -1,0 +1,13 @@
+{
+  "name": "kwent-lan-server",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local static file server + WebSocket relay so two browsers on the same network can play Kwent's Online Mode with zero internet access.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
