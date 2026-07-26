@@ -58,6 +58,17 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Board/board.jpg";
 const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Board/bluecrown.jpg";
 const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/bluecrown.jpg";
+// Top-bar "life gem" assets: backgem.png is the socket, always visible and
+// left behind even after a gem breaks; 1.png is the intact gem shown on top
+// of it; breaking.gif plays once (13 frames @100ms = 1300ms) over the socket
+// the instant a gem breaks, then gives way to the bare socket for good.
+const GEM_BACK_URL = IMAGE_BASE_URL + "Board/backgem.png";
+const GEM_BACK_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/backgem.png";
+const GEM_FRONT_URL = IMAGE_BASE_URL + "Board/1.png";
+const GEM_FRONT_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/1.png";
+const GEM_BREAK_URL = IMAGE_BASE_URL + "Board/breaking.gif";
+const GEM_BREAK_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/breaking.gif";
+const GEM_BREAK_ANIM_MS = 1300;
 // Board/*.jpg cell textures (leader frames, row/horn shelves, deck/discard
 // frames, weather frame, badge plaques) — filenames have spaces, hence %20.
 const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
@@ -1945,10 +1956,53 @@ function WeatherCenterCell({ board }) {
   );
 }
 
-function RoundPips({ wins }) {
+// A single gem socket. `broken` is the settled state (socket art only, gem
+// gone for good); `breaking` is true only for the brief window right after
+// a loss, while breaking.gif plays over the socket.
+function GemPip({ broken, breaking }) {
+  const [backStage, setBackStage] = useState(0);
+  const [frontStage, setFrontStage] = useState(0);
+  const [breakStage, setBreakStage] = useState(0);
+  const backSrc = backStage === 0 ? GEM_BACK_URL : GEM_BACK_FALLBACK_URL;
+  const frontSrc = frontStage === 0 ? GEM_FRONT_URL : GEM_FRONT_FALLBACK_URL;
+  const breakSrc = breakStage === 0 ? GEM_BREAK_URL : GEM_BREAK_FALLBACK_URL;
   return (
-    <span className="round-pips">
-      {[0, 1].map((i) => <span key={i} className={"pip" + (i < wins ? " pip-filled" : "")} />)}
+    <span className="gem-pip">
+      <img className="gem-img gem-back" src={backSrc} alt="" onError={() => setBackStage(1)} />
+      {!broken && !breaking && (
+        <img className="gem-img gem-front" src={frontSrc} alt="" onError={() => setFrontStage(1)} />
+      )}
+      {breaking && (
+        <img className="gem-img gem-crack" src={breakSrc} alt="" onError={() => setBreakStage(1)} />
+      )}
+    </span>
+  );
+}
+
+// Two life gems for one player. `losses` is how many rounds this player has
+// lost so far (0, 1, or 2) — the first loss breaks the left gem, the second
+// breaks the right gem and ends the game. Tracks the previous loss count so
+// only the gem that *just* broke plays the crack animation; anything broken
+// from an earlier round (or from loading mid-game) shows the settled socket
+// straightaway with no replay.
+function GemPair({ losses }) {
+  const prevLossesRef = useRef(losses);
+  const [breakingIdx, setBreakingIdx] = useState(null);
+  useEffect(() => {
+    const prev = prevLossesRef.current;
+    prevLossesRef.current = losses;
+    if (losses > prev) {
+      const idx = losses - 1;
+      setBreakingIdx(idx);
+      const t = setTimeout(() => setBreakingIdx((cur) => (cur === idx ? null : cur)), GEM_BREAK_ANIM_MS);
+      return () => clearTimeout(t);
+    }
+  }, [losses]);
+  return (
+    <span className="gem-pair">
+      {[0, 1].map((i) => (
+        <GemPip key={i} broken={i < losses && breakingIdx !== i} breaking={breakingIdx === i} />
+      ))}
     </span>
   );
 }
@@ -1958,14 +2012,14 @@ function TopBar({ p1, p2, round, turnLabel }) {
     <div className="top-bar">
       <div className="tb-side">
         <span className="tb-name">{p1.name}</span>
-        <RoundPips wins={p1.wins} />
+        <GemPair losses={p1.losses} />
       </div>
       <div className="tb-center">
         <span className="tb-round">ROUND {round}</span>
         <span className="tb-turn">{turnLabel}</span>
       </div>
       <div className="tb-side tb-side-right">
-        <RoundPips wins={p2.wins} />
+        <GemPair losses={p2.losses} />
         <span className="tb-name">{p2.name}</span>
       </div>
     </div>
@@ -2446,8 +2500,8 @@ function PlayBoard({
       {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <TopBar
-        p1={{ name: opponentName, wins: state.roundWins[opponentRole] }}
-        p2={{ name: viewerName, wins: state.roundWins[viewerRole] }}
+        p1={{ name: opponentName, losses: state.roundWins[viewerRole] }}
+        p2={{ name: viewerName, losses: state.roundWins[opponentRole] }}
         round={state.round}
         turnLabel={isMyTurn ? "Your turn" : `${opponentName}'s turn`}
       />
@@ -3784,9 +3838,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .tb-center { flex: 1; text-align: center; }
 .tb-round { display: block; font-family: var(--font-display); color: var(--gold); font-size: 0.85rem; letter-spacing: 0.08em; }
 .tb-turn { display: block; font-size: 0.75rem; color: var(--muted); }
-.round-pips { display: inline-flex; gap: 3px; }
-.pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--gold-dim); display: inline-block; }
-.pip-filled { background: var(--gold); }
+.gem-pair { display: inline-flex; gap: 5px; }
+.gem-pip { position: relative; display: inline-block; width: 28px; height: 23px; }
+.gem-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.gem-back { z-index: 0; }
+.gem-front { z-index: 1; }
+.gem-crack { z-index: 2; }
 
 /* boardls.png is the single full-board texture (both players' shelves +
    center divider) rendered once behind everything. .board-frame is a
