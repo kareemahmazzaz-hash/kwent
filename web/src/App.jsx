@@ -324,7 +324,7 @@ const CARDS = [
 {id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Donar an Hindar.png"},
 {id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"ranged",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Draig Bon-Dhu.png"},
 {id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Hero",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
-{id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Hjalmar.png"},
+{id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Hjalmar.png"},
 {id:"c216",name:"Holger Blackhand",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Holger Blackhand.png"},
 {id:"c217",name:"Kambi",faction:"skellige",power:0.0,row:"close",cardType:"Basic",ability:"summonAvenger",abilityMeta:{"summons": "Hemdall", "summonsId": "c236"},img:"Kambi.png"},
 {id:"c219",name:"Light Longship (1)",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Light Longship1.png"},
@@ -903,8 +903,18 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "summonAvenger":
     default: {
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
-      log.push(`${actor.name} plays ${card.name} (${ROW_META[targetRow]?.label || "?"}).`);
+      // Berserkers played into a row where Mardroeme is already active
+      // transform immediately on entry (not just units present at cast time).
+      const berserkerTarget = card.ability === "berserker" ? berserkerTransformTarget(card) : null;
+      ns = withPlayer(ns, actingKey, (p) => {
+        const landId = berserkerTarget && p.board.mardroeme[targetRow] ? berserkerTarget.id : cardId;
+        return { ...p, board: addToRow(p.board, targetRow, landId) };
+      });
+      log.push(
+        berserkerTarget && ns.players[actingKey].board[targetRow].slice(-1)[0] === berserkerTarget.id
+          ? `${actor.name} plays ${card.name} — it transforms into ${berserkerTarget.name} on arrival!`
+          : `${actor.name} plays ${card.name} (${ROW_META[targetRow]?.label || "?"}).`
+      );
       break;
     }
   }
@@ -3917,6 +3927,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-table td[rowspan="3"] { height: 18.75%; }
 
 .cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 65%; margin: 30% 0 0 17%; }
+.cell-opp-leader .card-art, .cell-my-leader .card-art { height: 137.5%; }
 
 /* ===== Board/*.jpg cell textures =====
    Portrait/icon assets (leader art, weather icon, deck/discard backs) are
@@ -4031,7 +4042,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   z-index: 1;
 }
 
-.cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
+.cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; position: relative; z-index: 2; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; }
 .hand-fit { display: flex; width: calc(100% - 13.5%); height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
 .hand-strip-cards:hover .hand-fit { margin-top: -30%; }
