@@ -73,24 +73,6 @@ const GEM_BREAK_ANIM_MS = 1300;
 // frames, weather frame, badge plaques) — filenames have spaces, hence %20.
 const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
 
-// The `backgrounds` folder names files by faction matchup, e.g.
-// "me_nilfgaardian-opp_scoia'tael.jpg". Its faction keys don't match the
-// internal faction codes used elsewhere in state (e.g. "nilfgaard",
-// "northern_realms"), so this table translates state faction -> filename key.
-const FACTION_TO_BG_KEY = {
-  monsters: "monster",
-  nilfgaard: "nilfgaardian",
-  northern_realms: "northern",
-  scoiatael: "scoia'tael",
-  skellige: "skellige",
-};
-const tableBackdropSrc = (myFaction, oppFaction) => {
-  const me = FACTION_TO_BG_KEY[myFaction];
-  const opp = FACTION_TO_BG_KEY[oppFaction];
-  if (!me || !opp) return null;
-  return `${IMAGE_BASE_URL}backgrounds/${encodeURIComponent(`me_${me}-opp_${opp}.jpg`)}`;
-};
-
 /* ----------------------------- META ------------------------------------ */
 
 const FACTION_META = {
@@ -2484,8 +2466,6 @@ function PlayBoard({
 
   const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
 
-  const backdropSrc = tableBackdropSrc(me.faction, opp.faction);
-
   // While Decoy is pending, clicking anywhere that isn't a valid target
   // cancels it — same "click away to back out" behavior as the other
   // pending choices (agile row / horn / mardroeme / medic), which use a
@@ -2497,7 +2477,6 @@ function PlayBoard({
 
   return (
     <>
-      {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <div className="board-frame">
         <div className="hand-strip-cards" style={{ position: "absolute", top: "-6.75%" }}>
@@ -3707,27 +3686,11 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
   box-sizing: border-box;
   padding: 0;
   position: relative;
-  z-index: 0; /* Forces .gwent-root to form its own stacking context so
-                 .table-backdrop's negative z-index is scoped locally and
-                 actually sits behind gwent-root's content, instead of
-                 gwent-root (a positioned element) outranking it in an
-                 ancestor stacking context and hiding it entirely. */
+  z-index: 0; /* Establishes its own stacking context. */
   overflow-x: hidden;
 }
 .gwent-root *, .gwent-root *::before, .gwent-root *::after { box-sizing: border-box; }
 html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
-
-/* Faction-matchup background image, rendered behind everything else in
-   .gwent-root. Fixed + inset:0 so it fills the full viewport even though
-   .screen itself is a narrow centered column. */
-.table-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background-size: cover;
-  background-position: center;
-  pointer-events: none;
-}
 
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
@@ -3829,7 +3792,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    (board rows, your hand, the opponent's card-back fan, deck/discard
    piles) is sized with plain %/aspect-ratio CSS — no JS measurement. */
 .play-board {
-  max-width: 100%; margin: 0 auto; padding: 6px 8px 8px;
+  max-width: 100%; margin: 0 auto; padding: 0;
   height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 4px;
   overflow: hidden; box-sizing: border-box;
 }
