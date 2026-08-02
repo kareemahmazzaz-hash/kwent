@@ -2025,7 +2025,7 @@ function DiscardPanel({ cardIds, onClose }) {
 
 function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gameWinnerName, hideButton, isTie }) {
   return (
-    <div className="overlay">
+    <div className="overlay overlay-clear">
       <div className="round-banner">
         <div className="ribbon">{isGameEnd ? "VICTORY" : "ROUND " + round + " COMPLETE"}</div>
         {score && (
@@ -2048,7 +2048,7 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
 function GameOverPanel({ state, onExit }) {
   const winnerName = state.gameWinner === "draw" ? null : state.players[state.gameWinner].name;
   return (
-    <div className="overlay">
+    <div className="overlay overlay-clear">
       <div className="round-banner gameover">
         <div className="ribbon">GAME OVER</div>
         <div className="banner-sub big">
@@ -3778,7 +3778,14 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ---- Pass gate / overlays / banners ---- */
 .overlay { position: fixed; inset: 0; background: rgba(6,7,4,0.86); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
-.round-banner { text-align: center; background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 34px 28px; max-width: 380px; }
+.overlay-clear { background: transparent; pointer-events: none; }
+.overlay-clear .round-banner { pointer-events: auto; }
+@keyframes bannerPop {
+  0% { transform: scale(0.7); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.round-banner { text-align: center; background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 34px 28px; max-width: 380px; animation: bannerPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .round-banner .ribbon { font-family: var(--font-display); letter-spacing: 0.14em; color: var(--gold); font-size: 1.1rem; margin-bottom: 14px; }
 .banner-score { font-family: var(--font-mono); font-size: 2.4rem; display: flex; gap: 14px; justify-content: center; align-items: center; margin-bottom: 10px; }
 .banner-score .vs { color: var(--muted); font-size: 1.2rem; }
@@ -3958,7 +3965,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; }
-.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; }
+.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
+.cell-my-hand:hover .hand-fit { margin-top: -30%; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; margin-left: 13.5%; }
