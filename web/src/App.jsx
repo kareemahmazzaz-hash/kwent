@@ -2499,13 +2499,6 @@ function PlayBoard({
     <>
       {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
-      <TopBar
-        p1={{ name: opponentName, losses: state.roundWins[viewerRole] }}
-        p2={{ name: viewerName, losses: state.roundWins[opponentRole] }}
-        round={state.round}
-        turnLabel={isMyTurn ? "Your turn" : `${opponentName}'s turn`}
-      />
-
       <div className="board-frame">
         <table className="board-table">
           <colgroup>
@@ -2567,7 +2560,10 @@ function PlayBoard({
 
             {/* Row 6: name, score, deck */}
             <tr>
-              <td rowSpan={2} colSpan={2} className="cell-opp-name"><span className="side-name">{opponentName}</span></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-name">
+                <span className="side-name">{opponentName}</span>
+                <GemPair losses={state.roundWins[viewerRole]} />
+              </td>
               <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></td>
               <td rowSpan={2} className="cell-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} hideCount /></td>
             </tr>
@@ -2614,7 +2610,10 @@ function PlayBoard({
 
             {/* Row 10: my name, score, my deck (moved up one row) */}
             <tr>
-              <td rowSpan={2} colSpan={2} className="cell-my-name"><span className="side-name">{viewerName}</span></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-name">
+                <span className="side-name">{viewerName}</span>
+                <GemPair losses={state.roundWins[opponentRole]} />
+              </td>
               <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></td>
               <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
@@ -3828,7 +3827,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    (board rows, your hand, the opponent's card-back fan, deck/discard
    piles) is sized with plain %/aspect-ratio CSS — no JS measurement. */
 .play-board {
-  max-width: 70%; margin: 0 auto; padding: 6px 8px 8px;
+  max-width: 100%; margin: 0 auto; padding: 6px 8px 8px;
   height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 4px;
   overflow: hidden; box-sizing: border-box;
 }
@@ -3838,9 +3837,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .tb-center { flex: 1; text-align: center; }
 .tb-round { display: block; font-family: var(--font-display); color: var(--gold); font-size: 0.85rem; letter-spacing: 0.08em; }
 .tb-turn { display: block; font-size: 0.75rem; color: var(--muted); }
-.gem-pair { display: inline-flex; gap: 5px; }
-.gem-pip { position: relative; display: inline-block; width: 28px; height: 23px; }
-.gem-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.gem-pair { display: inline-flex; gap: 5px; margin: -15% 0% 0 -12%; }
+.gem-pip { position: relative; display: inline-block; width: 6cqh; height: 5cqh; }
+.gem-img { position: absolute; inset: 0; width: 270%; height: 300%; object-fit: contain; pointer-events: none; margin: -60% 0 0 0%; }
 .gem-back { z-index: 0; }
 .gem-front { z-index: 1; }
 .gem-crack { z-index: 2; }
@@ -3925,7 +3924,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* Row label / horn / cards cells are plain <td> content now — no wrapper
    div needed, the <td> itself is the positioned box. */
-.row-label { position: relative; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
+.row-label { position: relative; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 95%; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-markers { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
 .marker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
@@ -3968,8 +3967,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-unused-badge { width: 75%; height: 75%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -40% 3%; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
-.side-name { font-family: var(--font-display); font-size: 60%; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.side-name { font-family: var(--font-display); font-size: 95%; color: var(--gold); letter-spacing: 0.04em; display: flex; justify-content: center; width: 100%; height: 30%; align-items: flex-start; }
+.score-badge { font-size: 135%; color: var(--gold); font-weight: 700; line-height: 1; display: flex; justify-content: center; width: 100%; height: 100%; align-items: flex-start; }
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; height: 67%; margin: 13% auto auto auto; flex-direction: row; }
@@ -3994,7 +3993,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 100%; }
-.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
+.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 10%; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; margin-left: 10%; }
@@ -4007,7 +4006,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; height: 90%; width: auto; aspect-ratio: 0.537 / 1; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
+.deck-count-standalone { font-family: var(--font-mono); font-size: 85%; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 18%; width: 100%; height: 100%; }
 .discard-pile { display: flex; position: relative; flex: 0 0 auto; margin: 0; height: 100%; width: 48%; justify-content: center; }
 .discard-pile-back { position: absolute; top: 50%; right: 59.5%; transform: translateY(-50%); height: 12cqh; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
