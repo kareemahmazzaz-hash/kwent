@@ -2500,6 +2500,9 @@ function PlayBoard({
       {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <div className="board-frame">
+        <div className="hand-strip-cards" style={{ position: "absolute", top: "-6.75%" }}>
+          <CardBackStack count={opp.hand.length} faction={opp.faction} />
+        </div>
         <table className="board-table">
           <colgroup>
             <col style={{ width: "10%" }} />
@@ -2512,17 +2515,16 @@ function PlayBoard({
             <col style={{ width: "20%" }} />
           </colgroup>
           <tbody>
-            {/* Row 1: 3 empty (col1-3), opp hand (col4-8, rowspan2) */}
+            {/* Row 1: 3 empty (col1-3), opp hand cell now empty — hand-strip-cards
+                moved out of the table to an absolutely-positioned sibling of
+                .board-frame (rendered before <table>) so it no longer occupies
+                table flow / rowspan. */}
             <tr>
               <td colSpan={3}></td>
-              <td colSpan={5} rowSpan={2} className="cell-opp-hand" style={{ width: "4100%" }}>
-                <div className="hand-strip-cards">
-                  <CardBackStack count={opp.hand.length} faction={opp.faction} />
-                </div>
-              </td>
+              <td></td>
             </tr>
 
-            {/* Row 2: opp pass status (col1-3); col4-8 covered by row1 rowspan */}
+            {/* Row 2: opp pass status (col1-3); col4-8 no longer covered by a rowspan */}
             <tr>
               <td colSpan={3} className="cell-opp-pass-status">
                 {opp.passed && <div className="passed-banner">Passed</div>}
@@ -3972,7 +3974,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; height: 67%; margin: 13% auto auto auto; flex-direction: row; }
-.weather-clear { display: flex; justify-content: center; align-self: center; margin: 25% 0 0 0; opacity: 0.6; }
+.weather-clear { display: flex; justify-content: center; align-self: center; margin: 30% 0 0 0; opacity: 0.6; }
 
 /* Weather overlay: absolutely positioned on .board-frame instead of a td
    background, so it can be placed/sized independently of the table's
@@ -3992,12 +3994,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 .cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
-.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 100%; }
-.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 10%; }
+.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; }
+.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
-.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; margin-left: 10%; }
-.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; margin-top: -12%; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; margin-left: 13.5%; }
+.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-top: -12.5%; }
 .card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
