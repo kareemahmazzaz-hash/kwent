@@ -3022,21 +3022,36 @@ function HotseatGame({ onExit }) {
     );
   }
 
-  if (state.phase === "roundEnd") {
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+    const me = state.turn;
+    const opp = otherKey(me);
+    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
-      <RoundBanner
-        round={state.round}
-        score={state.lastRoundScore}
-        isTie={isTie}
-        roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? state.players.p1.name : state.players.p2.name)}
-        onContinue={() => { setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" })); setRevealedTurn(null); }}
-      />
+      <>
+        <PlayBoard
+          state={state}
+          viewerRole={me}
+          opponentRole={opp}
+          viewerName={state.players[me].name}
+          opponentName={state.players[opp].name}
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {state.phase === "roundEnd" && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? state.players.p1.name : state.players.p2.name)}
+            onContinue={() => { setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" })); setRevealedTurn(null); }}
+          />
+        )}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} />}
+      </>
     );
-  }
-
-  if (state.phase === "gameEnd") {
-    return <GameOverPanel state={state} onExit={onExit} />;
   }
 
   return null;
@@ -3181,21 +3196,34 @@ function AIGame({ onExit }) {
     );
   }
 
-  if (state.phase === "roundEnd") {
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
-      <RoundBanner
-        round={state.round}
-        score={state.lastRoundScore}
-        isTie={isTie}
-        roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
-        onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
-      />
+      <>
+        <PlayBoard
+          state={state}
+          viewerRole="p1"
+          opponentRole="p2"
+          viewerName="You"
+          opponentName="AI Opponent"
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {state.phase === "roundEnd" && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
+            onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
+          />
+        )}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} />}
+      </>
     );
-  }
-
-  if (state.phase === "gameEnd") {
-    return <GameOverPanel state={state} onExit={onExit} />;
   }
 
   return null;
@@ -3630,30 +3658,55 @@ function OnlineGame({ onExit }) {
     );
   }
 
-  if (meta.phase === "roundEnd") {
-    const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
-    const p2s = meta.lastRoundScore ? meta.lastRoundScore.p2 : 0;
-    const isTie = p1s === p2s;
-    let winnerName = null;
-    if (!isTie) {
-      const p1Won = p1s > p2s;
-      const iAmP1 = role === "p1";
-      winnerName = p1Won === iAmP1 ? "You" : "Opponent";
-    }
-    return <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton />;
-  }
+  if (meta.phase === "roundEnd" || meta.phase === "gameEnd") {
+    if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
 
-  if (meta.phase === "gameEnd") {
-    const iWon = meta.gameWinner === role;
-    const isDraw = meta.gameWinner === "draw";
-    return (
-      <div className="overlay">
-        <div className="round-banner gameover">
-          <div className="ribbon">GAME OVER</div>
-          <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
-          <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+    let roundBannerEl = null;
+    if (meta.phase === "roundEnd") {
+      const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
+      const p2s = meta.lastRoundScore ? meta.lastRoundScore.p2 : 0;
+      const isTie = p1s === p2s;
+      let winnerName = null;
+      if (!isTie) {
+        const p1Won = p1s > p2s;
+        const iAmP1 = role === "p1";
+        winnerName = p1Won === iAmP1 ? "You" : "Opponent";
+      }
+      roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton />;
+    }
+
+    let gameOverEl = null;
+    if (meta.phase === "gameEnd") {
+      const iWon = meta.gameWinner === role;
+      const isDraw = meta.gameWinner === "draw";
+      gameOverEl = (
+        <div className="overlay overlay-clear">
+          <div className="round-banner gameover">
+            <div className="ribbon">GAME OVER</div>
+            <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
+            <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+          </div>
         </div>
-      </div>
+      );
+    }
+
+    return (
+      <>
+        <PlayBoard
+          state={composeState(meta, mine, theirs, role, oppRole)}
+          viewerRole={role}
+          opponentRole={oppRole}
+          viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
+          opponentName={role === "p1" ? "Guest" : "Host"}
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {roundBannerEl}
+        {gameOverEl}
+      </>
     );
   }
 
@@ -3966,7 +4019,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
-.cell-my-hand:hover .hand-fit { margin-top: -30%; }
+.hand-strip-cards:hover .hand-fit { margin-top: -30%; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
 .hand-card-slot:first-child { margin-left: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; margin-left: 13.5%; }
