@@ -2675,7 +2675,22 @@ function PlayBoard({
           {me.hand.length === 0 ? (
             <span className="hint">No cards left.</span>
           ) : (
-            <div className="hand-fit">
+            <div
+              className="hand-fit"
+              style={(() => {
+                const slotWidthPct = 9;   // must match .hand-card-slot width
+                const baseMarginPct = -1; // default overlap (matches old fixed value)
+                const n = sortedHand.length;
+                let overlapPct = baseMarginPct;
+                if (n > 1) {
+                  const naturalTotal = slotWidthPct * n + baseMarginPct * (n - 1);
+                  if (naturalTotal > 100) {
+                    overlapPct = (100 - slotWidthPct * n) / (n - 1);
+                  }
+                }
+                return { "--hand-overlap": `${overlapPct}%` };
+              })()}
+            >
               {sortedHand.map((id) => (
                 <div key={id} className="hand-card-slot">
                   <CardTile
@@ -4020,7 +4035,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; }
 .hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
 .hand-strip-cards:hover .hand-fit { margin-top: -30%; }
-.hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
+.hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: var(--hand-overlap, -1%); }
 .hand-card-slot:first-child { margin-left: 0; }
 .card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; margin-left: 13.5%; }
 .card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-top: -12.5%; }
