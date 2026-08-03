@@ -2658,7 +2658,7 @@ function PlayBoard({
                 <span className="side-name">{opponentName}</span>
                 <GemPair losses={state.roundWins[viewerRole]} />
               </td>
-              <td rowSpan={2} className="cell-opp-score"><span className={"score-badge score-opp" + (oppTotal > myTotal ? " score-leading" : "")}>{oppTotal}</span></td>
+              <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp"><span className={oppTotal > myTotal ? "score-leading" : ""}>{oppTotal}</span></span></td>
               <td rowSpan={2} className="cell-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} hideCount /></td>
             </tr>
 
@@ -2708,7 +2708,7 @@ function PlayBoard({
                 <span className="side-name">{viewerName}</span>
                 <GemPair losses={state.roundWins[opponentRole]} />
               </td>
-              <td rowSpan={2} className="cell-my-score"><span className={"score-badge score-me" + (myTotal > oppTotal ? " score-leading" : "")}>{myTotal}</span></td>
+              <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me"><span className={myTotal > oppTotal ? "score-leading" : ""}>{myTotal}</span></span></td>
               <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
 
@@ -4181,12 +4181,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .side-name { font-family: var(--font-display); font-size: 95%; color: var(--gold); letter-spacing: 0.04em; display: flex; justify-content: center; width: 100%; height: 30%; align-items: flex-start; }
 .score-badge { font-size: 135%; color: var(--gold); font-weight: 700; line-height: 1; display: flex; justify-content: center; width: 100%; height: 100%; align-items: flex-start; }
 .score-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7em;
+  min-height: 1.7em;
+  padding: 0 0.15em;
+  box-sizing: border-box;
   color: #1a1206;
   background: radial-gradient(ellipse at center, #ffe27a 0%, #ffb930 70%, #d98c0f 100%);
   border-radius: 50%;
   box-shadow: 0 0 0 3px #ffdd7a, 0 0 18px 4px rgba(255, 200, 60, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.6);
-  transform: scale(1.35);
-  font-size: 115%;
+  font-size: 90%;
   animation: score-leading-pulse 1.6s ease-in-out infinite;
 }
 @keyframes score-leading-pulse {
