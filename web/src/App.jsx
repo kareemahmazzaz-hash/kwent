@@ -2768,7 +2768,7 @@ function PlayBoard({
 
             {/* Row 16: pass button, positioned via inline style */}
             <tr>
-              <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-30% 0 0 85%" }}>
+              <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-37.5% 0 0 115%" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
                   <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
                     {me.passed ? "You passed" : "Pass"}
@@ -3928,6 +3928,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .btn-pass:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-forfeit {
   position: relative;
+  white-space: nowrap;
   overflow: hidden;
   font-family: var(--font-display);
   background: #1c1a1a;
@@ -3936,7 +3937,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   padding: 6px 16px;
   border-radius: 18px;
   cursor: pointer;
-  font-size: 90%;
+  font-size: 85%;
   user-select: none;
   touch-action: none;
   transition: color 0.15s, border-color 0.15s;
