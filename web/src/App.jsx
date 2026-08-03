@@ -3763,7 +3763,7 @@ function OnlineGame({ onExit }) {
       // own independent Math.random() result and briefly disagree before the
       // database catches up.
       const iAmCaller = caller === role;
-      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={caller} myName={iAmCaller ? myName : oppName} oppName={iAmCaller ? oppName : myName}
+      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={role} myName={myName} oppName={oppName}
         onFlip={iAmCaller ? undefined : () => applyAction({ type: "COIN_FLIP" })} />;
     }
     if (starter === role) {
