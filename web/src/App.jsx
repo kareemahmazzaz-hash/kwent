@@ -494,6 +494,7 @@ function emptyBoard() {
     horns: { close: 0, ranged: 0, siege: 0 },
     hornCards: { close: [], ranged: [], siege: [] }, // cardIds of true Horn specials (not Dandelion) played per row, for display
     mardroeme: { close: false, ranged: false, siege: false },
+    mardroemeCards: { close: [], ranged: [], siege: [] }, // cardIds of true Mardroeme specials (not Ermion) played per row, for display
     specials: [],
     halveWeather: false, // set true for a King Bran-led board — weather halves Strength on THIS board instead of flattening it to 1
   };
@@ -763,6 +764,10 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "horn": {
       const row = card.row || options.chosenRow; // Dandelion has a fixed row; Commander's Horn needs a choice
+      // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
+      // mutually exclusive per row, same as real Gwent. The UI already blocks this pick, but guard
+      // here too in case of stale state.
+      if (state.players[actingKey].board.mardroeme[row]) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
@@ -773,15 +778,18 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "mardroeme": {
       const row = card.row || options.chosenRow; // Ermion has a fixed row; Mardroeme (special) needs a choice
+      // Same mutual exclusion as above, the other direction.
+      if (state.players[actingKey].board.horns[row] > 0) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         let board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const transformedRow = board[row].map((id) => {
           const target = berserkerTransformTarget(cardById(id));
           return target ? target.id : id;
         });
+        const mardroemeCards = card.row ? board.mardroemeCards : { ...board.mardroemeCards, [row]: [...board.mardroemeCards[row], cardId] };
         return {
           ...p,
-          board: { ...board, [row]: transformedRow, mardroeme: { ...board.mardroeme, [row]: true } },
+          board: { ...board, [row]: transformedRow, mardroeme: { ...board.mardroeme, [row]: true }, mardroemeCards },
         };
       });
       log.push(`${actor.name} plays Mardroeme — Berserkers in ${ROW_META[row].label} transform!`);
@@ -1332,6 +1340,18 @@ function gameReducer(state, action) {
     case "CONTINUE_ROUND":
       return startNextRound(state);
 
+    case "FORFEIT": {
+      const winnerKey = otherKey(action.player);
+      const roundWins = { ...state.roundWins, [winnerKey]: 2 };
+      return {
+        ...state,
+        phase: "gameEnd",
+        roundWins,
+        gameWinner: winnerKey,
+        log: [...state.log, `${state.players[action.player].name} forfeits — ${state.players[winnerKey].name} wins the game!`],
+      };
+    }
+
     default:
       return state;
   }
@@ -1524,10 +1544,15 @@ const LEADER_PRIORITY = {
 
 function chooseAiDeck(aiFaction) {
   const pool = poolForFaction(aiFaction);
+  const isUnit = (c) => c.cardType === "Basic" || c.cardType === "Hero";
   const scored = pool
     .map((c) => ({ card: c, value: evaluateCardBaseValue(c) + Math.random() * 1.5 })) // small jitter so it's not identical every game
     .sort((a, b) => b.value - a.value);
-  const deckIds = scored.slice(0, DECK_SIZE).map((s) => s.card.id);
+  // The 22 minimum only counts unit cards now — take the top 22 units, then round
+  // out the deck with the best non-unit specials (weather, horns, decoys, etc.).
+  const unitIds = scored.filter((s) => isUnit(s.card)).slice(0, DECK_SIZE).map((s) => s.card.id);
+  const specialIds = scored.filter((s) => !isUnit(s.card)).slice(0, 6).map((s) => s.card.id);
+  const deckIds = [...unitIds, ...specialIds];
 
   const leaders = leadersForFaction(aiFaction);
   const priority = LEADER_PRIORITY[aiFaction] || leaders.map((l) => l.id);
@@ -1887,16 +1912,20 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
 // empty for it, exactly like the request specifies.
 function RowHornCell({ board, rowKey }) {
   const hornCardIds = board.hornCards?.[rowKey] || [];
-  const mardroeme = board.mardroeme[rowKey];
-  if (!hornCardIds.length && !mardroeme) return null;
+  const mardroemeCardIds = board.mardroemeCards?.[rowKey] || [];
+  if (!hornCardIds.length && !mardroemeCardIds.length) return null;
   return (
     <div className="row-markers">
       {hornCardIds.map((id, i) => (
-        <div key={id + "-" + i} className="horn-card-slot">
+        <div key={"h-" + id + "-" + i} className="horn-card-slot">
           <CardTile card={cardById(id)} size="fit" />
         </div>
       ))}
-      {mardroeme && <span className="marker marker-mardroeme">🍄</span>}
+      {mardroemeCardIds.map((id, i) => (
+        <div key={"m-" + id + "-" + i} className="horn-card-slot mardroeme-card-slot">
+          <CardTile card={cardById(id)} size="fit" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -2120,8 +2149,12 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
   const leaders = useMemo(() => leadersForFaction(faction), [faction]);
   const count = selectedIds.length;
+  const unitCount = useMemo(
+    () => selectedIds.filter((id) => { const c = cardById(id); return c && (c.cardType === "Basic" || c.cardType === "Hero"); }).length,
+    [selectedIds]
+  );
   const needsLeader = leaders.length > 0;
-  const canConfirm = count >= DECK_SIZE && (!needsLeader || !!leaderId);
+  const canConfirm = unitCount >= DECK_SIZE && (!needsLeader || !!leaderId);
 
   return (
     <div className="screen deckbuilder">
@@ -2158,7 +2191,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       </div>
 
       <div className="deck-count">
-        Selected: <strong>{count}</strong> / {DECK_SIZE} minimum
+        Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards
         {onRandomize && (
           <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
             🎲 Random deck
@@ -2261,7 +2294,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         <button type="button" className="btn btn-gold btn-lg" disabled={!canConfirm} onClick={onConfirm}>
           {busyLabel || "Confirm deck"}
         </button>
-        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} cards{needsLeader ? " and a leader" : ""}.</span>}
+        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count){needsLeader ? " and a leader" : ""}.</span>}
       </div>
     </div>
   );
@@ -2378,9 +2411,74 @@ function PassDeviceGate({ name, onContinue }) {
    an Agile unit / Commander's Horn / Mardroeme, which board card a Decoy
    swaps for, which discard-pile card a Medic revives) before dispatching
    the actual PLAY_CARD action with those options attached. */
+const FORFEIT_HOLD_MS = 3000;
+
+/* Press-and-hold forfeit button: has to be held for FORFEIT_HOLD_MS straight,
+   with a visible fill so it's obvious the hold is registering (and can't be
+   triggered by a stray click). Releasing early cancels and resets. */
+function HoldToForfeitButton({ onForfeit, disabled }) {
+  const [holding, setHolding] = useState(false);
+  const [progress, setProgress] = useState(0); // 0-100
+  const rafRef = useRef(null);
+  const startRef = useRef(null);
+  const doneRef = useRef(false);
+
+  const stop = () => {
+    setHolding(false);
+    setProgress(0);
+    doneRef.current = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  };
+
+  const tick = () => {
+    const elapsed = Date.now() - startRef.current;
+    const pct = Math.min(100, (elapsed / FORFEIT_HOLD_MS) * 100);
+    setProgress(pct);
+    if (pct >= 100) {
+      if (!doneRef.current) {
+        doneRef.current = true;
+        onForfeit && onForfeit();
+      }
+      stop();
+      return;
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const start = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    setHolding(true);
+    startRef.current = Date.now();
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  if (!onForfeit) return null;
+
+  return (
+    <button
+      type="button"
+      className={"btn btn-forfeit" + (holding ? " holding" : "")}
+      disabled={disabled}
+      style={{ "--forfeit-progress": progress + "%" }}
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      title="Hold for 3 seconds to forfeit the game"
+    >
+      <span className="forfeit-fill" />
+      <span className="forfeit-label">{holding ? "Hold to forfeit…" : "Forfeit"}</span>
+    </button>
+  );
+}
+
 function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
-  isMyTurn, onPlayCard, onPass, onUseLeader, canAct, opponentThinking,
+  isMyTurn, onPlayCard, onPass, onForfeit, onUseLeader, canAct, opponentThinking,
 }) {
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
@@ -2389,6 +2487,8 @@ function PlayBoard({
   const myLeader = cardById(me.leaderId);
   const oppLeader = cardById(opp.leaderId);
   const spyDoubled = matchHasLeader(state, "L01");
+  const myTotal = boardTotal(me.board, spyDoubled);
+  const oppTotal = boardTotal(opp.board, spyDoubled);
 
   // Track the most recently played card on each side so it can be flash-highlighted —
   // makes it obvious what the opponent (or AI) just did, since turns can otherwise fly by.
@@ -2435,6 +2535,9 @@ function PlayBoard({
     }
     if (card.ability === "horn" && !card.row) return setPending({ kind: "horn", cardId: id });
     if (card.ability === "mardroeme" && !card.row) return setPending({ kind: "mardroeme", cardId: id });
+    // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't carry both.
+    if (card.ability === "horn" && card.row && me.board.mardroeme[card.row]) return;
+    if (card.ability === "mardroeme" && card.row && me.board.horns[card.row] > 0) return;
     if (card.ability === "medic" && !me.forceRandomRevive) {
       const eligible = me.discard.filter((did) => { const c = cardById(did); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
       if (eligible.length) return setPending({ kind: "medic", cardId: id, eligible });
@@ -2555,7 +2658,7 @@ function PlayBoard({
                 <span className="side-name">{opponentName}</span>
                 <GemPair losses={state.roundWins[viewerRole]} />
               </td>
-              <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></td>
+              <td rowSpan={2} className="cell-opp-score"><span className={"score-badge score-opp" + (oppTotal > myTotal ? " score-leading" : "")}>{oppTotal}</span></td>
               <td rowSpan={2} className="cell-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} hideCount /></td>
             </tr>
 
@@ -2605,7 +2708,7 @@ function PlayBoard({
                 <span className="side-name">{viewerName}</span>
                 <GemPair losses={state.roundWins[opponentRole]} />
               </td>
-              <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></td>
+              <td rowSpan={2} className="cell-my-score"><span className={"score-badge score-me" + (myTotal > oppTotal ? " score-leading" : "")}>{myTotal}</span></td>
               <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
 
@@ -2666,9 +2769,12 @@ function PlayBoard({
             {/* Row 16: pass button, positioned via inline style */}
             <tr>
               <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-30% 0 0 85%" }}>
-                <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
-                  {me.passed ? "You passed" : "Pass"}
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                  <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
+                    {me.passed ? "You passed" : "Pass"}
+                  </button>
+                  <HoldToForfeitButton onForfeit={onForfeit} disabled={false} />
+                </div>
               </td>
             </tr>
           </tbody>
@@ -2723,9 +2829,23 @@ function PlayBoard({
           <div className="round-banner" onClick={(e) => e.stopPropagation()}>
             <div className="ribbon">CHOOSE A ROW</div>
             <div className="coin-call-row">
-              {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => (
-                <button key={r} type="button" className="btn btn-gold" onClick={() => confirmRow(r)}>{ROW_META[r].label}</button>
-              ))}
+              {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => {
+                const blocked =
+                  (pending.kind === "horn" && me.board.mardroeme[r]) ||
+                  (pending.kind === "mardroeme" && me.board.horns[r] > 0);
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    className="btn btn-gold"
+                    disabled={blocked}
+                    title={blocked ? "A row can only carry one of Horn / Mardroeme at a time" : undefined}
+                    onClick={() => !blocked && confirmRow(r)}
+                  >
+                    {ROW_META[r].label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -2846,8 +2966,10 @@ function Home({ onSelect, onlineAvailable }) {
 
 function randomDeckIds(faction) {
   const pool = poolForFaction(faction);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, DECK_SIZE).map((c) => c.id);
+  const isUnit = (c) => c.cardType === "Basic" || c.cardType === "Hero";
+  const units = pool.filter(isUnit).sort(() => Math.random() - 0.5).slice(0, DECK_SIZE);
+  const specials = pool.filter((c) => !isUnit(c)).sort(() => Math.random() - 0.5).slice(0, 6);
+  return [...units, ...specials].map((c) => c.id);
 }
 
 function randomLeaderId(faction) {
@@ -3042,6 +3164,7 @@ function HotseatGame({ onExit }) {
         canAct={true}
         onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: me, cardId, options }))}
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: me }))}
+        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
       />
     );
@@ -3215,6 +3338,7 @@ function AIGame({ onExit }) {
         canAct={state.turn === "p1"}
         onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: "p1", cardId, options }))}
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
+        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
         opponentThinking={state.turn === "p2" && !state.players.p2.passed}
       />
@@ -3302,6 +3426,11 @@ function normalizePlayer(p) {
         siege: (b.hornCards && b.hornCards.siege) || [],
       },
       mardroeme: { close: false, ranged: false, siege: false, ...(b.mardroeme || {}) },
+      mardroemeCards: {
+        close: (b.mardroemeCards && b.mardroemeCards.close) || [],
+        ranged: (b.mardroemeCards && b.mardroemeCards.ranged) || [],
+        siege: (b.mardroemeCards && b.mardroemeCards.siege) || [],
+      },
     },
   };
 }
@@ -3677,6 +3806,7 @@ function OnlineGame({ onExit }) {
           canAct={meta.turn === role}
           onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
           onPass={() => applyAction({ type: "PASS", player: role })}
+          onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
           onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
         />
       </>
@@ -3796,6 +3926,36 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .btn-ghost { background: transparent; }
 .btn-pass { font-family: var(--font-display); background: var(--danger); border: 1px solid #7a2323; color: #f4e6e6; padding: 8px 18px; border-radius: 20px; cursor: pointer; }
 .btn-pass:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-forfeit {
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-display);
+  background: #1c1a1a;
+  border: 1px solid #4a4444;
+  color: #b8afaf;
+  padding: 6px 16px;
+  border-radius: 18px;
+  cursor: pointer;
+  font-size: 90%;
+  user-select: none;
+  touch-action: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-forfeit:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-forfeit .forfeit-fill {
+  position: absolute;
+  inset: 0;
+  width: var(--forfeit-progress, 0%);
+  background: linear-gradient(90deg, #7a2323, #c23c3c);
+  transition: width 0.05s linear;
+  z-index: 0;
+}
+.btn-forfeit .forfeit-label { position: relative; z-index: 1; }
+.btn-forfeit.holding {
+  color: #fff;
+  border-color: #c23c3c;
+  box-shadow: 0 0 10px rgba(194, 60, 60, 0.6);
+}
 
 /* ---- Card tiles ---- */
 .card-tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; text-align: left; background: linear-gradient(160deg, var(--parchment), #d8cba3); color: var(--ink); border: none; border-left: 4px solid var(--accent); border-radius: 6px; padding: 6px 7px 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; }
@@ -4020,6 +4180,19 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .side-name { font-family: var(--font-display); font-size: 95%; color: var(--gold); letter-spacing: 0.04em; display: flex; justify-content: center; width: 100%; height: 30%; align-items: flex-start; }
 .score-badge { font-size: 135%; color: var(--gold); font-weight: 700; line-height: 1; display: flex; justify-content: center; width: 100%; height: 100%; align-items: flex-start; }
+.score-leading {
+  color: #1a1206;
+  background: radial-gradient(ellipse at center, #ffe27a 0%, #ffb930 70%, #d98c0f 100%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px #ffdd7a, 0 0 18px 4px rgba(255, 200, 60, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.6);
+  transform: scale(1.35);
+  font-size: 115%;
+  animation: score-leading-pulse 1.6s ease-in-out infinite;
+}
+@keyframes score-leading-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px #ffdd7a, 0 0 18px 4px rgba(255, 200, 60, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.6); }
+  50% { box-shadow: 0 0 0 3px #ffdd7a, 0 0 26px 8px rgba(255, 200, 60, 1), inset 0 0 8px rgba(255, 255, 255, 0.8); }
+}
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; height: 67%; margin: 13% auto auto auto; flex-direction: row; }
