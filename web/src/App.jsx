@@ -1397,7 +1397,16 @@ function initGame(p1cfg, p2cfg) {
 
 /* ------------------------- AUTO-OPTIONS (AI + smart defaults) ------------ */
 
-function autoOptionsForCard(card, board) {
+function autoOptionsForCard(card, board, discard = []) {
+  if (card.ability === "medic") {
+    const eligible = discard.filter((id) => {
+      const c = cardById(id);
+      return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
+    });
+    if (!eligible.length) return {};
+    const best = [...eligible].sort((a, b) => (cardById(b)?.power || 0) - (cardById(a)?.power || 0))[0];
+    return { reviveId: best };
+  }
   if (card.row === "agile") {
     const closeWeathered = !!board.weather.close;
     const rangedWeathered = !!board.weather.ranged;
@@ -1424,6 +1433,16 @@ function autoOptionsForCard(card, board) {
     const candidates = ROWS.flatMap((r) => board[r].map((id) => ({ id, row: r, card: cardById(id) })))
       .filter((x) => x.card && x.card.cardType !== "Hero" && x.card.row);
     if (!candidates.length) return null; // no legal target — caller should skip this card
+    // Prefer recycling a unit whose on-play ability pays out again when replayed
+    // (Spy = another 2-card draw, Medic = another revive, Muster = re-fetch),
+    // ranked by how valuable that replay is. Otherwise fall back to pulling
+    // the weakest unit back to hand.
+    const REPLAY_PRIORITY = { spy: 3, medic: 2, muster: 1 };
+    const recyclable = candidates.filter((x) => REPLAY_PRIORITY[x.card.ability]);
+    if (recyclable.length) {
+      recyclable.sort((a, b) => REPLAY_PRIORITY[b.card.ability] - REPLAY_PRIORITY[a.card.ability]);
+      return { targetId: recyclable[0].id };
+    }
     candidates.sort((a, b) => unitEffectivePower(a.id, board, a.row) - unitEffectivePower(b.id, board, b.row));
     return { targetId: candidates[0].id };
   }
@@ -1498,7 +1517,41 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     return card.power;
   }
 
-  if (card.ability === "decoy") return 1; // pure utility, situational — low priority for a straight power race
+  if (card.ability === "decoy") {
+    const opts = autoOptionsForCard(card, board, me.discard);
+    const target = opts && opts.targetId ? cardById(opts.targetId) : null;
+    if (target && target.ability === "spy") return 5; // effectively banks another 2-card draw
+    if (target && target.ability === "medic") return 4; // another potential revive
+    if (target && target.ability === "muster") return 2; // only useful if siblings remain, worth a modest bet
+    return 1; // pure tempo/protection play, situational — low priority for a straight power race
+  }
+
+  if (card.ability === "spy") {
+    // The card itself goes on the OPPONENT's board — it adds nothing to our
+    // own total this turn. Its real value is the two extra cards it draws,
+    // which matters most early (hand/card advantage) and less once hand
+    // size no longer matters (late round 3 push). Treat it as a flat
+    // card-advantage value, NOT the card's printed power.
+    return 4;
+  }
+
+  if (card.ability === "medic") {
+    const opts = autoOptionsForCard(card, me.board, me.discard);
+    const reviveCard = opts && opts.reviveId ? cardById(opts.reviveId) : null;
+    return card.power + (reviveCard ? reviveCard.power : 0);
+  }
+
+  // Flat power play — lightly discourage stacking one row far past a
+  // typical Scorch-row threshold (~10) when there's no Horn/immune backup,
+  // since a single opposing Scorch can wipe the whole row at once. Cheap
+  // stand-in for real lookahead: don't put all the eggs in one basket.
+  if (card.row && ROWS.includes(card.row)) {
+    const rowAfter = rowTotal(board, card.row, spyDoubled) + card.power;
+    const otherRowsMax = Math.max(0, ...ROWS.filter((r) => r !== card.row).map((r) => rowTotal(board, r, spyDoubled)));
+    if (rowAfter >= 10 && rowAfter > otherRowsMax + 6) {
+      return card.power - 1.5;
+    }
+  }
 
   return card.power;
 }
@@ -1582,7 +1635,7 @@ function computeAIAction(state, aiKey) {
   // and rank the rest by actual battlefield impact rather than raw power.
   const ranked = me.hand
     .map(cardById)
-    .filter((c) => autoOptionsForCard(c, me.board) !== null)
+    .filter((c) => autoOptionsForCard(c, me.board, me.discard) !== null)
     .map((c) => ({ card: c, impact: estimateCardImpact(c, me, opp, spyDoubled) }))
     .sort((a, b) => b.impact - a.impact);
 
@@ -1591,7 +1644,7 @@ function computeAIAction(state, aiKey) {
   const myTotal = boardTotal(me.board, spyDoubled);
   const oppTotal = boardTotal(opp.board, spyDoubled);
 
-  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board) || {} });
+  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board, me.discard) || {} });
 
   if (opp.passed) {
     if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
@@ -1608,20 +1661,28 @@ function computeAIAction(state, aiKey) {
   // this round too would hand them the match immediately (2 wins = game over).
   const cardEdge = me.hand.length - opp.hand.length;
   const losingThisRound = myTotal < oppTotal;
+  const winningThisRound = myTotal > oppTotal;
   const oppAtMatchPoint = state.roundWins[oppKey] >= 1;
+
   const canAffordToConcede =
+    losingThisRound &&
     state.round < 3 &&
     !oppAtMatchPoint &&
     (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 2);
 
-  if (losingThisRound && canAffordToConcede && Math.random() < 0.6) {
+  // Under match-point pressure, never gamble a random pass while ahead —
+  // keep playing to protect the lead instead of risking the whole match.
+  const canAffordToBank = winningThisRound && !oppAtMatchPoint && cardEdge <= 0;
+
+  // Single random decision per turn (was two independent coinflips before,
+  // which could compound into erratic-looking play) — at most one of these
+  // situations applies on any given turn anyway.
+  const passChance = canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0;
+  if (passChance > 0 && Math.random() < passChance) {
     return { type: "PASS", player: aiKey };
   }
 
   if (myTotal <= oppTotal) return play(ranked[0].card);
-  // Under match-point pressure, don't gamble on a random pass while still ahead —
-  // keep playing to protect the lead instead of risking the whole match.
-  if (!oppAtMatchPoint && cardEdge <= 0 && Math.random() < 0.55) return { type: "PASS", player: aiKey };
   return play(ranked[ranked.length - 1].card);
 }
 
@@ -2084,8 +2145,35 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
   );
 }
 
-function GameOverPanel({ state, onExit }) {
+function GameOverPanel({ state, onExit, gameLog }) {
   const winnerName = state.gameWinner === "draw" ? null : state.players[state.gameWinner].name;
+
+  function downloadLog() {
+    const payload = {
+      startedAt: gameLog?.startedAt || null,
+      finishedAt: new Date().toISOString(),
+      players: {
+        p1: { name: state.players.p1.name, faction: state.players.p1.faction, leaderId: state.players.p1.leaderId },
+        p2: { name: state.players.p2.name, faction: state.players.p2.faction, leaderId: state.players.p2.leaderId },
+      },
+      roundWins: state.roundWins,
+      winner: state.gameWinner === "draw" ? "draw" : state.gameWinner,
+      // Per-decision snapshots captured as the AI acted, for later review of its play.
+      aiDecisions: (gameLog && gameLog.decisions) || [],
+      // Full narrative event log shown in-game.
+      eventLog: state.log,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kwent-game-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="overlay overlay-clear">
       <div className="round-banner gameover">
@@ -2093,7 +2181,10 @@ function GameOverPanel({ state, onExit }) {
         <div className="banner-sub big">
           {winnerName ? `${winnerName} wins ${state.roundWins.p1} – ${state.roundWins.p2}!` : `It's a draw, ${state.roundWins.p1} – ${state.roundWins.p2}!`}
         </div>
-        <button type="button" className="btn btn-gold" onClick={onExit}>Back to menu</button>
+        <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-gold" onClick={onExit}>Back to menu</button>
+          <button type="button" className="btn" onClick={downloadLog}>Download game log</button>
+        </div>
       </div>
     </div>
   );
@@ -3212,6 +3303,7 @@ function AIGame({ onExit }) {
   const [state, setState] = useState(null);
   const builder = useDeckBuilderState();
   const aiTimerRef = useRef(null);
+  const gameLogRef = useRef({ startedAt: null, decisions: [] });
 
   function confirmDeck() {
     const p1cfg = { name: "You", faction: builder.faction, leaderId: builder.leaderId, deckIds: builder.selected, isAI: false };
@@ -3220,6 +3312,12 @@ function AIGame({ onExit }) {
     const { deckIds: aiPool, aiLeaderId } = chooseAiDeck(aiFaction);
     const p2cfg = { name: "AI Opponent", faction: aiFaction, leaderId: aiLeaderId, deckIds: aiPool, isAI: true };
     const initial = initGame(p1cfg, p2cfg);
+    gameLogRef.current = {
+      startedAt: new Date().toISOString(),
+      you: { faction: p1cfg.faction, leaderId: p1cfg.leaderId },
+      aiOpponent: { faction: p2cfg.faction, leaderId: p2cfg.leaderId },
+      decisions: [],
+    };
     setState(initial);
     setStep("coinflip");
   }
@@ -3261,6 +3359,16 @@ function AIGame({ onExit }) {
     if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed) {
       aiTimerRef.current = setTimeout(() => {
         const action = computeAIAction(state, "p2");
+        const me = state.players.p2;
+        const opp = state.players.p1;
+        gameLogRef.current.decisions.push({
+          round: state.round,
+          myBoardTotal: boardTotal(me.board, matchHasLeader(state, "L01")),
+          oppBoardTotal: boardTotal(opp.board, matchHasLeader(state, "L01")),
+          myHandSize: me.hand.length,
+          oppHandSize: opp.hand.length,
+          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
+        });
         setState((s) => gameReducer(s, action));
       }, 1300);
       return () => clearTimeout(aiTimerRef.current);
@@ -3370,7 +3478,7 @@ function AIGame({ onExit }) {
             onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
           />
         )}
-        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} />}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} gameLog={gameLogRef.current} />}
       </>
     );
   }
