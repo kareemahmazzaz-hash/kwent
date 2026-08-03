@@ -4179,7 +4179,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
 .side-name { font-family: var(--font-display); font-size: 95%; color: var(--gold); letter-spacing: 0.04em; display: flex; justify-content: center; width: 100%; height: 30%; align-items: flex-start; }
-.cell-opp-score, .cell-my-score { overflow: visible; }
+.board-table td.cell-opp-score, .board-table td.cell-my-score { overflow: visible; }
 .score-badge { font-size: 135%; color: var(--gold); font-weight: 700; line-height: 1; display: flex; justify-content: center; width: 100%; height: 100%; align-items: flex-start; }
 .score-leading {
   display: inline-flex;
