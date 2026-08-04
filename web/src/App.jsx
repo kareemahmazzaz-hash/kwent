@@ -1495,7 +1495,10 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     const rows = Array.isArray(card.abilityMeta.row) ? card.abilityMeta.row : [card.abilityMeta.row];
     const oppHit = rows.reduce((sum, r) => sum + rowTotal(opp.board, r, spyDoubled), 0);
     const selfHit = rows.reduce((sum, r) => sum + rowTotal(me.board, r, spyDoubled), 0);
-    return Math.max(0, oppHit - selfHit - 3); // only worth it if it hurts them meaningfully more than us
+    // No floor here on purpose: if selfHit outweighs oppHit this should come
+    // back NEGATIVE, not clamp to a fake "harmless" 0 — a weather that hurts
+    // our own board more than theirs is an active mistake, not a safe dump.
+    return oppHit - selfHit - 3;
   }
 
   if (card.ability === "scorchRow" && card.row) {
@@ -1689,7 +1692,16 @@ function computeAIAction(state, aiKey) {
   }
 
   if (myTotal <= oppTotal) return play(ranked[0].card);
-  return play(ranked[ranked.length - 1].card);
+
+  // Protecting a lead: dump the lowest-impact card, but never one with a
+  // NEGATIVE impact (self-harming Scorch when the opponent's board is
+  // empty, a weather that guts our own row worse than theirs, etc). A
+  // negative score means "actively bad," not "safe filler" — if the worst
+  // non-harmful option doesn't exist, passing is strictly better than
+  // hurting ourselves for no reason.
+  const safeDump = [...ranked].reverse().find((r) => r.impact >= 0);
+  if (!safeDump) return { type: "PASS", player: aiKey };
+  return play(safeDump.card);
 }
 
 /* ============================ UI PIECES ================================ */
