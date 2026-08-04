@@ -1407,7 +1407,7 @@ function initGame(p1cfg, p2cfg) {
 
 /* ------------------------- AUTO-OPTIONS (AI + smart defaults) ------------ */
 
-function autoOptionsForCard(card, board, discard = []) {
+function autoOptionsForCard(card, board, discard = [], deck = []) {
   if (card.ability === "medic") {
     const eligible = discard.filter((id) => {
       const c = cardById(id);
@@ -1443,12 +1443,29 @@ function autoOptionsForCard(card, board, discard = []) {
     const candidates = ROWS.flatMap((r) => board[r].map((id) => ({ id, row: r, card: cardById(id) })))
       .filter((x) => x.card && x.card.cardType !== "Hero" && x.card.row);
     if (!candidates.length) return null; // no legal target — caller should skip this card
-    // Prefer recycling a unit whose on-play ability pays out again when replayed
-    // (Spy = another 2-card draw, Medic = another revive, Muster = re-fetch),
-    // ranked by how valuable that replay is. Otherwise fall back to pulling
-    // the weakest unit back to hand.
+    // Prefer recycling a unit whose on-play ability ACTUALLY pays out again
+    // when replayed — not just any unit tagged spy/medic/muster. A Medic
+    // with an empty discard, or a Muster card whose siblings are all already
+    // on the board, gains nothing from being replayed; treating those as
+    // "recyclable" was why the AI kept bouncing spent cards for zero value
+    // (logs showed it decoying an already-fired Toad, or replaying a
+    // Trebuchet right back into the same slot, both dead turns). Only a
+    // genuinely eligible target gets the priority boost.
     const REPLAY_PRIORITY = { spy: 3, medic: 2, muster: 1 };
-    const recyclable = candidates.filter((x) => REPLAY_PRIORITY[x.card.ability]);
+    const isEligibleReplay = (c) => {
+      if (c.ability === "spy") return true; // always draws 2 more, no precondition
+      if (c.ability === "medic") {
+        return discard.some((id) => {
+          const dc = cardById(id);
+          return dc && dc.cardType !== "Hero" && dc.cardType !== "Special" && dc.row;
+        });
+      }
+      if (c.ability === "muster") {
+        return musterFetchIds(c.id).some((id) => deck.includes(id));
+      }
+      return false;
+    };
+    const recyclable = candidates.filter((x) => REPLAY_PRIORITY[x.card.ability] && isEligibleReplay(x.card));
     if (recyclable.length) {
       recyclable.sort((a, b) => REPLAY_PRIORITY[b.card.ability] - REPLAY_PRIORITY[a.card.ability]);
       return { targetId: recyclable[0].id };
@@ -1531,12 +1548,24 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
   }
 
   if (card.ability === "decoy") {
-    const opts = autoOptionsForCard(card, board, me.discard);
+    const opts = autoOptionsForCard(card, board, me.discard, me.deck);
     const target = opts && opts.targetId ? cardById(opts.targetId) : null;
-    if (target && target.ability === "spy") return 5; // effectively banks another 2-card draw
-    if (target && target.ability === "medic") return 4; // another potential revive
-    if (target && target.ability === "muster") return 2; // only useful if siblings remain, worth a modest bet
-    return 1; // pure tempo/protection play, situational — low priority for a straight power race
+    if (!target) return -99; // shouldn't happen (caller filters unplayable cards), but never force it
+    const targetRow = ROWS.find((r) => board[r].includes(opts.targetId));
+    // Decoy is a 0-power card that takes the returned unit's spot — playing
+    // it costs the target's current power on THIS turn's board total. That
+    // cost is real and immediate; the payoff (if any) only lands on some
+    // later turn when the recycled card gets replayed. Ignoring that cost
+    // was why the AI kept bouncing cards for a flat "positive" score even
+    // when it had nothing to gain — e.g. decoying an already-fired Toad
+    // with the opponent's row already empty, or a plain Trebuchet with no
+    // ability at all, straight loss of board power for a wasted turn.
+    const immediateCost = targetRow ? unitEffectivePower(opts.targetId, board, targetRow, spyDoubled) : target.power;
+    let replayValue = 0;
+    if (target.ability === "spy") replayValue = 6; // reliably banks another 2-card draw
+    else if (target.ability === "medic") replayValue = 5; // eligibility already verified by autoOptionsForCard
+    else if (target.ability === "muster") replayValue = 3; // eligibility already verified by autoOptionsForCard
+    return replayValue - immediateCost;
   }
 
   if (card.ability === "spy") {
@@ -1755,7 +1784,7 @@ function computeAIAction(state, aiKey) {
   // and rank the rest by actual battlefield impact rather than raw power.
   const ranked = me.hand
     .map(cardById)
-    .filter((c) => autoOptionsForCard(c, me.board, me.discard) !== null)
+    .filter((c) => autoOptionsForCard(c, me.board, me.discard, me.deck) !== null)
     .map((c) => ({ card: c, impact: estimateCardImpact(c, me, opp, spyDoubled) }))
     .sort((a, b) => b.impact - a.impact);
 
@@ -1764,7 +1793,7 @@ function computeAIAction(state, aiKey) {
   const myTotal = boardTotal(me.board, spyDoubled);
   const oppTotal = boardTotal(opp.board, spyDoubled);
 
-  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board, me.discard) || {} });
+  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board, me.discard, me.deck) || {} });
 
   if (opp.passed) {
     if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
@@ -1783,6 +1812,7 @@ function computeAIAction(state, aiKey) {
   const losingThisRound = myTotal < oppTotal;
   const winningThisRound = myTotal > oppTotal;
   const oppAtMatchPoint = state.roundWins[oppKey] >= 1;
+  const margin = Math.abs(myTotal - oppTotal);
 
   // How many cards the AI has actually committed THIS round — proxy is the
   // board, since it's wiped between rounds. Concede/bank decisions require
@@ -1793,12 +1823,26 @@ function computeAIAction(state, aiKey) {
   const committed = me.board.close.length + me.board.ranged.length + me.board.siege.length + (me.board.specials?.length || 0);
   const minCommitmentMet = committed >= 2;
 
+  // Round 1 while the match is still 0-0 is the classic round to sacrifice —
+  // losing it costs nothing structurally (both sides still need 2 of 3
+  // either way), so it shouldn't need the same hand-lead proof that rounds
+  // 2+ require. Self-play logs showed the AI dumping its entire hand into a
+  // losing round 1 game after game because cardEdge>=3 almost never happens
+  // this early when both sides are trading cards roughly evenly — it only
+  // banked when it had stockpiled a huge card lead, and just kept feeding
+  // cards into an unwinnable round otherwise. A mild edge (>=1), or a big
+  // enough board deficit that catching up would cost several more cards
+  // anyway, is reason enough to let round 1 go.
+  const roundOneIsFree = state.round === 1 && state.roundWins[aiKey] === 0 && state.roundWins[oppKey] === 0;
+
   const canAffordToConcede =
     losingThisRound &&
     minCommitmentMet &&
     state.round < 3 &&
     !oppAtMatchPoint &&
-    (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 3);
+    (state.roundWins[aiKey] > state.roundWins[oppKey] ||
+      cardEdge >= 3 ||
+      (roundOneIsFree && (cardEdge >= 1 || margin >= 20)));
 
   // Under match-point pressure, never gamble a random pass while ahead —
   // keep playing to protect the lead instead of risking the whole match.
@@ -1812,14 +1856,21 @@ function computeAIAction(state, aiKey) {
   // Scale the roll by how real the lead/deficit actually is — a 2-point
   // margin barely moves the needle, a 20+ point margin is close to certain.
   // Without this, a tiny/illusory lead (or deficit) triggered the exact
-  // same coinflip as a commanding one.
-  const margin = Math.abs(myTotal - oppTotal);
+  // same coinflip as a commanding one. BUT a big card-count edge is its own
+  // form of conviction independent of the current point margin — being up
+  // 5 cards while only down 1 point is still a great spot to bank, since
+  // that hand advantage will crush rounds 2-3. Self-play logs showed the AI
+  // stuck at ~4% pass chance in exactly this situation (huge card lead,
+  // razor-thin point margin) and just kept dumping cards instead of banking
+  // the lead it had already earned. Take the stronger of the two signals.
   const marginScale = Math.min(1, margin / 15);
+  const cardEdgeScale = Math.min(1, Math.max(cardEdge, 0) / 3);
+  const conviction = Math.max(marginScale, cardEdgeScale);
 
   // Single random decision per turn (was two independent coinflips before,
   // which could compound into erratic-looking play) — at most one of these
   // situations applies on any given turn anyway.
-  const passChance = (canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0) * marginScale;
+  const passChance = (canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0) * conviction;
   if (passChance > 0 && Math.random() < passChance) {
     return { type: "PASS", player: aiKey };
   }
