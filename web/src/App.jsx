@@ -3314,7 +3314,8 @@ function HotseatGame({ onExit }) {
     return <DeckBuilder playerLabel="Player 1" faction={builder1.faction} onFactionChange={builder1.setFaction}
       lockFaction={false} selectedIds={builder1.selected} onToggleCard={builder1.toggle}
       leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} onRandomize={builder1.randomize}
-      savedDecks={builder1.savedDecks} onSaveDeck={builder1.saveDeck} onLoadDeck={builder1.loadDeck} onDeleteDeck={builder1.deleteDeck} />;
+      savedDecks={builder1.savedDecks} onSaveDeck={builder1.saveDeck} onLoadDeck={builder1.loadDeck} onDeleteDeck={builder1.deleteDeck}
+      onBack={onExit} />;
   }
   if (step === "gateTo2") {
     return <PassDeviceGate name="Player 2" onContinue={() => setStep("deck2")} />;
@@ -3323,7 +3324,8 @@ function HotseatGame({ onExit }) {
     return <DeckBuilder playerLabel="Player 2" faction={builder2.faction} onFactionChange={builder2.setFaction}
       lockFaction={false} selectedIds={builder2.selected} onToggleCard={builder2.toggle}
       leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} onRandomize={builder2.randomize}
-      savedDecks={builder2.savedDecks} onSaveDeck={builder2.saveDeck} onLoadDeck={builder2.loadDeck} onDeleteDeck={builder2.deleteDeck} />;
+      savedDecks={builder2.savedDecks} onSaveDeck={builder2.saveDeck} onLoadDeck={builder2.loadDeck} onDeleteDeck={builder2.deleteDeck}
+      onBack={() => setStep("deck1")} />;
   }
   if (!state) return null;
 
@@ -3885,6 +3887,28 @@ function OnlineGame({ onExit }) {
     setPhase("waiting-deck");
   }
 
+  // Leaves the room entirely (tears down listeners/timers and any in-flight
+  // presence state) and drops back to the host/join chooser. Used by the
+  // deck screen's Back button so a stale room isn't left dangling in Firebase
+  // while the player picks a different mode.
+  function backToChoose() {
+    listenersRef.current.forEach((unsub) => unsub());
+    listenersRef.current = [];
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    if (watchdogRef.current) clearInterval(watchdogRef.current);
+    theirLastSeenRef.current = null;
+    forfeitFiredRef.current = false;
+    transitionGuard.current = {};
+    setRoomCode("");
+    setRole(null);
+    setMeta(null);
+    setMine(null);
+    setTheirs(null);
+    setOppDisconnected(false);
+    setJoinError("");
+    setPhase("choose");
+  }
+
   // Both decks ready -> deal hands -> move to coin flip.
   useEffect(() => {
     if (phase !== "waiting-deck" && phase !== "deckbuild") return;
@@ -3945,6 +3969,7 @@ function OnlineGame({ onExit }) {
     const lastHello = getLastHello();
     return (
       <div className="screen online-lobby">
+        <button type="button" className="btn btn-sm deckbuilder-back" onClick={onExit}>← Back</button>
         <h2 className="screen-title">Online</h2>
         <div className="net-mode-toggle" style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
           <button
@@ -3998,6 +4023,7 @@ function OnlineGame({ onExit }) {
           onConfirm={confirmDeckOnline}
           onRandomize={builder.randomize}
           savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
+          onBack={backToChoose}
         />
       </>
     );
