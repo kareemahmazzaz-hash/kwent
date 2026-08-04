@@ -328,7 +328,7 @@ const CARDS = [
 {id:"c209",name:"Clan Heymaey Skald",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Heymaey Skald.png"},
 {id:"c210",name:"Clan Tordarroch Armorsmith",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Tordarroch Armorsmith.png"},
 {id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Donar an Hindar.png"},
-{id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"ranged",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Draig Bon-Dhu.png"},
+{id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"siege",cardType:"Basic",ability:"horn",abilityMeta:{},img:"Draig Bon-Dhu.png"},
 {id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Hero",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
 {id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Hjalmar.png"},
 {id:"c216",name:"Holger Blackhand",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Holger Blackhand.png"},
