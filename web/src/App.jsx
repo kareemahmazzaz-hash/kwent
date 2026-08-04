@@ -939,9 +939,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
 }
 
 /* ---------------------------- LEADER ENGINE ------------------------------
-   20 of the 22 leaders are a once-per-game activated power the acting
+   21 of the 22 leaders are a once-per-game activated power the acting
    player triggers on their own turn (a "Use Leader Ability" button).
-   Three are passive instead and never produce a visible effect through
+   Two are passive instead and never produce a visible effect through
    this function directly:
      - L01 Eredin Bréacc Glas: The Treacherous — handled inside the power
        engine itself (spyDoubled, see above).
@@ -949,8 +949,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
        forceRandomRevive on BOTH players at game setup (it affects every
        Medic-style revive in the match, not just its owner's), which the
        Medic branch of resolvePlayCard already checks.
-     - L22 King Bran — handled by setting board.halveWeather on his own
-       board at game setup, which unitEffectivePower already checks.
+   L22 King Bran is click-to-activate like the rest: his case below sets
+   board.halveWeather on his own board when the player uses his ability,
+   which unitEffectivePower already checks.
    -------------------------------------------------------------------- */
 
 function leaderNeedsOptions(leaderId) {
@@ -1117,7 +1118,10 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       log.push(`Shuffles both graveyards back into their decks.`);
       break;
     }
-    case "L22": break; // King Bran is passive — see board.halveWeather, set at game setup, like L01/L08.
+    case "L22": { // King Bran — on activation, this board's weather softens to half Strength instead of flattening to 1
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, halveWeather: true } }));
+      break;
+    }
 
     default: break;
   }
@@ -1374,9 +1378,9 @@ function initGame(p1cfg, p2cfg) {
     p1 = { ...p1, forceRandomRevive: true };
     p2 = { ...p2, forceRandomRevive: true };
   }
-  // L22 King Bran only softens weather on his own board.
-  if (p1cfg.leaderId === "L22") p1 = { ...p1, board: { ...p1.board, halveWeather: true } };
-  if (p2cfg.leaderId === "L22") p2 = { ...p2, board: { ...p2.board, halveWeather: true } };
+  // L22 King Bran: no longer auto-applied at setup — his ability now
+  // activates like any other leader, via resolveLeaderAbility (case "L22"),
+  // which sets board.halveWeather on his own board at that point.
 
   // Scoia'tael faction ability: if exactly one side is Scoia'tael, that
   // player chooses who opens Round 1 — no coin toss needed. If both sides
@@ -1604,16 +1608,81 @@ const LEADER_PRIORITY = {
   skellige: ["L21", "L22"],
 };
 
+// Special-card "families" used to cap how many near-duplicate effects the
+// AI is allowed to stack in one deck — otherwise the flat top-N sort just
+// grabs every weather/horn/scorch it can find and never touches a Decoy.
+function specialFamily(card) {
+  if (card.ability === "weather") return "weather";
+  if (card.ability === "clearWeather") return "clearWeather";
+  if (card.ability === "horn") return "horn";
+  if (card.ability === "decoy") return "decoy";
+  if (card.ability === "scorchGlobal" || card.ability === "scorchRow" || card.ability === "scorchRowThreshold") return "scorch";
+  return "other";
+}
+
 function chooseAiDeck(aiFaction) {
   const pool = poolForFaction(aiFaction);
   const isUnit = (c) => c.cardType === "Basic" || c.cardType === "Hero";
   const scored = pool
     .map((c) => ({ card: c, value: evaluateCardBaseValue(c) + Math.random() * 1.5 })) // small jitter so it's not identical every game
     .sort((a, b) => b.value - a.value);
-  // The 22 minimum only counts unit cards now — take the top 22 units, then round
-  // out the deck with the best non-unit specials (weather, horns, decoys, etc.).
-  const unitIds = scored.filter((s) => isUnit(s.card)).slice(0, DECK_SIZE).map((s) => s.card.id);
-  const specialIds = scored.filter((s) => !isUnit(s.card)).slice(0, 6).map((s) => s.card.id);
+
+  // --- Units: draft per-row instead of one flat global sort, so the AI
+  // can't end up with (for example) four Close Combat units and nothing
+  // in Ranged or Siege. Agile units count toward whichever row is thinner
+  // at the time they're picked. Split into roughly even row quotas, then
+  // fill any leftover slots (Heroes, odd counts) with the next-best units
+  // regardless of row.
+  const unitPool = scored.filter((s) => isUnit(s.card));
+  const baseQuota = Math.floor(DECK_SIZE / ROWS.length);
+  const quota = { close: baseQuota, ranged: baseQuota, siege: baseQuota };
+  let remainder = DECK_SIZE - baseQuota * ROWS.length;
+  ROWS.forEach((r) => { if (remainder > 0) { quota[r] += 1; remainder--; } });
+
+  const rowCount = { close: 0, ranged: 0, siege: 0 };
+  const unitIds = [];
+  const leftover = [];
+  for (const s of unitPool) {
+    const row = s.card.row;
+    if (row === "agile") {
+      // Slot into whichever of Close/Ranged still needs it more.
+      const target = rowCount.close <= rowCount.ranged ? "close" : "ranged";
+      if (rowCount[target] < quota[target]) { rowCount[target]++; unitIds.push(s.card.id); continue; }
+    } else if (ROWS.includes(row)) {
+      if (rowCount[row] < quota[row]) { rowCount[row]++; unitIds.push(s.card.id); continue; }
+    }
+    leftover.push(s.card.id);
+  }
+  // Any row that came up short (faction pool too thin in that row) gets
+  // backfilled from the leftover pile, best-value first, until DECK_SIZE.
+  let i = 0;
+  while (unitIds.length < DECK_SIZE && i < leftover.length) { unitIds.push(leftover[i]); i++; }
+
+  // --- Specials: cap per family so weather/horn/scorch can't crowd out
+  // everything else, and guarantee at least one Decoy if the pool has one.
+  const specialCandidates = scored.filter((s) => !isUnit(s.card));
+  const FAMILY_CAP = { weather: 2, horn: 2, scorch: 2, decoy: 2, clearWeather: 1, other: 3 };
+  const familyCount = {};
+  const specialIds = [];
+  for (const s of specialCandidates) {
+    if (specialIds.length >= 6) break;
+    const fam = specialFamily(s.card);
+    const used = familyCount[fam] || 0;
+    if (used >= (FAMILY_CAP[fam] ?? 2)) continue;
+    familyCount[fam] = used + 1;
+    specialIds.push(s.card.id);
+  }
+  // If nothing from the Decoy family made the cut but the pool has one,
+  // swap it in for the weakest pick — Decoy is too useful to skip entirely.
+  if (!(familyCount.decoy > 0)) {
+    const decoyOption = specialCandidates.find((s) => specialFamily(s.card) === "decoy");
+    if (decoyOption && specialIds.length >= 6) {
+      specialIds[specialIds.length - 1] = decoyOption.card.id;
+    } else if (decoyOption) {
+      specialIds.push(decoyOption.card.id);
+    }
+  }
+
   const deckIds = [...unitIds, ...specialIds];
 
   const leaders = leadersForFaction(aiFaction);
@@ -1626,16 +1695,58 @@ function chooseAiDeck(aiFaction) {
 
 /* ---------------------------- SIMPLE HEURISTIC AI ------------------------ */
 
+// Leaders whose effect is unconditionally useful even on an empty board /
+// empty discard, so firing them turn 1 round 1 never wastes them: extra
+// card draw, instant Horn, info reveal, denying the opponent their own
+// leader, etc. Every other leader has a real precondition (needs weather
+// on the board, a scorch-row total ≥10, a non-empty discard pile, an
+// Agile unit already down, ...) that literally cannot be true on turn 1
+// with an empty board — firing those unconditionally just burns the
+// leader for a permanent no-op, so they're checked live instead below.
+const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L05", "L06", "L07", "L10", "L11", "L14", "L16", "L18", "L20", "L22"]);
+
+function leaderConditionMet(state, aiKey, leaderId) {
+  const me = state.players[aiKey];
+  const oppKey = otherKey(aiKey);
+  const opp = state.players[oppKey];
+  switch (leaderId) {
+    case "L02": // Medic revive — needs an eligible (non-Hero, non-Special) card in own discard
+      return me.discard.some((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
+    case "L09": // Take a non-Hero card from opponent's discard
+      return opp.discard.some((id) => cardById(id)?.cardType !== "Hero");
+    case "L12": // Clear Weather — needs weather actually present on either side
+      return ROWS.some((r) => me.board.weather[r] || opp.board.weather[r]);
+    case "L13": // Foltest — Scorch Ranged if total >= 10
+      return rowTotal(opp.board, "ranged", matchHasLeader(state, "L01")) >= 10;
+    case "L15": // Scorch Siege if total >= 10
+      return rowTotal(opp.board, "siege", matchHasLeader(state, "L01")) >= 10;
+    case "L19": // Francesca — Scorch Close Combat if total >= 10
+      return rowTotal(opp.board, "close", matchHasLeader(state, "L01")) >= 10;
+    case "L17": // Francesca — reposition Agile units, needs one on the board
+      return [...me.board.close, ...me.board.ranged].some((id) => cardById(id)?.row === "agile");
+    case "L21": // Crach an Craite — shuffle graveyards, needs at least one non-empty
+      return me.discard.length > 0 || opp.discard.length > 0;
+    default:
+      return true;
+  }
+}
+
 function computeAIAction(state, aiKey) {
   const me = state.players[aiKey];
   const oppKey = otherKey(aiKey);
   const opp = state.players[oppKey];
   const spyDoubled = matchHasLeader(state, "L01");
 
-  // Simple heuristic: fire the leader ability on the AI's first turn of the game.
-  if (me.leaderId && !me.leaderUsed && !me.leaderBlocked && state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0) {
-    const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
-    return { type: "USE_LEADER", player: aiKey, options };
+  // Fire the leader ability as soon as it can do something real: the
+  // always-good leaders go off turn 1 like before, everything else waits
+  // until its actual precondition is met (checked fresh every AI turn).
+  if (me.leaderId && !me.leaderUsed && !me.leaderBlocked) {
+    const isOpeningTurn = state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0;
+    const shouldFire = LEADER_ALWAYS_GOOD_EARLY.has(me.leaderId) ? isOpeningTurn : leaderConditionMet(state, aiKey, me.leaderId);
+    if (shouldFire) {
+      const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
+      return { type: "USE_LEADER", player: aiKey, options };
+    }
   }
 
   if (me.hand.length === 0 || me.passed) return { type: "PASS", player: aiKey };
@@ -1673,20 +1784,37 @@ function computeAIAction(state, aiKey) {
   const winningThisRound = myTotal > oppTotal;
   const oppAtMatchPoint = state.roundWins[oppKey] >= 1;
 
+  // How many cards the AI has actually committed THIS round — proxy is the
+  // board, since it's wiped between rounds. Concede/bank decisions require
+  // a minimum commitment first: without this, the AI could (and did) decide
+  // to give up a round on turn 1 with a full hand and nothing played yet,
+  // purely off a fragile early card-count difference or a lead it didn't
+  // even build itself (e.g. an opponent Spy landing on its board).
+  const committed = me.board.close.length + me.board.ranged.length + me.board.siege.length + (me.board.specials?.length || 0);
+  const minCommitmentMet = committed >= 2;
+
   const canAffordToConcede =
     losingThisRound &&
+    minCommitmentMet &&
     state.round < 3 &&
     !oppAtMatchPoint &&
-    (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 2);
+    (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 3);
 
   // Under match-point pressure, never gamble a random pass while ahead —
   // keep playing to protect the lead instead of risking the whole match.
-  const canAffordToBank = winningThisRound && !oppAtMatchPoint && cardEdge <= 0;
+  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint && cardEdge <= 0;
+
+  // Scale the roll by how real the lead/deficit actually is — a 2-point
+  // margin barely moves the needle, a 20+ point margin is close to certain.
+  // Without this, a tiny/illusory lead (or deficit) triggered the exact
+  // same coinflip as a commanding one.
+  const margin = Math.abs(myTotal - oppTotal);
+  const marginScale = Math.min(1, margin / 15);
 
   // Single random decision per turn (was two independent coinflips before,
   // which could compound into erratic-looking play) — at most one of these
   // situations applies on any given turn anyway.
-  const passChance = canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0;
+  const passChance = (canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0) * marginScale;
   if (passChance > 0 && Math.random() < passChance) {
     return { type: "PASS", player: aiKey };
   }
@@ -3745,9 +3873,7 @@ function OnlineGame({ onExit }) {
       const theirLeader = theirs?.leaderId;
       const dealtWithLeaderMod = (mine.leaderId === "L08" || theirLeader === "L08")
         ? { ...dealt, forceRandomRevive: true }
-        : mine.leaderId === "L22"
-          ? { ...dealt, board: { ...dealt.board, halveWeather: true } }
-          : dealt;
+        : dealt;
       await writeJSON(playerKey(roomCode, role), dealtWithLeaderMod);
       setMine(dealtWithLeaderMod);
       const m = await readJSON(metaKey(roomCode));
