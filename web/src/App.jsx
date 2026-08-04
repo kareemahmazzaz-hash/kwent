@@ -1802,7 +1802,12 @@ function computeAIAction(state, aiKey) {
 
   // Under match-point pressure, never gamble a random pass while ahead —
   // keep playing to protect the lead instead of risking the whole match.
-  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint && cardEdge <= 0;
+  // CRITICAL: only bank when hand size is at least even with the opponent.
+  // A lead is only safe to freeze if the opponent doesn't have more cards
+  // left than us to simply keep playing and overtake it — this is especially
+  // true when the "lead" was inflated by the opponent's own Spy cards
+  // landing on our board, which costs them nothing to keep doing.
+  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint && cardEdge >= 0;
 
   // Scale the roll by how real the lead/deficit actually is — a 2-point
   // margin barely moves the needle, a 20+ point margin is close to certain.
@@ -1819,7 +1824,15 @@ function computeAIAction(state, aiKey) {
     return { type: "PASS", player: aiKey };
   }
 
-  if (myTotal <= oppTotal) return play(ranked[0].card);
+  // Even while behind, never force through an actively harmful card (e.g. a
+  // global Scorch that would torch our own strongest unit for a worse trade
+  // than it costs the opponent). If the best-ranked option is still
+  // negative, passing keeps the card for a later round instead of digging
+  // the hole deeper for nothing.
+  if (myTotal <= oppTotal) {
+    if (ranked[0].impact >= 0) return play(ranked[0].card);
+    return { type: "PASS", player: aiKey };
+  }
 
   // Protecting a lead: dump the lowest-impact card, but never one with a
   // NEGATIVE impact (self-harming Scorch when the opponent's board is
@@ -2295,7 +2308,7 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
   );
 }
 
-function GameOverPanel({ state, onExit, gameLog }) {
+function GameOverPanel({ state, onExit, onPlayAgain, gameLog }) {
   const winnerName = state.gameWinner === "draw" ? null : state.players[state.gameWinner].name;
 
   function downloadLog() {
@@ -2332,7 +2345,8 @@ function GameOverPanel({ state, onExit, gameLog }) {
           {winnerName ? `${winnerName} wins ${state.roundWins.p1} – ${state.roundWins.p2}!` : `It's a draw, ${state.roundWins.p1} – ${state.roundWins.p2}!`}
         </div>
         <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
-          <button type="button" className="btn btn-gold" onClick={onExit}>Back to menu</button>
+          {onPlayAgain && <button type="button" className="btn btn-gold" onClick={onPlayAgain}>Play again</button>}
+          <button type="button" className="btn" onClick={onExit}>Back to menu</button>
           <button type="button" className="btn" onClick={downloadLog}>Download game log</button>
         </div>
       </div>
@@ -2362,7 +2376,7 @@ function cardMatchesAbilityFilter(card, filterKey) {
   return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
 }
 
-function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck }) {
+function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
   const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
   const [deckName, setDeckName] = useState("");
@@ -2399,6 +2413,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
   return (
     <div className="screen deckbuilder">
+      {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
 
       {!lockFaction && (
@@ -3479,6 +3494,13 @@ function AIGame({ onExit }) {
     setStep("coinflip");
   }
 
+  function playAgain() {
+    clearTimeout(aiTimerRef.current);
+    setState(null);
+    gameLogRef.current = { startedAt: null, decisions: [] };
+    setStep("deck");
+  }
+
   // AI auto-decides during Scoia'tael's pre-game starter choice, if the AI is the chooser.
   useEffect(() => {
     if (!state || state.phase !== "scoiaChoice") return;
@@ -3536,7 +3558,8 @@ function AIGame({ onExit }) {
     return <DeckBuilder playerLabel="You" faction={builder.faction} onFactionChange={builder.setFaction}
       lockFaction={false} selectedIds={builder.selected} onToggleCard={builder.toggle}
       leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} onRandomize={builder.randomize}
-      savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck} />;
+      savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
+      onBack={onExit} />;
   }
   if (!state) return null;
 
@@ -3635,7 +3658,7 @@ function AIGame({ onExit }) {
             onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
           />
         )}
-        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} gameLog={gameLogRef.current} />}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} />}
       </>
     );
   }
@@ -4165,6 +4188,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
+.deckbuilder-back { margin-bottom: 10px; }
 
 /* ---- Home ---- */
 .home-hero { text-align: center; padding: 28px 8px 8px; }
@@ -4187,7 +4211,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .btn-lg { padding: 12px 22px; font-size: 1rem; }
 .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
 .btn-ghost { background: transparent; }
-.btn-pass { font-family: var(--font-display); background: var(--danger); border: 1px solid #7a2323; color: #f4e6e6; padding: 8px 18px; border-radius: 20px; cursor: pointer; }
+.btn-pass { font-family: var(--font-display); background: var(--danger); border: 1px solid #7a2323; color: #f4e6e6; padding: 8px 18px; border-radius: 20px; cursor: pointer; white-space: nowrap; }
 .btn-pass:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-forfeit {
   position: relative;
