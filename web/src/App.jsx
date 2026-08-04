@@ -51,6 +51,12 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // as an automatic fallback in case a path hasn't propagated to the CDN yet.
 const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@main/";
 const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/main/";
+// Safari detection for the handful of fixes that can't be done in pure CSS
+// (e.g. removing a table row). Matches desktop + mobile Safari, excludes
+// Chrome/Edge/Firefox/Android WebViews which also mention "Safari" in UA.
+const IS_SAFARI =
+  typeof navigator !== "undefined" &&
+  /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 // The real Gwent board-shelf texture, in the repo's Neutral folder. It's one
 // image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
 // line dead-center) — see BOARD_HALF background rules below for how each
@@ -290,7 +296,7 @@ const CARDS = [
 {id:"c177",name:"Havekar Smuggler (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Havekar Smuggler3.png"},
 {id:"c178",name:"Ida Emean aep Sivney",faction:"scoiatael",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Ida Emean aep Sivney.png"},
 {id:"c179",name:"Iorveth",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Iorveth.png"},
-{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
+{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Basic",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
 {id:"c181",name:"Mahakaman Defender (1)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender1.png"},
 {id:"c182",name:"Mahakaman Defender (2)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender2.png"},
 {id:"c183",name:"Mahakaman Defender (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender3.png"},
@@ -299,7 +305,7 @@ const CARDS = [
 {id:"c186",name:"Milva",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Basic",ability:"moraleBoost",abilityMeta:{},img:"Milva.png"},
 {id:"c187",name:"Riordain",faction:"scoiatael",power:1.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Riordain.png"},
 {id:"c188",name:"Saesenthessis",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Saesenthessis.png"},
-{id:"c189",name:"Schirru",faction:"scoiatael",power:8.0,row:"siege",cardType:"Basic",ability:"scorchRow",abilityMeta:{},img:"Schirru.png"},
+{id:"c189",name:"Schirru",faction:"scoiatael",power:8.0,row:"ranged",cardType:"Basic",ability:"scorchRow",abilityMeta:{},img:"Schirru.png"},
 {id:"c190",name:"Toruviel",faction:"scoiatael",power:2.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Toruviel.png"},
 {id:"c191",name:"Vrihedd Brigade Recruit (1)",faction:"scoiatael",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Vrihedd Brigade Recruit1.png"},
 {id:"c192",name:"Vrihedd Brigade Recruit (2)",faction:"scoiatael",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Vrihedd Brigade Recruit2.png"},
@@ -1787,6 +1793,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
             className="card-art"
             src={src}
             alt={card.name}
+            decoding="async"
+            loading="eager"
             onError={() => setArtStage((s) => s + 1)}
           />
         ) : null}
@@ -1808,7 +1816,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           <div className="card-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="card-zoom-art-wrap">
               {src ? (
-                <img className="card-zoom-art" src={src} alt={card.name} />
+                <img className="card-zoom-art" src={src} alt={card.name} decoding="async" loading="eager" />
               ) : (
                 <div className="card-zoom-fallback">{card.name}</div>
               )}
@@ -1850,7 +1858,7 @@ function CardBackStack({ count, faction }) {
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="card-back-wrap" style={{ zIndex: i }}>
           {src ? (
-            <img className="card-back-img" src={src} alt="Opponent card back" onError={() => setArtStage((s) => s + 1)} />
+            <img className="card-back-img" src={src} alt="Opponent card back" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />
           ) : (
             <div className="card-back-fallback" />
           )}
@@ -1880,6 +1888,8 @@ function DeckPile({ count, faction, hideCount }) {
                 className="card-back-img"
                 src={src}
                 alt="Deck"
+                decoding="async"
+                loading="eager"
                 onError={i === 0 ? () => setArtStage((s) => s + 1) : undefined}
               />
             ) : (
@@ -1923,7 +1933,7 @@ function DiscardTopBack({ discard, faction }) {
   return (
     <div className="discard-pile discard-pile-back">
       {src ? (
-        <img className="card-back-img" src={src} alt="Discarded card" onError={() => setArtStage((s) => s + 1)} />
+        <img className="card-back-img" src={src} alt="Discarded card" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />
       ) : (
         <div className="card-back-fallback" />
       )}
@@ -1937,7 +1947,7 @@ function LeaderUnusedBadge({ show }) {
   const [artStage, setArtStage] = useState(0);
   if (!show || artStage === 2) return null;
   const src = artStage === 0 ? LEADER_UNUSED_ICON_URL : LEADER_UNUSED_ICON_FALLBACK_URL;
-  return <img className="leader-unused-badge" src={src} alt="Leader ability available" onError={() => setArtStage((s) => s + 1)} />;
+  return <img className="leader-unused-badge" src={src} alt="Leader ability available" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />;
 }
 
 // The board no longer groups siege/ranged/close into one PlayerBoard block —
@@ -2050,12 +2060,12 @@ function GemPip({ broken, breaking }) {
   const breakSrc = breakStage === 0 ? GEM_BREAK_URL : GEM_BREAK_FALLBACK_URL;
   return (
     <span className="gem-pip">
-      <img className="gem-img gem-back" src={backSrc} alt="" onError={() => setBackStage(1)} />
+      <img className="gem-img gem-back" src={backSrc} alt="" decoding="async" loading="eager" onError={() => setBackStage(1)} />
       {!broken && !breaking && (
-        <img className="gem-img gem-front" src={frontSrc} alt="" onError={() => setFrontStage(1)} />
+        <img className="gem-img gem-front" src={frontSrc} alt="" decoding="async" loading="eager" onError={() => setFrontStage(1)} />
       )}
       {breaking && (
-        <img className="gem-img gem-crack" src={breakSrc} alt="" onError={() => setBreakStage(1)} />
+        <img className="gem-img gem-crack" src={breakSrc} alt="" decoding="async" loading="eager" onError={() => setBreakStage(1)} />
       )}
     </span>
   );
@@ -2683,7 +2693,7 @@ function PlayBoard({
     <>
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <div className="board-frame">
-        <div className="hand-strip-cards" style={{ position: "absolute", top: "-6.75%" }}>
+        <div className="hand-strip-cards opp-hand-strip" style={{ position: "absolute" }}>
           <CardBackStack count={opp.hand.length} faction={opp.faction} />
         </div>
         <table className="board-table">
@@ -2701,11 +2711,18 @@ function PlayBoard({
             {/* Row 1: 3 empty (col1-3), opp hand cell now empty — hand-strip-cards
                 moved out of the table to an absolutely-positioned sibling of
                 .board-frame (rendered before <table>) so it no longer occupies
-                table flow / rowspan. */}
-            <tr>
-              <td colSpan={3}></td>
-              <td></td>
-            </tr>
+                table flow / rowspan. Safari/Mac-only: this row is dropped
+                entirely (confirmed fix for the whole board sitting low on
+                Mac) since table-layout:fixed locks all rows to equal height,
+                so shrinking it via CSS has no effect there — removing it is
+                the only lever. Left in place elsewhere to avoid re-testing
+                row-to-background-texture alignment on other browsers. */}
+            {!IS_SAFARI && (
+              <tr>
+                <td colSpan={3}></td>
+                <td></td>
+              </tr>
+            )}
 
             {/* Row 2: opp pass status (col1-3); col4-8 no longer covered by a rowspan */}
             <tr>
@@ -4332,6 +4349,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 .hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; position: relative; z-index: 5; }
+.opp-hand-strip { top: -6.75%; }
 .hand-fit { display: flex; width: calc(100% - 13.5%); height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
 .hand-strip-cards:hover .hand-fit { margin-top: -30%; }
 .hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: var(--hand-overlap, -1%); }
@@ -4433,6 +4451,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   font-size: 0.68rem; padding: 4px 10px; border-radius: 10px; animation: toast-fade 2.2s ease-in-out;
 }
 @keyframes toast-fade { 0% { opacity: 0; } 12% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Safari/Mac-only overrides. @supports (-webkit-hyphens: none) is true in
+   Safari (desktop + iOS) and false in Chrome/Firefox/Edge, so these only
+   apply there. (The top-row deletion for this same fix set lives in JS via
+   IS_SAFARI, since @supports can't remove DOM elements.) */
+@supports (-webkit-hyphens: none) {
+  .leader-unused-badge { height: 15%; }
+  .side-name { font-size: 90%; }
+  .weather-overlay { top: 41%; }
+  .opp-hand-strip { top: -12.75%; }
+  .hand-fit { margin: -6% 0% 0 13.5%; }
+}
 `;
 
 /* ================================ APP ==================================== */
