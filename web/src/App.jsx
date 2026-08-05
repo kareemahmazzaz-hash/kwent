@@ -591,6 +591,19 @@ function matchHasLeader(state, leaderId) {
   return state.players.p1.leaderId === leaderId || state.players.p2.leaderId === leaderId;
 }
 
+// Heroes are immune to everything, including the GOOD stuff — Horn and
+// Weather both pass right through them (fixed power, no doubling, no
+// flattening). Any formula estimating "how much would doubling/freezing
+// this row actually change" needs to sum only the non-Hero units, or it
+// credits/blames a row for power that will never actually move.
+function rowNonHeroPower(board, row, spyDoubled) {
+  return board[row].reduce((sum, id) => {
+    const c = cardById(id);
+    if (!c || c.cardType === "Hero") return sum;
+    return sum + unitEffectivePower(id, board, row, spyDoubled);
+  }, 0);
+}
+
 function strongestInRow(board, row, spyDoubled) {
   const units = board[row].filter((id) => cardById(id)?.cardType !== "Hero");
   if (units.length === 0) return [];
@@ -1427,8 +1440,13 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     return { chosenRow };
   }
   if (card.ability === "horn" && !card.row) {
+    // Heroes don't benefit from Horn at all — picking the row with the
+    // highest RAW total (including Hero power) picked a row that was
+    // entirely a Hero more than once in self-play (Philippa Eilhart,
+    // Tibor Eggebracht), doubling nothing for zero net gain. Rank by the
+    // non-Hero power actually being doubled instead.
     let best = "close", bestVal = -1;
-    ROWS.forEach((r) => { const v = rowTotal(board, r); if (v > bestVal) { bestVal = v; best = r; } });
+    ROWS.forEach((r) => { const v = rowNonHeroPower(board, r); if (v > bestVal) { bestVal = v; best = r; } });
     return { chosenRow: best };
   }
   if (card.ability === "mardroeme") {
@@ -1476,6 +1494,29 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
   return {};
 }
 
+// A row sitting at 10+ power, well clear of the AI's other rows, is exactly
+// the shape a Scorch or a threshold-triggered leader (Francesca, Foltest,
+// Villentretenmerth) is built to punish in one hit. This used to only guard
+// the generic flat-power fallback at the bottom of estimateCardImpact — every
+// special-ability branch (muster, tightBond, moraleBoost, scorchRow) returns
+// early and skipped it entirely, which is exactly backwards: a Muster chain
+// dumping 3 cards into one row at once is the single riskiest shape of all.
+// Self-play logs showed this cost two full board wipes (a Crone chain piling
+// 18 power into Close Combat, punished by an unused Francesca leader) plus a
+// Villentretenmerth played into an already-15 Close Combat row. Scales with
+// both how far past the threshold the row ends up AND how much of that came
+// from this one play — a single card tipping it over is less alarming than a
+// whole chain doing it at once.
+function stackingPenalty(board, row, addedPower, spyDoubled) {
+  if (!row || !ROWS.includes(row)) return 0;
+  const rowAfter = rowTotal(board, row, spyDoubled) + addedPower;
+  const otherRowsMax = Math.max(0, ...ROWS.filter((r) => r !== row).map((r) => rowTotal(board, r, spyDoubled)));
+  if (rowAfter >= 10 && rowAfter > otherRowsMax + 6) {
+    return -Math.min(6, (rowAfter - 10) * 0.4 + addedPower * 0.15);
+  }
+  return 0;
+}
+
 /* Estimates how much a card is actually worth playing right now, accounting
    for its ability instead of just its printed power — a lone Tight Bond
    card looks weak by power alone but is worth much more once a stack is
@@ -1488,7 +1529,16 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
 
   if (card.ability === "muster") {
     const chain = musterFetchIds(card.id).filter((id) => me.hand.includes(id) || me.deck.includes(id));
-    return card.power + chain.reduce((sum, id) => sum + (cardById(id)?.power || 0), 0);
+    const chainPower = chain.reduce((sum, id) => sum + (cardById(id)?.power || 0), 0);
+    // Only the siblings landing in the SAME row as this card count toward the
+    // stacking risk — a muster group split across rows doesn't pile onto one
+    // Scorch-able target the way same-row copies (e.g. all three Crones into
+    // Close Combat) do.
+    const sameRowChainPower = chain.reduce((sum, id) => {
+      const c = cardById(id);
+      return c && c.row === card.row ? sum + c.power : sum;
+    }, 0);
+    return card.power + chainPower + stackingPenalty(board, card.row, card.power + sameRowChainPower, spyDoubled);
   }
 
   if (card.ability === "tightBond" && card.row) {
@@ -1499,23 +1549,32 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     }).length;
     // Growing an existing bond stack re-values every copy already down, so
     // it's worth much more than a flat card of the same printed power.
-    return card.power * (already + 1) + card.power * already;
+    const gain = card.power * (already + 1) + card.power * already;
+    return gain + stackingPenalty(board, card.row, gain, spyDoubled);
   }
 
   if (card.ability === "moraleBoost" && card.row) {
     const others = (board[card.row] || []).filter((id) => cardById(id)?.cardType !== "Hero").length;
-    return card.power + others;
+    // This card benefits from any Morale Boost already sitting in the row
+    // too, same as every other non-Hero unit there — forgetting that
+    // undervalues playing a second Morale source into an existing stack.
+    const existingMoraleSources = (board[card.row] || []).filter((id) => cardById(id)?.ability === "moraleBoost").length;
+    const gain = card.power + existingMoraleSources + others;
+    return gain + stackingPenalty(board, card.row, gain, spyDoubled);
   }
 
   if (card.ability === "horn") {
     const targetRow = card.row || (autoOptionsForCard(card, board) || {}).chosenRow;
-    return card.power + (targetRow ? rowTotal(board, targetRow, spyDoubled) : 0);
+    // Heroes don't double — count only the non-Hero power actually affected.
+    return card.power + (targetRow ? rowNonHeroPower(board, targetRow, spyDoubled) : 0);
   }
 
   if (card.ability === "weather") {
     const rows = Array.isArray(card.abilityMeta.row) ? card.abilityMeta.row : [card.abilityMeta.row];
-    const oppHit = rows.reduce((sum, r) => sum + rowTotal(opp.board, r, spyDoubled), 0);
-    const selfHit = rows.reduce((sum, r) => sum + rowTotal(me.board, r, spyDoubled), 0);
+    // Heroes are immune to weather too — a row anchored by one looks like a
+    // big juicy target by raw total but won't actually lose any power.
+    const oppHit = rows.reduce((sum, r) => sum + rowNonHeroPower(opp.board, r, spyDoubled), 0);
+    const selfHit = rows.reduce((sum, r) => sum + rowNonHeroPower(me.board, r, spyDoubled), 0);
     // No floor here on purpose: if selfHit outweighs oppHit this should come
     // back NEGATIVE, not clamp to a fake "harmless" 0 — a weather that hurts
     // our own board more than theirs is an active mistake, not a safe dump.
@@ -1524,7 +1583,8 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
 
   if (card.ability === "scorchRow" && card.row) {
     const hits = strongestInRow(opp.board, card.row, spyDoubled);
-    return card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, card.row, spyDoubled), 0);
+    const gain = card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, card.row, spyDoubled), 0);
+    return gain + stackingPenalty(board, card.row, card.power, spyDoubled);
   }
 
   if (card.ability === "scorchGlobal") {
@@ -1542,9 +1602,10 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     const total = rowTotal(opp.board, r, spyDoubled);
     if (total >= (card.abilityMeta.threshold || 10)) {
       const hits = strongestInRow(opp.board, r, spyDoubled);
-      return card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, r, spyDoubled), 0);
+      const gain = card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, r, spyDoubled), 0);
+      return gain + stackingPenalty(board, card.row, card.power, spyDoubled);
     }
-    return card.power;
+    return card.power + stackingPenalty(board, card.row, card.power, spyDoubled);
   }
 
   if (card.ability === "decoy") {
@@ -1570,11 +1631,12 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
 
   if (card.ability === "spy") {
     // The card itself goes on the OPPONENT's board — it adds nothing to our
-    // own total this turn. Its real value is the two extra cards it draws,
-    // which matters most early (hand/card advantage) and less once hand
-    // size no longer matters (late round 3 push). Treat it as a flat
-    // card-advantage value, NOT the card's printed power.
-    return 4;
+    // own total this turn, and worse, hands them its printed power. A flat
+    // constant here treated a 0-power Mysterious Elf identically to a
+    // 9-power Stefan Skellen, when the latter is a real gift to their board.
+    // The 2-card draw is still valuable enough that this rarely goes
+    // negative, but a high-power spy should score well below a cheap one.
+    return 6 - card.power * 0.6;
   }
 
   if (card.ability === "medic") {
@@ -1732,7 +1794,18 @@ function chooseAiDeck(aiFaction) {
 // Agile unit already down, ...) that literally cannot be true on turn 1
 // with an empty board — firing those unconditionally just burns the
 // leader for a permanent no-op, so they're checked live instead below.
-const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L05", "L06", "L07", "L10", "L11", "L14", "L16", "L18", "L20", "L22"]);
+// L05/L07 fetch-and-play a weather card instantly — unlike L03's instant Horn
+// (a standing multiplier that's genuinely fine to pre-commit turn 1, since it
+// just buffs whatever gets played into that row later), firing these on a
+// completely empty board freezes a row nothing is in yet. Self-play logs
+// caught this twice (08-08-39, 08-03-38): "freezing both sides' Siege row to
+// 1 power" as the literal opening move, before either side had a single Siege
+// card down. It's not purely wasted (weather is a standing effect that will
+// suppress future plays in that row too), but locking a row before either
+// side has committed to it is a coin flip that can just as easily deny the
+// AI's OWN plan as the opponent's — moved to leaderConditionMet so it fires
+// once there's an actual, favorable target instead of blindly turn 1.
+const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L06", "L10", "L11", "L14", "L16", "L18", "L20", "L22"]);
 
 function leaderConditionMet(state, aiKey, leaderId) {
   const me = state.players[aiKey];
@@ -1745,6 +1818,19 @@ function leaderConditionMet(state, aiKey, leaderId) {
       return opp.discard.some((id) => cardById(id)?.cardType !== "Hero");
     case "L12": // Clear Weather — needs weather actually present on either side
       return ROWS.some((r) => me.board.weather[r] || opp.board.weather[r]);
+    case "L07": { // Fetch + play Torrential Rain (Siege) — wait for the opponent
+      // to actually have Siege power worth freezing, and don't do it if we're
+      // the one ahead in that row (we'd just be freezing our own lead).
+      const spy = matchHasLeader(state, "L01");
+      const oppSiege = rowTotal(opp.board, "siege", spy);
+      const meSiege = rowTotal(me.board, "siege", spy);
+      return oppSiege > 0 && oppSiege >= meSiege;
+    }
+    case "L05": { // Pick any weather — same idea, generalized: only worth
+      // casting once the opponent has actually put real power somewhere.
+      const spy = matchHasLeader(state, "L01");
+      return boardTotal(opp.board, spy) >= 6;
+    }
     case "L13": // Foltest — Scorch Ranged if total >= 10
       return rowTotal(opp.board, "ranged", matchHasLeader(state, "L01")) >= 10;
     case "L15": // Scorch Siege if total >= 10
@@ -1795,13 +1881,6 @@ function computeAIAction(state, aiKey) {
 
   const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board, me.discard, me.deck) || {} });
 
-  if (opp.passed) {
-    if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
-    const need = oppTotal - myTotal;
-    const enough = [...ranked].reverse().find((r) => r.impact >= need) || ranked[0];
-    return play(enough.card);
-  }
-
   // Round-conceding strategy: a real Gwent player often lets a round go
   // rather than burning their whole hand to win it — especially once
   // already ahead in the match, or holding more cards than the opponent
@@ -1843,6 +1922,23 @@ function computeAIAction(state, aiKey) {
     (state.roundWins[aiKey] > state.roundWins[oppKey] ||
       cardEdge >= 3 ||
       (roundOneIsFree && (cardEdge >= 1 || margin >= 20)));
+
+  if (opp.passed) {
+    if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
+    // Being locked in a one-sided race doesn't mean fighting is free — a
+    // hopeless, cheap-to-give-up round (round 1, tied 0-0, opponent way
+    // ahead) is still worth banking cards instead of dumping the hand
+    // chasing it, exactly like the normal concede logic below. Without this
+    // check, this branch bypassed that logic entirely through a side door.
+    if (canAffordToConcede) return { type: "PASS", player: aiKey };
+    const need = oppTotal - myTotal;
+    const enough = [...ranked].reverse().find((r) => r.impact >= need) || ranked[0];
+    // Same guard the losing-and-still-contested branch below has: never
+    // force through an actively harmful card just because the opponent
+    // can't punish it back. If nothing helps, keep the card for next round.
+    if (enough.impact < 0) return { type: "PASS", player: aiKey };
+    return play(enough.card);
+  }
 
   // Under match-point pressure, never gamble a random pass while ahead —
   // keep playing to protect the lead instead of risking the whole match.
