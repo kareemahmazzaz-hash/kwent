@@ -108,11 +108,52 @@ const SOUND_FILES = {
   wonGame: "won_game.m4a",
   wonRound: "won_round.m4a",
 };
+// Exact clip lengths (ms), measured with ffprobe against the actual files —
+// used to gate move pacing (see soundBusyUntil below) so the next card can't
+// land until the current sound has actually finished playing.
+const SOUND_DURATIONS_MS = {
+  bond: 1947, clearWeather: 3378, crachAnCraite: 2285, decoy: 1966, fog: 3000,
+  frost: 2798, gameLoss: 3180, gettingAHero: 2754, horn: 2102, leader: 2459,
+  mardroeme: 1878, morale: 1262, muster: 4337, playingBasic: 679,
+  playingHero: 2638, rain: 1806, revival: 2449, roundLoss: 2756, scorch: 1759,
+  spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
+};
 // A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
 // (e.g. Muster fetching several siblings) don't get cut off by one another —
 // each play() call grabs whichever pooled element is currently free, or
 // clones a fresh one if the pool is momentarily exhausted.
 const _soundPools = {};
+// Kicks off the network fetch for every clip once, well before it's ever
+// needed, so the very first play of a given sound isn't held up waiting on
+// a cold fetch (that stall was the "delay between the card landing and the
+// sound playing" — playback itself was always immediate, it was the browser
+// fetching the file for the first time that was slow). Safe to call
+// repeatedly; browser HTTP cache + our pool both dedupe the actual work.
+function preloadAllSounds() {
+  if (typeof Audio === "undefined") return;
+  Object.entries(SOUND_FILES).forEach(([key, file]) => {
+    let pool = _soundPools[key];
+    if (!pool) { pool = []; _soundPools[key] = pool; }
+    if (pool.length) return;
+    const el = new Audio();
+    el.preload = "auto";
+    el.src = SOUND_BASE_URL + file;
+    el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; };
+    try { el.load(); } catch (e) { /* non-fatal */ }
+    pool.push(el);
+  });
+}
+// Tracks when the currently-queued sound(s) will actually finish, so moves
+// can be paced to not step on each other's audio (see soundGate below).
+// Module-level on purpose — pacing is a global "is anything audible right
+// now" concept, not something scoped to one component instance.
+let soundBusyUntil = 0;
+function markSoundBusy(durationMs) {
+  soundBusyUntil = Math.max(soundBusyUntil, Date.now() + (durationMs || 1400));
+}
+function soundGateRemainingMs() {
+  return Math.max(0, soundBusyUntil - Date.now());
+}
 function playSound(key) {
   const file = SOUND_FILES[key];
   if (!file || typeof Audio === "undefined") return;
@@ -128,6 +169,7 @@ function playSound(key) {
       el.currentTime = 0;
     }
     el.play().catch(() => {}); // browsers block autoplay before any user gesture — safe to ignore
+    markSoundBusy(SOUND_DURATIONS_MS[key]);
   } catch (e) { /* non-fatal — sound is decoration, never block gameplay on it */ }
 }
 // Ability -> sound key, for the layered "base play sound, then ability sound"
@@ -155,11 +197,32 @@ function weatherSoundKeyForRow(row) {
   if (row === "siege") return "rain";
   return null;
 }
-// Plays a card's base "someone played a card" sound, then — after a short
-// stagger so the two are audibly sequential rather than perfectly stacked —
-// layers its ability-specific sound on top, per Kareem's spec: "playing_basic
-// starts then the other ability sound follows."
-function playCardSounds(card) {
+// Bond/Morale only make noise when their ability actually *does* something —
+// a lone Bond unit with no matching sibling in its row, or a Morale card
+// played into an empty/all-Hero row, is a silent no-op and shouldn't sound
+// like one triggered. Every other ability always "does something" the
+// instant it's played, so this only needs to special-case those two.
+function abilityActuallyActivates(card, board, row) {
+  if (!board || !row) return true;
+  if (card.ability === "tightBond") {
+    const base = bondBaseName(card.name);
+    const count = board[row].filter((id) => {
+      const c = cardById(id);
+      return c && c.ability === "tightBond" && bondBaseName(c.name) === base;
+    }).length;
+    return count >= 2;
+  }
+  if (card.ability === "moraleBoost") {
+    const affected = board[row].filter((id) => id !== card.id && cardById(id)?.cardType !== "Hero").length;
+    return affected >= 1;
+  }
+  return true;
+}
+// Plays a card's base "someone played a card" sound, then — immediately
+// after, no artificial delay — layers its ability-specific sound on top if
+// the ability actually has an effect (see abilityActuallyActivates above).
+// `board`/`row` are optional context used only for the Bond/Morale check.
+function playCardSounds(card, board, row) {
   if (!card) return;
   playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
   let abilityKey = ABILITY_SOUND_KEY[card.ability];
@@ -167,12 +230,15 @@ function playCardSounds(card) {
   // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
   // clip exists for it, so both layer in together as the closest fit.
   const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
-  if (abilityKey || isStorm) {
-    setTimeout(() => {
-      if (isStorm) { playSound("fog"); playSound("rain"); }
-      else playSound(abilityKey);
-    }, 180);
+  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row)) {
+    if (isStorm) { playSound("fog"); playSound("rain"); }
+    else playSound(abilityKey);
   }
+}
+// Finds which row array (if any) currently holds this card id, for the
+// Bond/Morale activation check above.
+function rowOfCardInBoard(board, id) {
+  return ROWS.find((r) => board[r].includes(id)) || null;
 }
 
 /* ----------------------------- META ------------------------------------ */
@@ -2833,6 +2899,20 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 }
 
 function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLabel }) {
+  // Plays once, right when the very first hand is dealt (mulligan only ever
+  // happens at the start of Round 1 — see the single "phase: mulligan" site
+  // in gameReducer — so "on mount, before any swaps" reliably means "the
+  // opening hand"). Only fires if that hand has zero Heroes in it; a hand
+  // that does contain one gets getting_a_hero instead (not yet wired — see
+  // v37 notes).
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    const hasHero = (hand || []).some((id) => cardById(id)?.cardType === "Hero");
+    if (!hasHero) playSound("startingWithBasic");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const remaining = MAX_MULLIGAN - swapsUsed;
   const sortedHand = sortIdsByPower(hand);
   return (
@@ -3010,10 +3090,30 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
 
 function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
-  isMyTurn, onPlayCard, onPass, onForfeit, onUseLeader, canAct, opponentThinking,
+  isMyTurn, onPlayCard: onPlayCardRaw, onPass: onPassRaw, onForfeit, onUseLeader: onUseLeaderRaw, canAct: canActRaw, opponentThinking,
 }) {
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
+  // Move pacing: don't let the next card/leader/pass action fire until
+  // whatever sound is currently playing has actually finished — otherwise
+  // rapid-fire plays cut each other's audio off mid-clip. Re-renders every
+  // 150ms while something's playing purely so the "can I act yet" gate
+  // (and any disabled-button styling that depends on canAct) stays current;
+  // idle the rest of the time.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (soundGateRemainingMs() <= 0) return;
+    const t = setInterval(() => {
+      forceTick((n) => n + 1);
+      if (soundGateRemainingMs() <= 0) clearInterval(t);
+    }, 150);
+    return () => clearInterval(t);
+  });
+  const soundGated = soundGateRemainingMs() > 0;
+  const canAct = canActRaw && !soundGated;
+  const onPlayCard = (...args) => { if (soundGateRemainingMs() > 0) return; onPlayCardRaw(...args); };
+  const onUseLeader = (...args) => { if (soundGateRemainingMs() > 0) return; onUseLeaderRaw(...args); };
+  const onPass = (...args) => { if (soundGateRemainingMs() > 0) return; onPassRaw(...args); };
   const me = state.players[viewerRole];
   const opp = state.players[opponentRole];
   const myLeader = cardById(me.leaderId);
@@ -3079,8 +3179,8 @@ function PlayBoard({
       // (that's the whole point of Spy) — so it's picked up here via
       // newOppOnlyIds, not newMineIds, and only ever appears in one of the
       // two lists, so there's no risk of it playing twice.
-      newMineIds.forEach((id) => playCardSounds(cardById(id)));
-      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id)));
+      newMineIds.forEach((id) => playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id)));
+      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id)));
       // Weather changing per row -> fog/frost/rain; all-clear -> clearWeather.
       // (Checked once — since a weather card is also caught by the play-sound
       // pass above via its own ability, we only need the *ability-less* board
@@ -3867,6 +3967,9 @@ function AIGame({ onExit }) {
   useEffect(() => {
     if (!state) return;
     if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed) {
+      // Wait at least the usual "thinking" beat, but never fire before the
+      // last move's sound has actually finished (see soundGateRemainingMs).
+      const delay = Math.max(1300, soundGateRemainingMs());
       aiTimerRef.current = setTimeout(() => {
         const action = computeAIAction(state, "p2");
         const me = state.players.p2;
@@ -3880,7 +3983,7 @@ function AIGame({ onExit }) {
           action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
         });
         setState((s) => gameReducer(s, action));
-      }, 1300);
+      }, delay);
       return () => clearTimeout(aiTimerRef.current);
     }
   }, [state]);
@@ -4992,6 +5095,11 @@ export default function App() {
   const [mode, setMode] = useState(null);
   const [resetKey, setResetKey] = useState(0);
   const onlineAvailable = true; // backed by Firebase Realtime Database now
+
+  // Fire off the network fetch for every sound clip as soon as the app
+  // loads, well before any of them are actually needed — see
+  // preloadAllSounds' comment for why this matters.
+  useEffect(() => { preloadAllSounds(); }, []);
 
   function exitToMenu() {
     setMode(null);
