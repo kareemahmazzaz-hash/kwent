@@ -157,12 +157,6 @@ function soundGateRemainingMs() {
 function playSound(key) {
   const file = SOUND_FILES[key];
   if (!file || typeof Audio === "undefined") return;
-  // TEMP diagnostic — every sound call logs its key + a stack trace. Once we
-  // have a real capture of the muster/starting_with_basic report this can
-  // come back out; for now it's the fastest way to get hard evidence
-  // instead of another guess. Open devtools console, reproduce it, and send
-  // the "[kwent sound]" lines around the moment you hear it.
-  if (typeof console !== "undefined") console.trace("[kwent sound] play:", key);
   try {
     let pool = _soundPools[key];
     if (!pool) { pool = []; _soundPools[key] = pool; }
@@ -258,9 +252,9 @@ function abilityActuallyActivates(card, board, row, batchIds) {
   return true;
 }
 // Abilities that get ONLY their own dedicated sound, with no playing_basic/
-// playing_hero base layered under them — unlike every other special card
-// (Decoy, Muster, Scorch, Spy, Medic), which do get the base sound first.
-const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn"]);
+// playing_hero base layered under them — unlike the rest of the special
+// cards (Decoy, Scorch, Spy, Medic), which do get the base sound first.
+const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn", "muster"]);
 // Plays a card's base "someone played a card" sound (skipped for weather/
 // horn — see NO_BASE_SOUND_ABILITIES above), then layers its ability-
 // specific sound on top if the ability actually has an effect (see
@@ -514,7 +508,7 @@ const CARDS = [
 {id:"c177",name:"Havekar Smuggler (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Havekar Smuggler3.png"},
 {id:"c178",name:"Ida Emean aep Sivney",faction:"scoiatael",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Ida Emean aep Sivney.png"},
 {id:"c179",name:"Iorveth",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Iorveth.png"},
-{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:10.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
+{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
 {id:"c181",name:"Mahakaman Defender (1)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender1.png"},
 {id:"c182",name:"Mahakaman Defender (2)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender2.png"},
 {id:"c183",name:"Mahakaman Defender (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender3.png"},
