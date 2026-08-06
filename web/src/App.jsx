@@ -157,6 +157,12 @@ function soundGateRemainingMs() {
 function playSound(key) {
   const file = SOUND_FILES[key];
   if (!file || typeof Audio === "undefined") return;
+  // TEMP diagnostic — every sound call logs its key + a stack trace. Once we
+  // have a real capture of the muster/starting_with_basic report this can
+  // come back out; for now it's the fastest way to get hard evidence
+  // instead of another guess. Open devtools console, reproduce it, and send
+  // the "[kwent sound]" lines around the moment you hear it.
+  if (typeof console !== "undefined") console.trace("[kwent sound] play:", key);
   try {
     let pool = _soundPools[key];
     if (!pool) { pool = []; _soundPools[key] = pool; }
@@ -3247,6 +3253,13 @@ function PlayBoard({
     };
     const prev = soundPrevRef.current;
     if (prev) {
+      // The whole block is wrapped, not just the per-id forEach above — ANY
+      // throw in here (weather/leader detection included) must not be able
+      // to skip the soundPrevRef.current write at the bottom of this effect,
+      // for the same reason: a skipped write means next diff compares
+      // against a stale snapshot and old, already-played cards can look
+      // "new" again.
+      try {
       // Newly played cards (on either side) — base sound + layered ability sound.
       const newMineIds = snapshot.meIds.filter((id) => !prev.meIds.includes(id));
       const newOppOnlyIds = snapshot.oppIds.filter((id) => !prev.oppIds.includes(id));
@@ -3254,8 +3267,21 @@ function PlayBoard({
       // (that's the whole point of Spy) — so it's picked up here via
       // newOppOnlyIds, not newMineIds, and only ever appears in one of the
       // two lists, so there's no risk of it playing twice.
-      newMineIds.forEach((id) => playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds));
-      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds));
+      // Wrapped per-id: one bad card must not be able to throw and abort the
+      // rest of this effect — that would skip every sound after it in this
+      // batch (a very plausible reason Spy could go silent) AND, worse,
+      // prevent soundPrevRef.current from ever being updated at the bottom
+      // of this effect, leaving the next diff comparing against a stale,
+      // several-moves-old snapshot — which could make an old card look
+      // "new" again and refire an unrelated sound entirely.
+      newMineIds.forEach((id) => {
+        try { playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds); }
+        catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
+      });
+      newOppOnlyIds.forEach((id) => {
+        try { playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds); }
+        catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
+      });
       // Hero drawn into hand — mulligan swap, Spy's 2-card draw, a leader's
       // draw, an automatic per-faction draw (e.g. Northern Realms on a round
       // win), etc. All treated the same way regardless of *why* the hand
@@ -3286,6 +3312,9 @@ function PlayBoard({
       // Leader activation — leaderUsed flipping false -> true.
       if (!prev.meLeaderUsed && snapshot.meLeaderUsed) playSound(snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader");
       if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) playSound(snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader");
+      } catch (e) {
+        console.error("[kwent sound] sound-diff effect threw — snapshot still committed below", e);
+      }
     }
     soundPrevRef.current = snapshot;
   }, [me.board, opp.board, me.hand, opp.hand, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
