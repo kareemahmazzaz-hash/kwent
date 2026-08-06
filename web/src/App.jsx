@@ -168,8 +168,26 @@ function playSound(key) {
     } else {
       el.currentTime = 0;
     }
-    el.play().catch(() => {}); // browsers block autoplay before any user gesture — safe to ignore
-    markSoundBusy(SOUND_DURATIONS_MS[key]);
+    // el.play() returns a Promise that only resolves once playback has
+    // ACTUALLY started — not when play() was called. If a clip is still
+    // buffering (very plausible for the very first sound of a session,
+    // e.g. starting_with_basic right at the mulligan screen, even with
+    // preloading), there can be a real gap between calling play() and
+    // audio actually coming out of the speakers. Anchoring the busy-window
+    // to call time instead of that resolved moment was the bug behind
+    // "starting_with_basic played together with muster": the pacing gate
+    // considered starting_with_basic already finished (counting down from
+    // when play() was called) and let a Muster play through before
+    // starting_with_basic's delayed audio had actually started, so the two
+    // ended up genuinely overlapping. Anchoring to the promise's resolution
+    // instead means the busy-window always reflects when the sound is truly
+    // audible, however long buffering took.
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.then === "function") {
+      playPromise.then(() => markSoundBusy(SOUND_DURATIONS_MS[key])).catch(() => {});
+    } else {
+      markSoundBusy(SOUND_DURATIONS_MS[key]); // older browsers with no Promise-returning play()
+    }
   } catch (e) { /* non-fatal — sound is decoration, never block gameplay on it */ }
 }
 // Ability -> sound key, for the layered "base play sound, then ability sound"
