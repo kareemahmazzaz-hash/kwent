@@ -514,7 +514,7 @@ const CARDS = [
 {id:"c177",name:"Havekar Smuggler (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Havekar Smuggler3.png"},
 {id:"c178",name:"Ida Emean aep Sivney",faction:"scoiatael",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Ida Emean aep Sivney.png"},
 {id:"c179",name:"Iorveth",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Iorveth.png"},
-{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
+{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:10.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
 {id:"c181",name:"Mahakaman Defender (1)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender1.png"},
 {id:"c182",name:"Mahakaman Defender (2)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender2.png"},
 {id:"c183",name:"Mahakaman Defender (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender3.png"},
