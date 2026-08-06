@@ -197,12 +197,20 @@ function weatherSoundKeyForRow(row) {
   if (row === "siege") return "rain";
   return null;
 }
-// Bond/Morale only make noise when their ability actually *does* something —
-// a lone Bond unit with no matching sibling in its row, or a Morale card
-// played into an empty/all-Hero row, is a silent no-op and shouldn't sound
-// like one triggered. Every other ability always "does something" the
-// instant it's played, so this only needs to special-case those two.
-function abilityActuallyActivates(card, board, row) {
+// Bond/Morale/Muster only make noise when their ability actually *does*
+// something — a lone Bond unit with no matching sibling in its row, a
+// Morale card played into an empty/all-Hero row, or a Muster card with no
+// siblings left to fetch are silent no-ops and shouldn't sound like they
+// triggered. Every other ability always "does something" the instant it's
+// played, so this only needs to special-case these three. `batchIds` is the
+// full list of card ids that landed on the board in this same diff pass —
+// used only for Muster, to check whether any siblings actually arrived
+// alongside it.
+function abilityActuallyActivates(card, board, row, batchIds) {
+  if (card.ability === "muster") {
+    const fetch = musterFetchIds(card.id);
+    return !!(batchIds && batchIds.some((id) => id !== card.id && fetch.includes(id)));
+  }
   if (!board || !row) return true;
   if (card.ability === "tightBond") {
     const base = bondBaseName(card.name);
@@ -218,19 +226,26 @@ function abilityActuallyActivates(card, board, row) {
   }
   return true;
 }
-// Plays a card's base "someone played a card" sound, then — immediately
-// after, no artificial delay — layers its ability-specific sound on top if
-// the ability actually has an effect (see abilityActuallyActivates above).
-// `board`/`row` are optional context used only for the Bond/Morale check.
-function playCardSounds(card, board, row) {
+// Abilities that get ONLY their own dedicated sound, with no playing_basic/
+// playing_hero base layered under them — unlike every other special card
+// (Decoy, Muster, Scorch, Spy, Medic), which do get the base sound first.
+const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn"]);
+// Plays a card's base "someone played a card" sound (skipped for weather/
+// horn — see NO_BASE_SOUND_ABILITIES above), then layers its ability-
+// specific sound on top if the ability actually has an effect (see
+// abilityActuallyActivates above). `board`/`row`/`batchIds` are optional
+// context used only for the Bond/Morale/Muster activation checks.
+function playCardSounds(card, board, row, batchIds) {
   if (!card) return;
-  playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
+  if (!NO_BASE_SOUND_ABILITIES.has(card.ability)) {
+    playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
+  }
   let abilityKey = ABILITY_SOUND_KEY[card.ability];
   if (card.ability === "weather") abilityKey = weatherSoundKeyForRow(Array.isArray(card.abilityMeta?.row) ? card.abilityMeta.row[0] : card.abilityMeta?.row) || null;
   // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
   // clip exists for it, so both layer in together as the closest fit.
   const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
-  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row)) {
+  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds)) {
     if (isStorm) { playSound("fog"); playSound("rain"); }
     else playSound(abilityKey);
   }
@@ -239,6 +254,16 @@ function playCardSounds(card, board, row) {
 // Bond/Morale activation check above.
 function rowOfCardInBoard(board, id) {
   return ROWS.find((r) => board[r].includes(id)) || null;
+}
+// Guards starting_with_basic so it can only ever fire once for the whole
+// game, no matter how many times a MulliganPanel instance happens to mount —
+// reset by resetStartingBasicGuard() whenever a brand new game is started.
+let startingBasicFiredThisGame = false;
+function resetStartingBasicGuard() { startingBasicFiredThisGame = false; }
+function playStartingBasicOnce() {
+  if (startingBasicFiredThisGame) return;
+  startingBasicFiredThisGame = true;
+  playSound("startingWithBasic");
 }
 
 /* ----------------------------- META ------------------------------------ */
@@ -1018,25 +1043,37 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "medic": {
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
-      const eligible = state.players[actingKey].discard.filter((id) => {
-        const c = cardById(id);
-        return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
-      });
-      let reviveId = null;
-      if (eligible.length) {
-        reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (options.reviveId && eligible.includes(options.reviveId) ? options.reviveId : eligible[0]);
-      }
-      if (reviveId) {
+      // Chain: if the revived card is itself a Medic, it immediately revives
+      // another card too, and so on, until either the discard has nothing
+      // eligible left or a link in the chain isn't a Medic. Only the very
+      // first pick can come from `options.reviveId` (player's choice);
+      // everything after that in the chain is automatic for now — v38's
+      // interactive two-step rework will make each link player-chosen.
+      let chainState = ns;
+      let chainCount = 0;
+      let preferredId = options.reviveId;
+      let chaining = true;
+      while (chaining) {
+        const eligible = chainState.players[actingKey].discard.filter((id) => {
+          const c = cardById(id);
+          return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
+        });
+        if (!eligible.length) {
+          if (chainCount === 0) log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
+          break;
+        }
+        const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (preferredId && eligible.includes(preferredId) ? preferredId : eligible[0]);
+        preferredId = null;
         const reviveCard = cardById(reviveId);
         if (reviveCard.ability === "spy") {
           // Reviving a Spy through Medic plays it exactly like a normal Spy:
           // it goes on the OPPONENT's side, and the medic's controller still
           // draws the usual 2 cards for it.
-          ns = withPlayer(ns, oppKey, (p) => ({
+          chainState = withPlayer(chainState, oppKey, (p) => ({
             ...p,
             board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
           }));
-          ns = withPlayer(ns, actingKey, (p) => {
+          chainState = withPlayer(chainState, actingKey, (p) => {
             const drawn = p.deck.slice(0, 2);
             return {
               ...p,
@@ -1045,18 +1082,19 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
               hand: [...p.hand, ...drawn],
             };
           });
-          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
+          log.push(`${actor.name}'s Medic revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
         } else {
-          ns = withPlayer(ns, actingKey, (p) => ({
+          chainState = withPlayer(chainState, actingKey, (p) => ({
             ...p,
             discard: p.discard.filter((id) => id !== reviveId),
             board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
           }));
-          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} from the discard pile.`);
+          log.push(`${actor.name}'s Medic revives ${reviveCard.name} from the discard pile.`);
         }
-      } else {
-        log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
+        chainCount++;
+        chaining = reviveCard.ability === "medic";
       }
+      ns = chainState;
       break;
     }
     case "scorchGlobal": {
@@ -1545,6 +1583,7 @@ function gameReducer(state, action) {
 /* ------------------------------ GAME INIT -------------------------------- */
 
 function initGame(p1cfg, p2cfg) {
+  resetStartingBasicGuard(); // a brand new game means the opening-hand sound can fire again
   let p1 = dealHand(makePlayer(p1cfg));
   let p2 = dealHand(makePlayer(p2cfg));
   // L08 Invader of the North affects Medic-style revives for BOTH players
@@ -2902,17 +2941,29 @@ function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLa
   // Plays once, right when the very first hand is dealt (mulligan only ever
   // happens at the start of Round 1 — see the single "phase: mulligan" site
   // in gameReducer — so "on mount, before any swaps" reliably means "the
-  // opening hand"). Only fires if that hand has zero Heroes in it; a hand
-  // that does contain one gets getting_a_hero instead (not yet wired — see
-  // v37 notes).
+  // opening hand"). Zero Heroes -> starting_with_basic (guarded to fire only
+  // once for the whole game, no matter how many times this component
+  // mounts). One or more Heroes -> getting_a_hero, once per Hero, same as
+  // any other hero-gain moment.
   const firedRef = useRef(false);
+  const prevHandRef = useRef(hand || []);
   useEffect(() => {
     if (firedRef.current) return;
     firedRef.current = true;
-    const hasHero = (hand || []).some((id) => cardById(id)?.cardType === "Hero");
-    if (!hasHero) playSound("startingWithBasic");
+    const heroes = (hand || []).filter((id) => cardById(id)?.cardType === "Hero");
+    if (heroes.length) heroes.forEach(() => playSound("gettingAHero"));
+    else playStartingBasicOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Subsequent hand changes are swap-drawn replacement cards — if a swap
+  // draws a Hero, that's its own getting_a_hero moment too.
+  useEffect(() => {
+    if (!firedRef.current) return; // skip the run that coincides with the mount effect above
+    const prev = prevHandRef.current;
+    const newHeroes = (hand || []).filter((id) => !prev.includes(id) && cardById(id)?.cardType === "Hero");
+    newHeroes.forEach(() => playSound("gettingAHero"));
+    prevHandRef.current = hand || [];
+  }, [hand]);
   const remaining = MAX_MULLIGAN - swapsUsed;
   const sortedHand = sortIdsByPower(hand);
   return (
@@ -3161,6 +3212,8 @@ function PlayBoard({
     const snapshot = {
       meIds: [...me.board.close, ...me.board.ranged, ...me.board.siege, ...me.board.specials.map((s) => s.cardId)],
       oppIds: [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)],
+      meHand: me.hand,
+      oppHand: opp.hand,
       meWeather: me.board.weather,
       meLeaderUsed: me.leaderUsed,
       oppLeaderUsed: opp.leaderUsed,
@@ -3172,15 +3225,24 @@ function PlayBoard({
       // Newly played cards (on either side) — base sound + layered ability sound.
       const newMineIds = snapshot.meIds.filter((id) => !prev.meIds.includes(id));
       const newOppOnlyIds = snapshot.oppIds.filter((id) => !prev.oppIds.includes(id));
-      // A Spy I play lands on the opponent's board, not mine — detect that
-      // case (new opp-side card whose ability is "spy") and attribute its
-      // sound to my own play rather than treating it as the opponent's turn.
       // Note: a Spy card I play lands on the OPPONENT's board array, not mine
       // (that's the whole point of Spy) — so it's picked up here via
       // newOppOnlyIds, not newMineIds, and only ever appears in one of the
       // two lists, so there's no risk of it playing twice.
-      newMineIds.forEach((id) => playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id)));
-      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id)));
+      newMineIds.forEach((id) => playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds));
+      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds));
+      // Hero drawn into hand — mulligan swap, Spy's 2-card draw, a leader's
+      // draw, an automatic per-faction draw (e.g. Northern Realms on a round
+      // win), etc. All treated the same way regardless of *why* the hand
+      // grew: any newly-present Hero id plays its own overlapping instance
+      // of the sound, so several at once naturally get louder together. The
+      // very first hand (before any swap) is intentionally NOT covered here —
+      // MulliganPanel owns that moment on its own (see playStartingBasicOnce/
+      // its own getting_a_hero check), so it isn't double counted against
+      // this diff's baseline once PlayBoard first mounts.
+      const newHeroesMine = snapshot.meHand.filter((id) => !prev.meHand.includes(id) && cardById(id)?.cardType === "Hero");
+      const newHeroesOpp = snapshot.oppHand.filter((id) => !prev.oppHand.includes(id) && cardById(id)?.cardType === "Hero");
+      [...newHeroesMine, ...newHeroesOpp].forEach(() => playSound("gettingAHero"));
       // Weather changing per row -> fog/frost/rain; all-clear -> clearWeather.
       // (Checked once — since a weather card is also caught by the play-sound
       // pass above via its own ability, we only need the *ability-less* board
@@ -3201,7 +3263,7 @@ function PlayBoard({
       if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) playSound(snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader");
     }
     soundPrevRef.current = snapshot;
-  }, [me.board, opp.board, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
+  }, [me.board, opp.board, me.hand, opp.hand, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
 
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
