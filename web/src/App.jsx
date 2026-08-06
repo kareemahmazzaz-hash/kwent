@@ -79,6 +79,102 @@ const GEM_BREAK_ANIM_MS = 1300;
 // frames, weather frame, badge plaques) — filenames have spaces, hence %20.
 const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
 
+/* ------------------------------ SOUND ----------------------------------- */
+// Every clip lives in /sounds at repo root, served the same way as card art.
+const SOUND_BASE_URL = IMAGE_BASE_URL + "sounds/";
+const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
+const SOUND_FILES = {
+  bond: "bond.m4a",
+  clearWeather: "clear_weather.m4a",
+  crachAnCraite: "crach_an_craite.m4a",
+  decoy: "decoy.m4a",
+  fog: "fog.m4a",
+  frost: "frost.m4a",
+  gameLoss: "game_loss.m4a",
+  gettingAHero: "getting_a_hero.m4a",
+  horn: "horn.m4a",
+  leader: "leader.m4a",
+  mardroeme: "mardroeme.m4a",
+  morale: "moral.m4a",
+  muster: "muster.m4a",
+  playingBasic: "playing_basic.m4a",
+  playingHero: "playing_hero.m4a",
+  rain: "rain.m4a",
+  revival: "revival.m4a",
+  roundLoss: "round_loss.m4a",
+  scorch: "scorch.m4a",
+  spy: "spy.m4a",
+  startingWithBasic: "starting_with_basic.m4a",
+  wonGame: "won_game.m4a",
+  wonRound: "won_round.m4a",
+};
+// A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
+// (e.g. Muster fetching several siblings) don't get cut off by one another —
+// each play() call grabs whichever pooled element is currently free, or
+// clones a fresh one if the pool is momentarily exhausted.
+const _soundPools = {};
+function playSound(key) {
+  const file = SOUND_FILES[key];
+  if (!file || typeof Audio === "undefined") return;
+  try {
+    let pool = _soundPools[key];
+    if (!pool) { pool = []; _soundPools[key] = pool; }
+    let el = pool.find((a) => a.paused || a.ended);
+    if (!el) {
+      el = new Audio(SOUND_BASE_URL + file);
+      el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; el.play().catch(() => {}); };
+      if (pool.length < 4) pool.push(el);
+    } else {
+      el.currentTime = 0;
+    }
+    el.play().catch(() => {}); // browsers block autoplay before any user gesture — safe to ignore
+  } catch (e) { /* non-fatal — sound is decoration, never block gameplay on it */ }
+}
+// Ability -> sound key, for the layered "base play sound, then ability sound"
+// rule. Abilities not listed here (e.g. plain units, berserker/summonAvenger
+// which have no distinct clip yet) just get the base playingBasic/playingHero.
+const ABILITY_SOUND_KEY = {
+  tightBond: "bond",
+  moraleBoost: "morale",
+  horn: "horn",
+  mardroeme: "mardroeme",
+  decoy: "decoy",
+  spy: "spy",
+  muster: "muster",
+  scorchRow: "scorch",
+  scorchGlobal: "scorch",
+  scorchRowThreshold: "scorch",
+  clearWeather: "clearWeather",
+  // "weather" itself is ambiguous (fog/frost/rain depend on abilityMeta.row)
+  // and "medic" is being reworked into its own two-step flow (v38) — both
+  // are resolved with dedicated logic at the call site instead of this table.
+};
+function weatherSoundKeyForRow(row) {
+  if (row === "close") return "frost";
+  if (row === "ranged") return "fog";
+  if (row === "siege") return "rain";
+  return null;
+}
+// Plays a card's base "someone played a card" sound, then — after a short
+// stagger so the two are audibly sequential rather than perfectly stacked —
+// layers its ability-specific sound on top, per Kareem's spec: "playing_basic
+// starts then the other ability sound follows."
+function playCardSounds(card) {
+  if (!card) return;
+  playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
+  let abilityKey = ABILITY_SOUND_KEY[card.ability];
+  if (card.ability === "weather") abilityKey = weatherSoundKeyForRow(Array.isArray(card.abilityMeta?.row) ? card.abilityMeta.row[0] : card.abilityMeta?.row) || null;
+  // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
+  // clip exists for it, so both layer in together as the closest fit.
+  const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
+  if (abilityKey || isStorm) {
+    setTimeout(() => {
+      if (isStorm) { playSound("fog"); playSound("rain"); }
+      else playSound(abilityKey);
+    }, 180);
+  }
+}
+
 /* ----------------------------- META ------------------------------------ */
 
 const FACTION_META = {
@@ -2433,7 +2529,18 @@ function DiscardPanel({ cardIds, onClose }) {
   );
 }
 
-function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gameWinnerName, hideButton, isTie }) {
+function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gameWinnerName, hideButton, isTie, viewerName }) {
+  // Fires once per round-end banner shown (keyed on round number so it
+  // doesn't replay on unrelated rerenders). Ties don't have a clear
+  // winner/loser, so no round win/loss clip plays for them. Skipped
+  // entirely when no viewerName is supplied (Hotseat — shared device,
+  // no single "you" to judge the outcome against).
+  const firedRef = useRef(null);
+  useEffect(() => {
+    if (!viewerName || isTie || isGameEnd || firedRef.current === round) return;
+    firedRef.current = round;
+    playSound(roundWinnerName === viewerName ? "wonRound" : "roundLoss");
+  }, [round, isTie, isGameEnd, roundWinnerName, viewerName]);
   return (
     <div className="overlay overlay-clear">
       <div className="round-banner">
@@ -2455,8 +2562,30 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
   );
 }
 
-function GameOverPanel({ state, onExit, onPlayAgain, gameLog }) {
+// Online mode builds its game-over banner inline (see OnlineGame) rather
+// than through GameOverPanel, so it gets this tiny sibling instead of
+// duplicating GameOverPanel's fire-once sound logic inline there.
+function OnlineGameOverSound({ iWon, isDraw }) {
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (isDraw || firedRef.current) return;
+    firedRef.current = true;
+    playSound(iWon ? "wonGame" : "gameLoss");
+  }, [iWon, isDraw]);
+  return null;
+}
+
+function GameOverPanel({ state, onExit, onPlayAgain, gameLog, viewerRole }) {
   const winnerName = state.gameWinner === "draw" ? null : state.players[state.gameWinner].name;
+  // Same fire-once pattern as RoundBanner. Draws don't have a clip; skipped
+  // when viewerRole isn't supplied (Hotseat/Online-spectator-ish contexts
+  // where "you" isn't well defined here yet).
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!viewerRole || state.gameWinner === "draw" || firedRef.current) return;
+    firedRef.current = true;
+    playSound(state.gameWinner === viewerRole ? "wonGame" : "gameLoss");
+  }, [viewerRole, state.gameWinner]);
 
   function downloadLog() {
     const payload = {
@@ -2902,17 +3031,17 @@ function PlayBoard({
     const curOppIds = [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)];
     const curMeIds = [...me.board.close, ...me.board.ranged, ...me.board.siege, ...me.board.specials.map((s) => s.cardId)];
     if (prevIdsRef.current.opp) {
-      const newOppId = curOppIds.find((id) => !prevIdsRef.current.opp.includes(id));
-      if (newOppId) {
-        setFlash((f) => ({ ...f, opp: newOppId }));
+      const newOppIds = curOppIds.filter((id) => !prevIdsRef.current.opp.includes(id));
+      if (newOppIds.length) {
+        setFlash((f) => ({ ...f, opp: newOppIds[0] }));
         clearTimeout(flashTimers.current.opp);
         flashTimers.current.opp = setTimeout(() => setFlash((f) => ({ ...f, opp: null })), 2200);
       }
     }
     if (prevIdsRef.current.me) {
-      const newMeId = curMeIds.find((id) => !prevIdsRef.current.me.includes(id));
-      if (newMeId) {
-        setFlash((f) => ({ ...f, me: newMeId }));
+      const newMeIds = curMeIds.filter((id) => !prevIdsRef.current.me.includes(id));
+      if (newMeIds.length) {
+        setFlash((f) => ({ ...f, me: newMeIds[0] }));
         clearTimeout(flashTimers.current.me);
         flashTimers.current.me = setTimeout(() => setFlash((f) => ({ ...f, me: null })), 2200);
       }
@@ -2920,6 +3049,59 @@ function PlayBoard({
     prevIdsRef.current = { opp: curOppIds, me: curMeIds };
   }, [opp.board, me.board]);
   useEffect(() => () => { clearTimeout(flashTimers.current.opp); clearTimeout(flashTimers.current.me); }, []);
+
+  // --- Sound: card plays, weather, leader activation, round/game outcome ---
+  // Kept as its own effect (separate from the flash-highlight one above) so
+  // sound logic doesn't get tangled up with the flash-timer bookkeeping.
+  // Uses the same "diff against previous state" approach: reliable across
+  // hotseat/AI/online since it only reacts to state actually changing, and
+  // naturally skips replays/rerenders that don't add anything new.
+  const soundPrevRef = useRef(null);
+  useEffect(() => {
+    const snapshot = {
+      meIds: [...me.board.close, ...me.board.ranged, ...me.board.siege, ...me.board.specials.map((s) => s.cardId)],
+      oppIds: [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)],
+      meWeather: me.board.weather,
+      meLeaderUsed: me.leaderUsed,
+      oppLeaderUsed: opp.leaderUsed,
+      meLeaderId: me.leaderId,
+      oppLeaderId: opp.leaderId,
+    };
+    const prev = soundPrevRef.current;
+    if (prev) {
+      // Newly played cards (on either side) — base sound + layered ability sound.
+      const newMineIds = snapshot.meIds.filter((id) => !prev.meIds.includes(id));
+      const newOppOnlyIds = snapshot.oppIds.filter((id) => !prev.oppIds.includes(id));
+      // A Spy I play lands on the opponent's board, not mine — detect that
+      // case (new opp-side card whose ability is "spy") and attribute its
+      // sound to my own play rather than treating it as the opponent's turn.
+      // Note: a Spy card I play lands on the OPPONENT's board array, not mine
+      // (that's the whole point of Spy) — so it's picked up here via
+      // newOppOnlyIds, not newMineIds, and only ever appears in one of the
+      // two lists, so there's no risk of it playing twice.
+      newMineIds.forEach((id) => playCardSounds(cardById(id)));
+      newOppOnlyIds.forEach((id) => playCardSounds(cardById(id)));
+      // Weather changing per row -> fog/frost/rain; all-clear -> clearWeather.
+      // (Checked once — since a weather card is also caught by the play-sound
+      // pass above via its own ability, we only need the *ability-less* board
+      // paths here, e.g. a leader picking weather from deck with no card play.)
+      ROWS.forEach((r) => {
+        const before = prev.meWeather?.[r]?.cardId ?? null;
+        const after = snapshot.meWeather?.[r]?.cardId ?? null;
+        if (before !== after && after && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) {
+          const key = weatherSoundKeyForRow(r);
+          if (key) playSound(key);
+        }
+      });
+      const wasClear = prev.meWeather && (prev.meWeather.close || prev.meWeather.ranged || prev.meWeather.siege);
+      const isClear = !(snapshot.meWeather.close || snapshot.meWeather.ranged || snapshot.meWeather.siege);
+      if (wasClear && isClear) playSound("clearWeather");
+      // Leader activation — leaderUsed flipping false -> true.
+      if (!prev.meLeaderUsed && snapshot.meLeaderUsed) playSound(snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader");
+      if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) playSound(snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader");
+    }
+    soundPrevRef.current = snapshot;
+  }, [me.board, opp.board, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
 
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
@@ -3804,10 +3986,11 @@ function AIGame({ onExit }) {
             score={state.lastRoundScore}
             isTie={isTie}
             roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
+            viewerName="You"
             onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
           />
         )}
-        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} />}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} viewerRole="p1" />}
       </>
     );
   }
@@ -4286,7 +4469,7 @@ function OnlineGame({ onExit }) {
         const iAmP1 = role === "p1";
         winnerName = p1Won === iAmP1 ? "You" : "Opponent";
       }
-      roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton />;
+      roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton viewerName="You" />;
     }
 
     let gameOverEl = null;
@@ -4294,13 +4477,16 @@ function OnlineGame({ onExit }) {
       const iWon = meta.gameWinner === role;
       const isDraw = meta.gameWinner === "draw";
       gameOverEl = (
-        <div className="overlay overlay-clear">
-          <div className="round-banner gameover">
-            <div className="ribbon">GAME OVER</div>
-            <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
-            <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+        <>
+          <OnlineGameOverSound iWon={iWon} isDraw={isDraw} />
+          <div className="overlay overlay-clear">
+            <div className="round-banner gameover">
+              <div className="ribbon">GAME OVER</div>
+              <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
+              <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+            </div>
           </div>
-        </div>
+        </>
       );
     }
 
