@@ -169,24 +169,31 @@ function playSound(key) {
       el.currentTime = 0;
     }
     // el.play() returns a Promise that only resolves once playback has
-    // ACTUALLY started — not when play() was called. If a clip is still
-    // buffering (very plausible for the very first sound of a session,
-    // e.g. starting_with_basic right at the mulligan screen, even with
-    // preloading), there can be a real gap between calling play() and
-    // audio actually coming out of the speakers. Anchoring the busy-window
-    // to call time instead of that resolved moment was the bug behind
-    // "starting_with_basic played together with muster": the pacing gate
-    // considered starting_with_basic already finished (counting down from
-    // when play() was called) and let a Muster play through before
-    // starting_with_basic's delayed audio had actually started, so the two
-    // ended up genuinely overlapping. Anchoring to the promise's resolution
-    // instead means the busy-window always reflects when the sound is truly
-    // audible, however long buffering took.
+    // ACTUALLY started — not when play() was called. There are two things
+    // that need to be true at once, and they pull in different directions:
+    //   1. Move pacing (soundGateRemainingMs, read synchronously by the AI's
+    //      move-scheduler and by onPlayCard's click-gate) needs the busy
+    //      window set IMMEDIATELY, in the same tick as this call — the
+    //      promise resolving is a microtask, which runs strictly after the
+    //      current render commit, so anything that reads the gate
+    //      synchronously during that same commit (e.g. AIGame's "it's my
+    //      turn" effect) would otherwise see a stale, not-yet-updated
+    //      window and schedule its next move off the flat 1300ms floor
+    //      regardless of how long the actual clip is — this was the "no
+    //      delay between moves" bug.
+    //   2. If a clip is still genuinely buffering (plausible for the very
+    //      first sound of a session, e.g. starting_with_basic right at the
+    //      mulligan screen), audible playback can start later than
+    //      call-time — so the window also needs correcting once we know
+    //      playback truly began, or a later move's sound could still end up
+    //      overlapping the tail end of a delayed one.
+    // Doing both — mark immediately, then re-mark (via the same Math.max)
+    // once the promise resolves — covers both without regressing either.
+    const durationMs = SOUND_DURATIONS_MS[key];
+    markSoundBusy(durationMs);
     const playPromise = el.play();
     if (playPromise && typeof playPromise.then === "function") {
-      playPromise.then(() => markSoundBusy(SOUND_DURATIONS_MS[key])).catch(() => {});
-    } else {
-      markSoundBusy(SOUND_DURATIONS_MS[key]); // older browsers with no Promise-returning play()
+      playPromise.then(() => markSoundBusy(durationMs)).catch(() => {});
     }
   } catch (e) { /* non-fatal — sound is decoration, never block gameplay on it */ }
 }
