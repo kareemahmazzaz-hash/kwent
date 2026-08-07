@@ -90,7 +90,7 @@ const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
 // and global on purpose: bumping busts ALL sound files at once rather than
 // needing to track versions per-file, which is fine since re-fetching a few
 // dozen small clips costs nothing.
-const SOUND_ASSET_VERSION = 2;
+const SOUND_ASSET_VERSION = 3;
 const SOUND_FILES = {
   bond: "bond.m4a",
   clearWeather: "clear_weather.m4a",
@@ -263,8 +263,10 @@ function abilityActuallyActivates(card, board, row, batchIds) {
 }
 // Abilities that get ONLY their own dedicated sound, with no playing_basic/
 // playing_hero base layered under them — unlike the rest of the special
-// cards (Decoy, Scorch, Spy, Medic), which do get the base sound first.
-const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn", "muster"]);
+// cards (Decoy, Muster, Scorch, Spy, Medic), which do get the base sound
+// first. Muster deliberately kept OUT of this set: playing_basic before
+// muster.m4a is the wanted behavior.
+const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn"]);
 // Plays a card's base "someone played a card" sound (skipped for weather/
 // horn — see NO_BASE_SOUND_ABILITIES above), then layers its ability-
 // specific sound on top if the ability actually has an effect (see
