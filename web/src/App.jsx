@@ -3318,6 +3318,8 @@ function PlayBoard({
       oppLeaderUsed: opp.leaderUsed,
       meLeaderId: me.leaderId,
       oppLeaderId: opp.leaderId,
+      meMardroeme: me.board.mardroeme,
+      oppMardroeme: opp.board.mardroeme,
     };
     const prev = soundPrevRef.current;
     if (prev) {
@@ -3349,12 +3351,35 @@ function PlayBoard({
       // of this effect, leaving the next diff comparing against a stale,
       // several-moves-old snapshot — which could make an old card look
       // "new" again and refire an unrelated sound entirely.
+      // A Berserker played straight into a row where Mardroeme is ALREADY
+      // active transforms on arrival (see the "berserker" default-case
+      // reducer logic) — its board id lands directly as the Transformed
+      // Vildkaarl/Young Vildkaarl variant, so by the time this diff sees it
+      // it just looks like a plain tightBond/moraleBoost unit and gets no
+      // distinct transform sound. Detected here via the undraftable
+      // Transformed-variant flag landing in a row whose mardroeme flag was
+      // ALREADY true in the previous snapshot (as opposed to just having
+      // been flipped true by a Mardroeme card played in this very diff,
+      // which already gets its own dedicated mardroeme/mardroemeAlone sound
+      // via the card.ability === "mardroeme" branch of playCardSounds).
+      const arrivalTransformSound = (id, board, prevMardroeme) => {
+        const c = cardById(id);
+        if (!c?.abilityMeta?.undraftable) return;
+        const row = rowOfCardInBoard(board, id);
+        if (row && prevMardroeme?.[row]) playSound("mardroeme");
+      };
       newMineIds.forEach((id) => {
-        try { playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds); }
+        try {
+          playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds);
+          arrivalTransformSound(id, me.board, prev.meMardroeme);
+        }
         catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
       });
       newOppOnlyIds.forEach((id) => {
-        try { playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds); }
+        try {
+          playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds);
+          arrivalTransformSound(id, opp.board, prev.oppMardroeme);
+        }
         catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
       });
       // scorchGlobal special cards (Scorch (1)/(2)/(3)) never touch the
@@ -4150,16 +4175,6 @@ function AIGame({ onExit }) {
     return () => clearTimeout(t);
   }, [state]);
 
-  // AI auto-acknowledges the coin flip result so the human isn't blocked on it.
-  useEffect(() => {
-    if (!state || state.phase !== "coinflip") return;
-    const { resolved, starter } = state.coinFlip;
-    if (resolved && starter === "p2") {
-      const t = setTimeout(() => setState((s) => gameReducer(s, { type: "COIN_ACK" })), 700);
-      return () => clearTimeout(t);
-    }
-  }, [state]);
-
   useEffect(() => {
     if (!state) return;
     if (state.phase === "mulligan" && !state.players.p2.mulliganDone) {
@@ -4235,11 +4250,8 @@ function AIGame({ onExit }) {
       return <CoinFlipPanel coinFlip={state.coinFlip} myKey={caller} myName="You" oppName="AI Opponent"
         onFlip={() => setState((s) => gameReducer(s, { type: "COIN_FLIP" }))} />;
     }
-    if (starter === "p1") {
-      return <CoinFlipPanel coinFlip={state.coinFlip} myKey="p1" myName="You" oppName="AI Opponent"
-        onAck={() => setState((s) => gameReducer(s, { type: "COIN_ACK" }))} />;
-    }
-    return <CoinFlipPanel coinFlip={state.coinFlip} myKey="p2" myName="You" oppName="AI Opponent" />;
+    return <CoinFlipPanel coinFlip={state.coinFlip} myKey="p1" myName="You" oppName="AI Opponent"
+      onAck={() => setState((s) => gameReducer(s, { type: "COIN_ACK" }))} />;
   }
 
   if (state.phase === "mulligan") {
