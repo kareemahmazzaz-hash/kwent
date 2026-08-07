@@ -83,6 +83,14 @@ const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(nam
 // Every clip lives in /sounds at repo root, served the same way as card art.
 const SOUND_BASE_URL = IMAGE_BASE_URL + "sounds/";
 const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
+// Bump this whenever a sound file gets replaced in the repo (same filename,
+// new content) — it's appended as a query string on every sound URL below,
+// so a bump makes every URL new to jsDelivr's edge cache and the browser's
+// own cache, guaranteeing a fresh fetch with no manual purge needed. Cheap
+// and global on purpose: bumping busts ALL sound files at once rather than
+// needing to track versions per-file, which is fine since re-fetching a few
+// dozen small clips costs nothing.
+const SOUND_ASSET_VERSION = 2;
 const SOUND_FILES = {
   bond: "bond.m4a",
   clearWeather: "clear_weather.m4a",
@@ -114,7 +122,7 @@ const SOUND_FILES = {
 const SOUND_DURATIONS_MS = {
   bond: 1947, clearWeather: 3378, crachAnCraite: 2285, decoy: 1966, fog: 3000,
   frost: 2798, gameLoss: 3180, gettingAHero: 2754, horn: 2102, leader: 2459,
-  mardroeme: 1878, morale: 1262, muster: 4337, playingBasic: 679,
+  mardroeme: 1878, morale: 1262, muster: 1238, playingBasic: 679,
   playingHero: 2638, rain: 1806, revival: 2449, roundLoss: 2756, scorch: 1759,
   spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
@@ -129,6 +137,8 @@ const _soundPools = {};
 // sound playing" — playback itself was always immediate, it was the browser
 // fetching the file for the first time that was slow). Safe to call
 // repeatedly; browser HTTP cache + our pool both dedupe the actual work.
+function soundUrl(file) { return SOUND_BASE_URL + file + "?v=" + SOUND_ASSET_VERSION; }
+function soundFallbackUrl(file) { return SOUND_FALLBACK_BASE_URL + file + "?v=" + SOUND_ASSET_VERSION; }
 function preloadAllSounds() {
   if (typeof Audio === "undefined") return;
   Object.entries(SOUND_FILES).forEach(([key, file]) => {
@@ -137,8 +147,8 @@ function preloadAllSounds() {
     if (pool.length) return;
     const el = new Audio();
     el.preload = "auto";
-    el.src = SOUND_BASE_URL + file;
-    el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; };
+    el.src = soundUrl(file);
+    el.onerror = () => { el.onerror = null; el.src = soundFallbackUrl(file); };
     try { el.load(); } catch (e) { /* non-fatal */ }
     pool.push(el);
   });
@@ -157,19 +167,13 @@ function soundGateRemainingMs() {
 function playSound(key) {
   const file = SOUND_FILES[key];
   if (!file || typeof Audio === "undefined") return;
-  // TEMP diagnostic — every sound call logs its key + a stack trace. Once we
-  // have a real capture of the muster/starting_with_basic report this can
-  // come back out; for now it's the fastest way to get hard evidence
-  // instead of another guess. Open devtools console, reproduce it, and send
-  // the "[kwent sound]" lines around the moment you hear it.
-  if (typeof console !== "undefined") console.trace("[kwent sound] play:", key);
   try {
     let pool = _soundPools[key];
     if (!pool) { pool = []; _soundPools[key] = pool; }
     let el = pool.find((a) => a.paused || a.ended);
     if (!el) {
-      el = new Audio(SOUND_BASE_URL + file);
-      el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; el.play().catch(() => {}); };
+      el = new Audio(soundUrl(file));
+      el.onerror = () => { el.onerror = null; el.src = soundFallbackUrl(file); el.play().catch(() => {}); };
       if (pool.length < 4) pool.push(el);
     } else {
       el.currentTime = 0;
@@ -258,9 +262,9 @@ function abilityActuallyActivates(card, board, row, batchIds) {
   return true;
 }
 // Abilities that get ONLY their own dedicated sound, with no playing_basic/
-// playing_hero base layered under them — unlike every other special card
-// (Decoy, Muster, Scorch, Spy, Medic), which do get the base sound first.
-const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn"]);
+// playing_hero base layered under them — unlike the rest of the special
+// cards (Decoy, Scorch, Spy, Medic), which do get the base sound first.
+const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn", "muster"]);
 // Plays a card's base "someone played a card" sound (skipped for weather/
 // horn — see NO_BASE_SOUND_ABILITIES above), then layers its ability-
 // specific sound on top if the ability actually has an effect (see
