@@ -51,6 +51,12 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // as an automatic fallback in case a path hasn't propagated to the CDN yet.
 const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@main/";
 const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/main/";
+// Safari detection for the handful of fixes that can't be done in pure CSS
+// (e.g. removing a table row). Matches desktop + mobile Safari, excludes
+// Chrome/Edge/Firefox/Android WebViews which also mention "Safari" in UA.
+const IS_SAFARI =
+  typeof navigator !== "undefined" &&
+  /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 // The real Gwent board-shelf texture, in the repo's Neutral folder. It's one
 // image covering all 6 rows (3 opponent + 3 mine, stacked, split by a divider
 // line dead-center) — see BOARD_HALF background rules below for how each
@@ -58,27 +64,232 @@ const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazza
 const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Board/board.jpg";
 const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Board/bluecrown.jpg";
 const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/bluecrown.jpg";
+// Top-bar "life gem" assets: backgem.png is the socket, always visible and
+// left behind even after a gem breaks; 1.png is the intact gem shown on top
+// of it; breaking.gif plays once (13 frames @100ms = 1300ms) over the socket
+// the instant a gem breaks, then gives way to the bare socket for good.
+const GEM_BACK_URL = IMAGE_BASE_URL + "Board/backgem.png";
+const GEM_BACK_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/backgem.png";
+const GEM_FRONT_URL = IMAGE_BASE_URL + "Board/1.png";
+const GEM_FRONT_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/1.png";
+const GEM_BREAK_URL = IMAGE_BASE_URL + "Board/breaking.gif";
+const GEM_BREAK_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/breaking.gif";
+const GEM_BREAK_ANIM_MS = 1300;
 // Board/*.jpg cell textures (leader frames, row/horn shelves, deck/discard
 // frames, weather frame, badge plaques) — filenames have spaces, hence %20.
 const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(name)}.jpg')`;
 
-// The `backgrounds` folder names files by faction matchup, e.g.
-// "me_nilfgaardian-opp_scoia'tael.jpg". Its faction keys don't match the
-// internal faction codes used elsewhere in state (e.g. "nilfgaard",
-// "northern_realms"), so this table translates state faction -> filename key.
-const FACTION_TO_BG_KEY = {
-  monsters: "monster",
-  nilfgaard: "nilfgaardian",
-  northern_realms: "northern",
-  scoiatael: "scoia'tael",
-  skellige: "skellige",
+/* ------------------------------ SOUND ----------------------------------- */
+// Every clip lives in /sounds at repo root, served the same way as card art.
+const SOUND_BASE_URL = IMAGE_BASE_URL + "sounds/";
+const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
+const SOUND_FILES = {
+  bond: "bond.m4a",
+  clearWeather: "clear_weather.m4a",
+  crachAnCraite: "crach_an_craite.m4a",
+  decoy: "decoy.m4a",
+  fog: "fog.m4a",
+  frost: "frost.m4a",
+  gameLoss: "game_loss.m4a",
+  gettingAHero: "getting_a_hero.m4a",
+  horn: "horn.m4a",
+  leader: "leader.m4a",
+  mardroeme: "mardroeme.m4a",
+  morale: "moral.m4a",
+  muster: "muster.m4a",
+  playingBasic: "playing_basic.m4a",
+  playingHero: "playing_hero.m4a",
+  rain: "rain.m4a",
+  revival: "revival.m4a",
+  roundLoss: "round_loss.m4a",
+  scorch: "scorch.m4a",
+  spy: "spy.m4a",
+  startingWithBasic: "starting_with_basic.m4a",
+  wonGame: "won_game.m4a",
+  wonRound: "won_round.m4a",
 };
-const tableBackdropSrc = (myFaction, oppFaction) => {
-  const me = FACTION_TO_BG_KEY[myFaction];
-  const opp = FACTION_TO_BG_KEY[oppFaction];
-  if (!me || !opp) return null;
-  return `${IMAGE_BASE_URL}backgrounds/${encodeURIComponent(`me_${me}-opp_${opp}.jpg`)}`;
+// Exact clip lengths (ms), measured with ffprobe against the actual files —
+// used to gate move pacing (see soundBusyUntil below) so the next card can't
+// land until the current sound has actually finished playing.
+const SOUND_DURATIONS_MS = {
+  bond: 1947, clearWeather: 3378, crachAnCraite: 2285, decoy: 1966, fog: 3000,
+  frost: 2798, gameLoss: 3180, gettingAHero: 2754, horn: 2102, leader: 2459,
+  mardroeme: 1878, morale: 1262, muster: 4337, playingBasic: 679,
+  playingHero: 2638, rain: 1806, revival: 2449, roundLoss: 2756, scorch: 1759,
+  spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
+// A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
+// (e.g. Muster fetching several siblings) don't get cut off by one another —
+// each play() call grabs whichever pooled element is currently free, or
+// clones a fresh one if the pool is momentarily exhausted.
+const _soundPools = {};
+// Kicks off the network fetch for every clip once, well before it's ever
+// needed, so the very first play of a given sound isn't held up waiting on
+// a cold fetch (that stall was the "delay between the card landing and the
+// sound playing" — playback itself was always immediate, it was the browser
+// fetching the file for the first time that was slow). Safe to call
+// repeatedly; browser HTTP cache + our pool both dedupe the actual work.
+function preloadAllSounds() {
+  if (typeof Audio === "undefined") return;
+  Object.entries(SOUND_FILES).forEach(([key, file]) => {
+    let pool = _soundPools[key];
+    if (!pool) { pool = []; _soundPools[key] = pool; }
+    if (pool.length) return;
+    const el = new Audio();
+    el.preload = "auto";
+    el.src = SOUND_BASE_URL + file;
+    el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; };
+    try { el.load(); } catch (e) { /* non-fatal */ }
+    pool.push(el);
+  });
+}
+// Tracks when the currently-queued sound(s) will actually finish, so moves
+// can be paced to not step on each other's audio (see soundGate below).
+// Module-level on purpose — pacing is a global "is anything audible right
+// now" concept, not something scoped to one component instance.
+let soundBusyUntil = 0;
+function markSoundBusy(durationMs) {
+  soundBusyUntil = Math.max(soundBusyUntil, Date.now() + (durationMs || 1400));
+}
+function soundGateRemainingMs() {
+  return Math.max(0, soundBusyUntil - Date.now());
+}
+function playSound(key) {
+  const file = SOUND_FILES[key];
+  if (!file || typeof Audio === "undefined") return;
+  try {
+    let pool = _soundPools[key];
+    if (!pool) { pool = []; _soundPools[key] = pool; }
+    let el = pool.find((a) => a.paused || a.ended);
+    if (!el) {
+      el = new Audio(SOUND_BASE_URL + file);
+      el.onerror = () => { el.onerror = null; el.src = SOUND_FALLBACK_BASE_URL + file; el.play().catch(() => {}); };
+      if (pool.length < 4) pool.push(el);
+    } else {
+      el.currentTime = 0;
+    }
+    // el.play() returns a Promise that only resolves once playback has
+    // ACTUALLY started — not when play() was called. There are two things
+    // that need to be true at once, and they pull in different directions:
+    //   1. Move pacing (soundGateRemainingMs, read synchronously by the AI's
+    //      move-scheduler and by onPlayCard's click-gate) needs the busy
+    //      window set IMMEDIATELY, in the same tick as this call — the
+    //      promise resolving is a microtask, which runs strictly after the
+    //      current render commit, so anything that reads the gate
+    //      synchronously during that same commit (e.g. AIGame's "it's my
+    //      turn" effect) would otherwise see a stale, not-yet-updated
+    //      window and schedule its next move off the flat 1300ms floor
+    //      regardless of how long the actual clip is — this was the "no
+    //      delay between moves" bug.
+    //   2. If a clip is still genuinely buffering (plausible for the very
+    //      first sound of a session, e.g. starting_with_basic right at the
+    //      mulligan screen), audible playback can start later than
+    //      call-time — so the window also needs correcting once we know
+    //      playback truly began, or a later move's sound could still end up
+    //      overlapping the tail end of a delayed one.
+    // Doing both — mark immediately, then re-mark (via the same Math.max)
+    // once the promise resolves — covers both without regressing either.
+    const durationMs = SOUND_DURATIONS_MS[key];
+    markSoundBusy(durationMs);
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.then === "function") {
+      playPromise.then(() => markSoundBusy(durationMs)).catch(() => {});
+    }
+  } catch (e) { /* non-fatal — sound is decoration, never block gameplay on it */ }
+}
+// Ability -> sound key, for the layered "base play sound, then ability sound"
+// rule. Abilities not listed here (e.g. plain units, berserker/summonAvenger
+// which have no distinct clip yet) just get the base playingBasic/playingHero.
+const ABILITY_SOUND_KEY = {
+  tightBond: "bond",
+  moraleBoost: "morale",
+  horn: "horn",
+  mardroeme: "mardroeme",
+  decoy: "decoy",
+  spy: "spy",
+  muster: "muster",
+  scorchRow: "scorch",
+  scorchGlobal: "scorch",
+  scorchRowThreshold: "scorch",
+  clearWeather: "clearWeather",
+  // "weather" itself is ambiguous (fog/frost/rain depend on abilityMeta.row)
+  // and "medic" is being reworked into its own two-step flow (v38) — both
+  // are resolved with dedicated logic at the call site instead of this table.
+};
+function weatherSoundKeyForRow(row) {
+  if (row === "close") return "frost";
+  if (row === "ranged") return "fog";
+  if (row === "siege") return "rain";
+  return null;
+}
+// Bond/Morale/Muster only make noise when their ability actually *does*
+// something — a lone Bond unit with no matching sibling in its row, a
+// Morale card played into an empty/all-Hero row, or a Muster card with no
+// siblings left to fetch are silent no-ops and shouldn't sound like they
+// triggered. Every other ability always "does something" the instant it's
+// played, so this only needs to special-case these three. `batchIds` is the
+// full list of card ids that landed on the board in this same diff pass —
+// used only for Muster, to check whether any siblings actually arrived
+// alongside it.
+function abilityActuallyActivates(card, board, row, batchIds) {
+  if (card.ability === "muster") {
+    const fetch = musterFetchIds(card.id);
+    return !!(batchIds && batchIds.some((id) => id !== card.id && fetch.includes(id)));
+  }
+  if (!board || !row) return true;
+  if (card.ability === "tightBond") {
+    const base = bondBaseName(card.name);
+    const count = board[row].filter((id) => {
+      const c = cardById(id);
+      return c && c.ability === "tightBond" && bondBaseName(c.name) === base;
+    }).length;
+    return count >= 2;
+  }
+  if (card.ability === "moraleBoost") {
+    const affected = board[row].filter((id) => id !== card.id && cardById(id)?.cardType !== "Hero").length;
+    return affected >= 1;
+  }
+  return true;
+}
+// Abilities that get ONLY their own dedicated sound, with no playing_basic/
+// playing_hero base layered under them — unlike the rest of the special
+// cards (Decoy, Scorch, Spy, Medic), which do get the base sound first.
+const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn", "muster"]);
+// Plays a card's base "someone played a card" sound (skipped for weather/
+// horn — see NO_BASE_SOUND_ABILITIES above), then layers its ability-
+// specific sound on top if the ability actually has an effect (see
+// abilityActuallyActivates above). `board`/`row`/`batchIds` are optional
+// context used only for the Bond/Morale/Muster activation checks.
+function playCardSounds(card, board, row, batchIds) {
+  if (!card) return;
+  if (!NO_BASE_SOUND_ABILITIES.has(card.ability)) {
+    playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
+  }
+  let abilityKey = ABILITY_SOUND_KEY[card.ability];
+  if (card.ability === "weather") abilityKey = weatherSoundKeyForRow(Array.isArray(card.abilityMeta?.row) ? card.abilityMeta.row[0] : card.abilityMeta?.row) || null;
+  // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
+  // clip exists for it, so both layer in together as the closest fit.
+  const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
+  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds)) {
+    if (isStorm) { playSound("fog"); playSound("rain"); }
+    else playSound(abilityKey);
+  }
+}
+// Finds which row array (if any) currently holds this card id, for the
+// Bond/Morale activation check above.
+function rowOfCardInBoard(board, id) {
+  return ROWS.find((r) => board[r].includes(id)) || null;
+}
+// Guards starting_with_basic so it can only ever fire once for the whole
+// game, no matter how many times a MulliganPanel instance happens to mount —
+// reset by resetStartingBasicGuard() whenever a brand new game is started.
+let startingBasicFiredThisGame = false;
+function resetStartingBasicGuard() { startingBasicFiredThisGame = false; }
+function playStartingBasicOnce() {
+  if (startingBasicFiredThisGame) return;
+  startingBasicFiredThisGame = true;
+  playSound("startingWithBasic");
+}
 
 /* ----------------------------- META ------------------------------------ */
 
@@ -236,8 +447,8 @@ const CARDS = [
 {id:"c116",name:"Young Emissary (1)",faction:"nilfgaard",power:5.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Young Emissary1.png"},
 {id:"c117",name:"Young Emissary (2)",faction:"nilfgaard",power:5.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Young Emissary2.png"},
 {id:"c118",name:"Zerrikanian Fire Scorpion",faction:"nilfgaard",power:5.0,row:"siege",cardType:"Basic",ability:null,abilityMeta:{},img:"Zerrikanian Fire Scorpion.png"},
-{id:"c119",name:"Ballista (1)",faction:"northern_realms",power:6.0,row:"siege",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Ballista1.png"},
-{id:"c120",name:"Ballista (2)",faction:"northern_realms",power:6.0,row:"siege",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Ballista2.png"},
+{id:"c119",name:"Ballista (1)",faction:"northern_realms",power:6.0,row:"siege",cardType:"Basic",ability:null,abilityMeta:{},img:"Ballista1.png"},
+{id:"c120",name:"Ballista (2)",faction:"northern_realms",power:6.0,row:"siege",cardType:"Basic",ability:null,abilityMeta:{},img:"Ballista2.png"},
 {id:"c121",name:"Blue Stripes Commando (1)",faction:"northern_realms",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Blue Stripes Commando1.png"},
 {id:"c122",name:"Blue Stripes Commando (2)",faction:"northern_realms",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Blue Stripes Commando2.png"},
 {id:"c123",name:"Blue Stripes Commando (3)",faction:"northern_realms",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Blue Stripes Commando3.png"},
@@ -297,7 +508,7 @@ const CARDS = [
 {id:"c177",name:"Havekar Smuggler (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Havekar Smuggler3.png"},
 {id:"c178",name:"Ida Emean aep Sivney",faction:"scoiatael",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Ida Emean aep Sivney.png"},
 {id:"c179",name:"Iorveth",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Iorveth.png"},
-{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Basic",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
+{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:10.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
 {id:"c181",name:"Mahakaman Defender (1)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender1.png"},
 {id:"c182",name:"Mahakaman Defender (2)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender2.png"},
 {id:"c183",name:"Mahakaman Defender (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender3.png"},
@@ -306,7 +517,7 @@ const CARDS = [
 {id:"c186",name:"Milva",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Basic",ability:"moraleBoost",abilityMeta:{},img:"Milva.png"},
 {id:"c187",name:"Riordain",faction:"scoiatael",power:1.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Riordain.png"},
 {id:"c188",name:"Saesenthessis",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Saesenthessis.png"},
-{id:"c189",name:"Schirru",faction:"scoiatael",power:8.0,row:"ranged",cardType:"Basic",ability:"scorchRow",abilityMeta:{},img:"Schirru.png"},
+{id:"c189",name:"Schirru",faction:"scoiatael",power:8.0,row:"siege",cardType:"Basic",ability:"scorchRow",abilityMeta:{},img:"Schirru.png"},
 {id:"c190",name:"Toruviel",faction:"scoiatael",power:2.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Toruviel.png"},
 {id:"c191",name:"Vrihedd Brigade Recruit (1)",faction:"scoiatael",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Vrihedd Brigade Recruit1.png"},
 {id:"c192",name:"Vrihedd Brigade Recruit (2)",faction:"scoiatael",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Vrihedd Brigade Recruit2.png"},
@@ -329,9 +540,9 @@ const CARDS = [
 {id:"c209",name:"Clan Heymaey Skald",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Heymaey Skald.png"},
 {id:"c210",name:"Clan Tordarroch Armorsmith",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Tordarroch Armorsmith.png"},
 {id:"c212",name:"Donar an Hindar",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Donar an Hindar.png"},
-{id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"ranged",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Draig Bon-Dhu.png"},
+{id:"c213",name:"Draig Bon-Dhu",faction:"skellige",power:2.0,row:"siege",cardType:"Basic",ability:"horn",abilityMeta:{},img:"Draig Bon-Dhu.png"},
 {id:"c214",name:"Ermion",faction:"skellige",power:8.0,row:"close",cardType:"Hero",ability:"mardroeme",abilityMeta:{},img:"Ermion.png"},
-{id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Hjalmar.png"},
+{id:"c215",name:"Hjalmar",faction:"skellige",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Hjalmar.png"},
 {id:"c216",name:"Holger Blackhand",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Holger Blackhand.png"},
 {id:"c217",name:"Kambi",faction:"skellige",power:0.0,row:"close",cardType:"Basic",ability:"summonAvenger",abilityMeta:{"summons": "Hemdall", "summonsId": "c236"},img:"Kambi.png"},
 {id:"c219",name:"Light Longship (1)",faction:"skellige",power:4.0,row:"ranged",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Light Longship1.png"},
@@ -501,6 +712,7 @@ function emptyBoard() {
     horns: { close: 0, ranged: 0, siege: 0 },
     hornCards: { close: [], ranged: [], siege: [] }, // cardIds of true Horn specials (not Dandelion) played per row, for display
     mardroeme: { close: false, ranged: false, siege: false },
+    mardroemeCards: { close: [], ranged: [], siege: [] }, // cardIds of true Mardroeme specials (not Ermion) played per row, for display
     specials: [],
     halveWeather: false, // set true for a King Bran-led board — weather halves Strength on THIS board instead of flattening it to 1
   };
@@ -589,6 +801,19 @@ function boardTotal(board, spyDoubled) {
 }
 function matchHasLeader(state, leaderId) {
   return state.players.p1.leaderId === leaderId || state.players.p2.leaderId === leaderId;
+}
+
+// Heroes are immune to everything, including the GOOD stuff — Horn and
+// Weather both pass right through them (fixed power, no doubling, no
+// flattening). Any formula estimating "how much would doubling/freezing
+// this row actually change" needs to sum only the non-Hero units, or it
+// credits/blames a row for power that will never actually move.
+function rowNonHeroPower(board, row, spyDoubled) {
+  return board[row].reduce((sum, id) => {
+    const c = cardById(id);
+    if (!c || c.cardType === "Hero") return sum;
+    return sum + unitEffectivePower(id, board, row, spyDoubled);
+  }, 0);
 }
 
 function strongestInRow(board, row, spyDoubled) {
@@ -770,6 +995,10 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "horn": {
       const row = card.row || options.chosenRow; // Dandelion has a fixed row; Commander's Horn needs a choice
+      // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
+      // mutually exclusive per row, same as real Gwent. The UI already blocks this pick, but guard
+      // here too in case of stale state.
+      if (state.players[actingKey].board.mardroeme[row]) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
@@ -780,15 +1009,18 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "mardroeme": {
       const row = card.row || options.chosenRow; // Ermion has a fixed row; Mardroeme (special) needs a choice
+      // Same mutual exclusion as above, the other direction.
+      if (state.players[actingKey].board.horns[row] > 0) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         let board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const transformedRow = board[row].map((id) => {
           const target = berserkerTransformTarget(cardById(id));
           return target ? target.id : id;
         });
+        const mardroemeCards = card.row ? board.mardroemeCards : { ...board.mardroemeCards, [row]: [...board.mardroemeCards[row], cardId] };
         return {
           ...p,
-          board: { ...board, [row]: transformedRow, mardroeme: { ...board.mardroeme, [row]: true } },
+          board: { ...board, [row]: transformedRow, mardroeme: { ...board.mardroeme, [row]: true }, mardroemeCards },
         };
       });
       log.push(`${actor.name} plays Mardroeme — Berserkers in ${ROW_META[row].label} transform!`);
@@ -836,25 +1068,37 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "medic": {
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
-      const eligible = state.players[actingKey].discard.filter((id) => {
-        const c = cardById(id);
-        return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
-      });
-      let reviveId = null;
-      if (eligible.length) {
-        reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (options.reviveId && eligible.includes(options.reviveId) ? options.reviveId : eligible[0]);
-      }
-      if (reviveId) {
+      // Chain: if the revived card is itself a Medic, it immediately revives
+      // another card too, and so on, until either the discard has nothing
+      // eligible left or a link in the chain isn't a Medic. Only the very
+      // first pick can come from `options.reviveId` (player's choice);
+      // everything after that in the chain is automatic for now — v38's
+      // interactive two-step rework will make each link player-chosen.
+      let chainState = ns;
+      let chainCount = 0;
+      let preferredId = options.reviveId;
+      let chaining = true;
+      while (chaining) {
+        const eligible = chainState.players[actingKey].discard.filter((id) => {
+          const c = cardById(id);
+          return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
+        });
+        if (!eligible.length) {
+          if (chainCount === 0) log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
+          break;
+        }
+        const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (preferredId && eligible.includes(preferredId) ? preferredId : eligible[0]);
+        preferredId = null;
         const reviveCard = cardById(reviveId);
         if (reviveCard.ability === "spy") {
           // Reviving a Spy through Medic plays it exactly like a normal Spy:
           // it goes on the OPPONENT's side, and the medic's controller still
           // draws the usual 2 cards for it.
-          ns = withPlayer(ns, oppKey, (p) => ({
+          chainState = withPlayer(chainState, oppKey, (p) => ({
             ...p,
             board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
           }));
-          ns = withPlayer(ns, actingKey, (p) => {
+          chainState = withPlayer(chainState, actingKey, (p) => {
             const drawn = p.deck.slice(0, 2);
             return {
               ...p,
@@ -863,18 +1107,19 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
               hand: [...p.hand, ...drawn],
             };
           });
-          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
+          log.push(`${actor.name}'s Medic revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
         } else {
-          ns = withPlayer(ns, actingKey, (p) => ({
+          chainState = withPlayer(chainState, actingKey, (p) => ({
             ...p,
             discard: p.discard.filter((id) => id !== reviveId),
             board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
           }));
-          log.push(`${actor.name} plays ${card.name} (Medic) and revives ${reviveCard.name} from the discard pile.`);
+          log.push(`${actor.name}'s Medic revives ${reviveCard.name} from the discard pile.`);
         }
-      } else {
-        log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
+        chainCount++;
+        chaining = reviveCard.ability === "medic";
       }
+      ns = chainState;
       break;
     }
     case "scorchGlobal": {
@@ -910,8 +1155,18 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "summonAvenger":
     default: {
-      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
-      log.push(`${actor.name} plays ${card.name} (${ROW_META[targetRow]?.label || "?"}).`);
+      // Berserkers played into a row where Mardroeme is already active
+      // transform immediately on entry (not just units present at cast time).
+      const berserkerTarget = card.ability === "berserker" ? berserkerTransformTarget(card) : null;
+      ns = withPlayer(ns, actingKey, (p) => {
+        const landId = berserkerTarget && p.board.mardroeme[targetRow] ? berserkerTarget.id : cardId;
+        return { ...p, board: addToRow(p.board, targetRow, landId) };
+      });
+      log.push(
+        berserkerTarget && ns.players[actingKey].board[targetRow].slice(-1)[0] === berserkerTarget.id
+          ? `${actor.name} plays ${card.name} — it transforms into ${berserkerTarget.name} on arrival!`
+          : `${actor.name} plays ${card.name} (${ROW_META[targetRow]?.label || "?"}).`
+      );
       break;
     }
   }
@@ -922,9 +1177,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
 }
 
 /* ---------------------------- LEADER ENGINE ------------------------------
-   20 of the 22 leaders are a once-per-game activated power the acting
+   21 of the 22 leaders are a once-per-game activated power the acting
    player triggers on their own turn (a "Use Leader Ability" button).
-   Three are passive instead and never produce a visible effect through
+   Two are passive instead and never produce a visible effect through
    this function directly:
      - L01 Eredin Bréacc Glas: The Treacherous — handled inside the power
        engine itself (spyDoubled, see above).
@@ -932,8 +1187,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
        forceRandomRevive on BOTH players at game setup (it affects every
        Medic-style revive in the match, not just its owner's), which the
        Medic branch of resolvePlayCard already checks.
-     - L22 King Bran — handled by setting board.halveWeather on his own
-       board at game setup, which unitEffectivePower already checks.
+   L22 King Bran is click-to-activate like the rest: his case below sets
+   board.halveWeather on his own board when the player uses his ability,
+   which unitEffectivePower already checks.
    -------------------------------------------------------------------- */
 
 function leaderNeedsOptions(leaderId) {
@@ -1100,7 +1356,10 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       log.push(`Shuffles both graveyards back into their decks.`);
       break;
     }
-    case "L22": break; // King Bran is passive — see board.halveWeather, set at game setup, like L01/L08.
+    case "L22": { // King Bran — on activation, this board's weather softens to half Strength instead of flattening to 1
+      ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: { ...p.board, halveWeather: true } }));
+      break;
+    }
 
     default: break;
   }
@@ -1329,6 +1588,18 @@ function gameReducer(state, action) {
     case "CONTINUE_ROUND":
       return startNextRound(state);
 
+    case "FORFEIT": {
+      const winnerKey = otherKey(action.player);
+      const roundWins = { ...state.roundWins, [winnerKey]: 2 };
+      return {
+        ...state,
+        phase: "gameEnd",
+        roundWins,
+        gameWinner: winnerKey,
+        log: [...state.log, `${state.players[action.player].name} forfeits — ${state.players[winnerKey].name} wins the game!`],
+      };
+    }
+
     default:
       return state;
   }
@@ -1337,6 +1608,7 @@ function gameReducer(state, action) {
 /* ------------------------------ GAME INIT -------------------------------- */
 
 function initGame(p1cfg, p2cfg) {
+  resetStartingBasicGuard(); // a brand new game means the opening-hand sound can fire again
   let p1 = dealHand(makePlayer(p1cfg));
   let p2 = dealHand(makePlayer(p2cfg));
   // L08 Invader of the North affects Medic-style revives for BOTH players
@@ -1345,9 +1617,9 @@ function initGame(p1cfg, p2cfg) {
     p1 = { ...p1, forceRandomRevive: true };
     p2 = { ...p2, forceRandomRevive: true };
   }
-  // L22 King Bran only softens weather on his own board.
-  if (p1cfg.leaderId === "L22") p1 = { ...p1, board: { ...p1.board, halveWeather: true } };
-  if (p2cfg.leaderId === "L22") p2 = { ...p2, board: { ...p2.board, halveWeather: true } };
+  // L22 King Bran: no longer auto-applied at setup — his ability now
+  // activates like any other leader, via resolveLeaderAbility (case "L22"),
+  // which sets board.halveWeather on his own board at that point.
 
   // Scoia'tael faction ability: if exactly one side is Scoia'tael, that
   // player chooses who opens Round 1 — no coin toss needed. If both sides
@@ -1374,7 +1646,16 @@ function initGame(p1cfg, p2cfg) {
 
 /* ------------------------- AUTO-OPTIONS (AI + smart defaults) ------------ */
 
-function autoOptionsForCard(card, board) {
+function autoOptionsForCard(card, board, discard = [], deck = []) {
+  if (card.ability === "medic") {
+    const eligible = discard.filter((id) => {
+      const c = cardById(id);
+      return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
+    });
+    if (!eligible.length) return {};
+    const best = [...eligible].sort((a, b) => (cardById(b)?.power || 0) - (cardById(a)?.power || 0))[0];
+    return { reviveId: best };
+  }
   if (card.row === "agile") {
     const closeWeathered = !!board.weather.close;
     const rangedWeathered = !!board.weather.ranged;
@@ -1385,8 +1666,13 @@ function autoOptionsForCard(card, board) {
     return { chosenRow };
   }
   if (card.ability === "horn" && !card.row) {
+    // Heroes don't benefit from Horn at all — picking the row with the
+    // highest RAW total (including Hero power) picked a row that was
+    // entirely a Hero more than once in self-play (Philippa Eilhart,
+    // Tibor Eggebracht), doubling nothing for zero net gain. Rank by the
+    // non-Hero power actually being doubled instead.
     let best = "close", bestVal = -1;
-    ROWS.forEach((r) => { const v = rowTotal(board, r); if (v > bestVal) { bestVal = v; best = r; } });
+    ROWS.forEach((r) => { const v = rowNonHeroPower(board, r); if (v > bestVal) { bestVal = v; best = r; } });
     return { chosenRow: best };
   }
   if (card.ability === "mardroeme") {
@@ -1401,10 +1687,60 @@ function autoOptionsForCard(card, board) {
     const candidates = ROWS.flatMap((r) => board[r].map((id) => ({ id, row: r, card: cardById(id) })))
       .filter((x) => x.card && x.card.cardType !== "Hero" && x.card.row);
     if (!candidates.length) return null; // no legal target — caller should skip this card
+    // Prefer recycling a unit whose on-play ability ACTUALLY pays out again
+    // when replayed — not just any unit tagged spy/medic/muster. A Medic
+    // with an empty discard, or a Muster card whose siblings are all already
+    // on the board, gains nothing from being replayed; treating those as
+    // "recyclable" was why the AI kept bouncing spent cards for zero value
+    // (logs showed it decoying an already-fired Toad, or replaying a
+    // Trebuchet right back into the same slot, both dead turns). Only a
+    // genuinely eligible target gets the priority boost.
+    const REPLAY_PRIORITY = { spy: 3, medic: 2, muster: 1 };
+    const isEligibleReplay = (c) => {
+      if (c.ability === "spy") return true; // always draws 2 more, no precondition
+      if (c.ability === "medic") {
+        return discard.some((id) => {
+          const dc = cardById(id);
+          return dc && dc.cardType !== "Hero" && dc.cardType !== "Special" && dc.row;
+        });
+      }
+      if (c.ability === "muster") {
+        return musterFetchIds(c.id).some((id) => deck.includes(id));
+      }
+      return false;
+    };
+    const recyclable = candidates.filter((x) => REPLAY_PRIORITY[x.card.ability] && isEligibleReplay(x.card));
+    if (recyclable.length) {
+      recyclable.sort((a, b) => REPLAY_PRIORITY[b.card.ability] - REPLAY_PRIORITY[a.card.ability]);
+      return { targetId: recyclable[0].id };
+    }
     candidates.sort((a, b) => unitEffectivePower(a.id, board, a.row) - unitEffectivePower(b.id, board, b.row));
     return { targetId: candidates[0].id };
   }
   return {};
+}
+
+// A row sitting at 10+ power, well clear of the AI's other rows, is exactly
+// the shape a Scorch or a threshold-triggered leader (Francesca, Foltest,
+// Villentretenmerth) is built to punish in one hit. This used to only guard
+// the generic flat-power fallback at the bottom of estimateCardImpact — every
+// special-ability branch (muster, tightBond, moraleBoost, scorchRow) returns
+// early and skipped it entirely, which is exactly backwards: a Muster chain
+// dumping 3 cards into one row at once is the single riskiest shape of all.
+// Self-play logs showed this cost two full board wipes (a Crone chain piling
+// 18 power into Close Combat, punished by an unused Francesca leader) plus a
+// Villentretenmerth played into an already-15 Close Combat row. Scales with
+// both how far past the threshold the row ends up AND how much of that came
+// from this one play — a single card tipping it over is less alarming than a
+// whole chain doing it at once.
+function stackingPenalty(board, row, addedPower, spyDoubled) {
+  if (!row || !ROWS.includes(row)) return 0;
+  const rowAfter = rowTotal(board, row, spyDoubled) + addedPower;
+  const otherRowsMax = Math.max(0, ...ROWS.filter((r) => r !== row).map((r) => rowTotal(board, r, spyDoubled)));
+  if (rowAfter >= 10 && rowAfter > otherRowsMax + 6) {
+    return -Math.min(6, (rowAfter - 10) * 0.4 + addedPower * 0.15);
+  }
+  return 0;
 }
 
 /* Estimates how much a card is actually worth playing right now, accounting
@@ -1419,7 +1755,16 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
 
   if (card.ability === "muster") {
     const chain = musterFetchIds(card.id).filter((id) => me.hand.includes(id) || me.deck.includes(id));
-    return card.power + chain.reduce((sum, id) => sum + (cardById(id)?.power || 0), 0);
+    const chainPower = chain.reduce((sum, id) => sum + (cardById(id)?.power || 0), 0);
+    // Only the siblings landing in the SAME row as this card count toward the
+    // stacking risk — a muster group split across rows doesn't pile onto one
+    // Scorch-able target the way same-row copies (e.g. all three Crones into
+    // Close Combat) do.
+    const sameRowChainPower = chain.reduce((sum, id) => {
+      const c = cardById(id);
+      return c && c.row === card.row ? sum + c.power : sum;
+    }, 0);
+    return card.power + chainPower + stackingPenalty(board, card.row, card.power + sameRowChainPower, spyDoubled);
   }
 
   if (card.ability === "tightBond" && card.row) {
@@ -1430,29 +1775,42 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     }).length;
     // Growing an existing bond stack re-values every copy already down, so
     // it's worth much more than a flat card of the same printed power.
-    return card.power * (already + 1) + card.power * already;
+    const gain = card.power * (already + 1) + card.power * already;
+    return gain + stackingPenalty(board, card.row, gain, spyDoubled);
   }
 
   if (card.ability === "moraleBoost" && card.row) {
     const others = (board[card.row] || []).filter((id) => cardById(id)?.cardType !== "Hero").length;
-    return card.power + others;
+    // This card benefits from any Morale Boost already sitting in the row
+    // too, same as every other non-Hero unit there — forgetting that
+    // undervalues playing a second Morale source into an existing stack.
+    const existingMoraleSources = (board[card.row] || []).filter((id) => cardById(id)?.ability === "moraleBoost").length;
+    const gain = card.power + existingMoraleSources + others;
+    return gain + stackingPenalty(board, card.row, gain, spyDoubled);
   }
 
   if (card.ability === "horn") {
     const targetRow = card.row || (autoOptionsForCard(card, board) || {}).chosenRow;
-    return card.power + (targetRow ? rowTotal(board, targetRow, spyDoubled) : 0);
+    // Heroes don't double — count only the non-Hero power actually affected.
+    return card.power + (targetRow ? rowNonHeroPower(board, targetRow, spyDoubled) : 0);
   }
 
   if (card.ability === "weather") {
     const rows = Array.isArray(card.abilityMeta.row) ? card.abilityMeta.row : [card.abilityMeta.row];
-    const oppHit = rows.reduce((sum, r) => sum + rowTotal(opp.board, r, spyDoubled), 0);
-    const selfHit = rows.reduce((sum, r) => sum + rowTotal(me.board, r, spyDoubled), 0);
-    return Math.max(0, oppHit - selfHit - 3); // only worth it if it hurts them meaningfully more than us
+    // Heroes are immune to weather too — a row anchored by one looks like a
+    // big juicy target by raw total but won't actually lose any power.
+    const oppHit = rows.reduce((sum, r) => sum + rowNonHeroPower(opp.board, r, spyDoubled), 0);
+    const selfHit = rows.reduce((sum, r) => sum + rowNonHeroPower(me.board, r, spyDoubled), 0);
+    // No floor here on purpose: if selfHit outweighs oppHit this should come
+    // back NEGATIVE, not clamp to a fake "harmless" 0 — a weather that hurts
+    // our own board more than theirs is an active mistake, not a safe dump.
+    return oppHit - selfHit - 3;
   }
 
   if (card.ability === "scorchRow" && card.row) {
     const hits = strongestInRow(opp.board, card.row, spyDoubled);
-    return card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, card.row, spyDoubled), 0);
+    const gain = card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, card.row, spyDoubled), 0);
+    return gain + stackingPenalty(board, card.row, card.power, spyDoubled);
   }
 
   if (card.ability === "scorchGlobal") {
@@ -1470,12 +1828,60 @@ function estimateCardImpact(card, me, opp, spyDoubled) {
     const total = rowTotal(opp.board, r, spyDoubled);
     if (total >= (card.abilityMeta.threshold || 10)) {
       const hits = strongestInRow(opp.board, r, spyDoubled);
-      return card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, r, spyDoubled), 0);
+      const gain = card.power + hits.reduce((sum, id) => sum + unitEffectivePower(id, opp.board, r, spyDoubled), 0);
+      return gain + stackingPenalty(board, card.row, card.power, spyDoubled);
     }
-    return card.power;
+    return card.power + stackingPenalty(board, card.row, card.power, spyDoubled);
   }
 
-  if (card.ability === "decoy") return 1; // pure utility, situational — low priority for a straight power race
+  if (card.ability === "decoy") {
+    const opts = autoOptionsForCard(card, board, me.discard, me.deck);
+    const target = opts && opts.targetId ? cardById(opts.targetId) : null;
+    if (!target) return -99; // shouldn't happen (caller filters unplayable cards), but never force it
+    const targetRow = ROWS.find((r) => board[r].includes(opts.targetId));
+    // Decoy is a 0-power card that takes the returned unit's spot — playing
+    // it costs the target's current power on THIS turn's board total. That
+    // cost is real and immediate; the payoff (if any) only lands on some
+    // later turn when the recycled card gets replayed. Ignoring that cost
+    // was why the AI kept bouncing cards for a flat "positive" score even
+    // when it had nothing to gain — e.g. decoying an already-fired Toad
+    // with the opponent's row already empty, or a plain Trebuchet with no
+    // ability at all, straight loss of board power for a wasted turn.
+    const immediateCost = targetRow ? unitEffectivePower(opts.targetId, board, targetRow, spyDoubled) : target.power;
+    let replayValue = 0;
+    if (target.ability === "spy") replayValue = 6; // reliably banks another 2-card draw
+    else if (target.ability === "medic") replayValue = 5; // eligibility already verified by autoOptionsForCard
+    else if (target.ability === "muster") replayValue = 3; // eligibility already verified by autoOptionsForCard
+    return replayValue - immediateCost;
+  }
+
+  if (card.ability === "spy") {
+    // The card itself goes on the OPPONENT's board — it adds nothing to our
+    // own total this turn, and worse, hands them its printed power. A flat
+    // constant here treated a 0-power Mysterious Elf identically to a
+    // 9-power Stefan Skellen, when the latter is a real gift to their board.
+    // The 2-card draw is still valuable enough that this rarely goes
+    // negative, but a high-power spy should score well below a cheap one.
+    return 6 - card.power * 0.6;
+  }
+
+  if (card.ability === "medic") {
+    const opts = autoOptionsForCard(card, me.board, me.discard);
+    const reviveCard = opts && opts.reviveId ? cardById(opts.reviveId) : null;
+    return card.power + (reviveCard ? reviveCard.power : 0);
+  }
+
+  // Flat power play — lightly discourage stacking one row far past a
+  // typical Scorch-row threshold (~10) when there's no Horn/immune backup,
+  // since a single opposing Scorch can wipe the whole row at once. Cheap
+  // stand-in for real lookahead: don't put all the eggs in one basket.
+  if (card.row && ROWS.includes(card.row)) {
+    const rowAfter = rowTotal(board, card.row, spyDoubled) + card.power;
+    const otherRowsMax = Math.max(0, ...ROWS.filter((r) => r !== card.row).map((r) => rowTotal(board, r, spyDoubled)));
+    if (rowAfter >= 10 && rowAfter > otherRowsMax + 6) {
+      return card.power - 1.5;
+    }
+  }
 
   return card.power;
 }
@@ -1519,12 +1925,82 @@ const LEADER_PRIORITY = {
   skellige: ["L21", "L22"],
 };
 
+// Special-card "families" used to cap how many near-duplicate effects the
+// AI is allowed to stack in one deck — otherwise the flat top-N sort just
+// grabs every weather/horn/scorch it can find and never touches a Decoy.
+function specialFamily(card) {
+  if (card.ability === "weather") return "weather";
+  if (card.ability === "clearWeather") return "clearWeather";
+  if (card.ability === "horn") return "horn";
+  if (card.ability === "decoy") return "decoy";
+  if (card.ability === "scorchGlobal" || card.ability === "scorchRow" || card.ability === "scorchRowThreshold") return "scorch";
+  return "other";
+}
+
 function chooseAiDeck(aiFaction) {
   const pool = poolForFaction(aiFaction);
+  const isUnit = (c) => c.cardType === "Basic" || c.cardType === "Hero";
   const scored = pool
     .map((c) => ({ card: c, value: evaluateCardBaseValue(c) + Math.random() * 1.5 })) // small jitter so it's not identical every game
     .sort((a, b) => b.value - a.value);
-  const deckIds = scored.slice(0, DECK_SIZE).map((s) => s.card.id);
+
+  // --- Units: draft per-row instead of one flat global sort, so the AI
+  // can't end up with (for example) four Close Combat units and nothing
+  // in Ranged or Siege. Agile units count toward whichever row is thinner
+  // at the time they're picked. Split into roughly even row quotas, then
+  // fill any leftover slots (Heroes, odd counts) with the next-best units
+  // regardless of row.
+  const unitPool = scored.filter((s) => isUnit(s.card));
+  const baseQuota = Math.floor(DECK_SIZE / ROWS.length);
+  const quota = { close: baseQuota, ranged: baseQuota, siege: baseQuota };
+  let remainder = DECK_SIZE - baseQuota * ROWS.length;
+  ROWS.forEach((r) => { if (remainder > 0) { quota[r] += 1; remainder--; } });
+
+  const rowCount = { close: 0, ranged: 0, siege: 0 };
+  const unitIds = [];
+  const leftover = [];
+  for (const s of unitPool) {
+    const row = s.card.row;
+    if (row === "agile") {
+      // Slot into whichever of Close/Ranged still needs it more.
+      const target = rowCount.close <= rowCount.ranged ? "close" : "ranged";
+      if (rowCount[target] < quota[target]) { rowCount[target]++; unitIds.push(s.card.id); continue; }
+    } else if (ROWS.includes(row)) {
+      if (rowCount[row] < quota[row]) { rowCount[row]++; unitIds.push(s.card.id); continue; }
+    }
+    leftover.push(s.card.id);
+  }
+  // Any row that came up short (faction pool too thin in that row) gets
+  // backfilled from the leftover pile, best-value first, until DECK_SIZE.
+  let i = 0;
+  while (unitIds.length < DECK_SIZE && i < leftover.length) { unitIds.push(leftover[i]); i++; }
+
+  // --- Specials: cap per family so weather/horn/scorch can't crowd out
+  // everything else, and guarantee at least one Decoy if the pool has one.
+  const specialCandidates = scored.filter((s) => !isUnit(s.card));
+  const FAMILY_CAP = { weather: 2, horn: 2, scorch: 2, decoy: 2, clearWeather: 1, other: 3 };
+  const familyCount = {};
+  const specialIds = [];
+  for (const s of specialCandidates) {
+    if (specialIds.length >= 6) break;
+    const fam = specialFamily(s.card);
+    const used = familyCount[fam] || 0;
+    if (used >= (FAMILY_CAP[fam] ?? 2)) continue;
+    familyCount[fam] = used + 1;
+    specialIds.push(s.card.id);
+  }
+  // If nothing from the Decoy family made the cut but the pool has one,
+  // swap it in for the weakest pick — Decoy is too useful to skip entirely.
+  if (!(familyCount.decoy > 0)) {
+    const decoyOption = specialCandidates.find((s) => specialFamily(s.card) === "decoy");
+    if (decoyOption && specialIds.length >= 6) {
+      specialIds[specialIds.length - 1] = decoyOption.card.id;
+    } else if (decoyOption) {
+      specialIds.push(decoyOption.card.id);
+    }
+  }
+
+  const deckIds = [...unitIds, ...specialIds];
 
   const leaders = leadersForFaction(aiFaction);
   const priority = LEADER_PRIORITY[aiFaction] || leaders.map((l) => l.id);
@@ -1536,16 +2012,82 @@ function chooseAiDeck(aiFaction) {
 
 /* ---------------------------- SIMPLE HEURISTIC AI ------------------------ */
 
+// Leaders whose effect is unconditionally useful even on an empty board /
+// empty discard, so firing them turn 1 round 1 never wastes them: extra
+// card draw, instant Horn, info reveal, denying the opponent their own
+// leader, etc. Every other leader has a real precondition (needs weather
+// on the board, a scorch-row total ≥10, a non-empty discard pile, an
+// Agile unit already down, ...) that literally cannot be true on turn 1
+// with an empty board — firing those unconditionally just burns the
+// leader for a permanent no-op, so they're checked live instead below.
+// L05/L07 fetch-and-play a weather card instantly — unlike L03's instant Horn
+// (a standing multiplier that's genuinely fine to pre-commit turn 1, since it
+// just buffs whatever gets played into that row later), firing these on a
+// completely empty board freezes a row nothing is in yet. Self-play logs
+// caught this twice (08-08-39, 08-03-38): "freezing both sides' Siege row to
+// 1 power" as the literal opening move, before either side had a single Siege
+// card down. It's not purely wasted (weather is a standing effect that will
+// suppress future plays in that row too), but locking a row before either
+// side has committed to it is a coin flip that can just as easily deny the
+// AI's OWN plan as the opponent's — moved to leaderConditionMet so it fires
+// once there's an actual, favorable target instead of blindly turn 1.
+const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L06", "L10", "L11", "L14", "L16", "L18", "L20", "L22"]);
+
+function leaderConditionMet(state, aiKey, leaderId) {
+  const me = state.players[aiKey];
+  const oppKey = otherKey(aiKey);
+  const opp = state.players[oppKey];
+  switch (leaderId) {
+    case "L02": // Medic revive — needs an eligible (non-Hero, non-Special) card in own discard
+      return me.discard.some((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
+    case "L09": // Take a non-Hero card from opponent's discard
+      return opp.discard.some((id) => cardById(id)?.cardType !== "Hero");
+    case "L12": // Clear Weather — needs weather actually present on either side
+      return ROWS.some((r) => me.board.weather[r] || opp.board.weather[r]);
+    case "L07": { // Fetch + play Torrential Rain (Siege) — wait for the opponent
+      // to actually have Siege power worth freezing, and don't do it if we're
+      // the one ahead in that row (we'd just be freezing our own lead).
+      const spy = matchHasLeader(state, "L01");
+      const oppSiege = rowTotal(opp.board, "siege", spy);
+      const meSiege = rowTotal(me.board, "siege", spy);
+      return oppSiege > 0 && oppSiege >= meSiege;
+    }
+    case "L05": { // Pick any weather — same idea, generalized: only worth
+      // casting once the opponent has actually put real power somewhere.
+      const spy = matchHasLeader(state, "L01");
+      return boardTotal(opp.board, spy) >= 6;
+    }
+    case "L13": // Foltest — Scorch Ranged if total >= 10
+      return rowTotal(opp.board, "ranged", matchHasLeader(state, "L01")) >= 10;
+    case "L15": // Scorch Siege if total >= 10
+      return rowTotal(opp.board, "siege", matchHasLeader(state, "L01")) >= 10;
+    case "L19": // Francesca — Scorch Close Combat if total >= 10
+      return rowTotal(opp.board, "close", matchHasLeader(state, "L01")) >= 10;
+    case "L17": // Francesca — reposition Agile units, needs one on the board
+      return [...me.board.close, ...me.board.ranged].some((id) => cardById(id)?.row === "agile");
+    case "L21": // Crach an Craite — shuffle graveyards, needs at least one non-empty
+      return me.discard.length > 0 || opp.discard.length > 0;
+    default:
+      return true;
+  }
+}
+
 function computeAIAction(state, aiKey) {
   const me = state.players[aiKey];
   const oppKey = otherKey(aiKey);
   const opp = state.players[oppKey];
   const spyDoubled = matchHasLeader(state, "L01");
 
-  // Simple heuristic: fire the leader ability on the AI's first turn of the game.
-  if (me.leaderId && !me.leaderUsed && !me.leaderBlocked && state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0) {
-    const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
-    return { type: "USE_LEADER", player: aiKey, options };
+  // Fire the leader ability as soon as it can do something real: the
+  // always-good leaders go off turn 1 like before, everything else waits
+  // until its actual precondition is met (checked fresh every AI turn).
+  if (me.leaderId && !me.leaderUsed && !me.leaderBlocked) {
+    const isOpeningTurn = state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0;
+    const shouldFire = LEADER_ALWAYS_GOOD_EARLY.has(me.leaderId) ? isOpeningTurn : leaderConditionMet(state, aiKey, me.leaderId);
+    if (shouldFire) {
+      const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
+      return { type: "USE_LEADER", player: aiKey, options };
+    }
   }
 
   if (me.hand.length === 0 || me.passed) return { type: "PASS", player: aiKey };
@@ -1554,7 +2096,7 @@ function computeAIAction(state, aiKey) {
   // and rank the rest by actual battlefield impact rather than raw power.
   const ranked = me.hand
     .map(cardById)
-    .filter((c) => autoOptionsForCard(c, me.board) !== null)
+    .filter((c) => autoOptionsForCard(c, me.board, me.discard, me.deck) !== null)
     .map((c) => ({ card: c, impact: estimateCardImpact(c, me, opp, spyDoubled) }))
     .sort((a, b) => b.impact - a.impact);
 
@@ -1563,14 +2105,7 @@ function computeAIAction(state, aiKey) {
   const myTotal = boardTotal(me.board, spyDoubled);
   const oppTotal = boardTotal(opp.board, spyDoubled);
 
-  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board) || {} });
-
-  if (opp.passed) {
-    if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
-    const need = oppTotal - myTotal;
-    const enough = [...ranked].reverse().find((r) => r.impact >= need) || ranked[0];
-    return play(enough.card);
-  }
+  const play = (card) => ({ type: "PLAY_CARD", player: aiKey, cardId: card.id, options: autoOptionsForCard(card, me.board, me.discard, me.deck) || {} });
 
   // Round-conceding strategy: a real Gwent player often lets a round go
   // rather than burning their whole hand to win it — especially once
@@ -1580,21 +2115,107 @@ function computeAIAction(state, aiKey) {
   // this round too would hand them the match immediately (2 wins = game over).
   const cardEdge = me.hand.length - opp.hand.length;
   const losingThisRound = myTotal < oppTotal;
+  const winningThisRound = myTotal > oppTotal;
   const oppAtMatchPoint = state.roundWins[oppKey] >= 1;
+  const margin = Math.abs(myTotal - oppTotal);
+
+  // How many cards the AI has actually committed THIS round — proxy is the
+  // board, since it's wiped between rounds. Concede/bank decisions require
+  // a minimum commitment first: without this, the AI could (and did) decide
+  // to give up a round on turn 1 with a full hand and nothing played yet,
+  // purely off a fragile early card-count difference or a lead it didn't
+  // even build itself (e.g. an opponent Spy landing on its board).
+  const committed = me.board.close.length + me.board.ranged.length + me.board.siege.length + (me.board.specials?.length || 0);
+  const minCommitmentMet = committed >= 2;
+
+  // Round 1 while the match is still 0-0 is the classic round to sacrifice —
+  // losing it costs nothing structurally (both sides still need 2 of 3
+  // either way), so it shouldn't need the same hand-lead proof that rounds
+  // 2+ require. Self-play logs showed the AI dumping its entire hand into a
+  // losing round 1 game after game because cardEdge>=3 almost never happens
+  // this early when both sides are trading cards roughly evenly — it only
+  // banked when it had stockpiled a huge card lead, and just kept feeding
+  // cards into an unwinnable round otherwise. A mild edge (>=1), or a big
+  // enough board deficit that catching up would cost several more cards
+  // anyway, is reason enough to let round 1 go.
+  const roundOneIsFree = state.round === 1 && state.roundWins[aiKey] === 0 && state.roundWins[oppKey] === 0;
+
   const canAffordToConcede =
+    losingThisRound &&
+    minCommitmentMet &&
     state.round < 3 &&
     !oppAtMatchPoint &&
-    (state.roundWins[aiKey] > state.roundWins[oppKey] || cardEdge >= 2);
+    (state.roundWins[aiKey] > state.roundWins[oppKey] ||
+      cardEdge >= 3 ||
+      (roundOneIsFree && (cardEdge >= 1 || margin >= 20)));
 
-  if (losingThisRound && canAffordToConcede && Math.random() < 0.6) {
+  if (opp.passed) {
+    if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
+    // Being locked in a one-sided race doesn't mean fighting is free — a
+    // hopeless, cheap-to-give-up round (round 1, tied 0-0, opponent way
+    // ahead) is still worth banking cards instead of dumping the hand
+    // chasing it, exactly like the normal concede logic below. Without this
+    // check, this branch bypassed that logic entirely through a side door.
+    if (canAffordToConcede) return { type: "PASS", player: aiKey };
+    const need = oppTotal - myTotal;
+    const enough = [...ranked].reverse().find((r) => r.impact >= need) || ranked[0];
+    // Same guard the losing-and-still-contested branch below has: never
+    // force through an actively harmful card just because the opponent
+    // can't punish it back. If nothing helps, keep the card for next round.
+    if (enough.impact < 0) return { type: "PASS", player: aiKey };
+    return play(enough.card);
+  }
+
+  // Under match-point pressure, never gamble a random pass while ahead —
+  // keep playing to protect the lead instead of risking the whole match.
+  // CRITICAL: only bank when hand size is at least even with the opponent.
+  // A lead is only safe to freeze if the opponent doesn't have more cards
+  // left than us to simply keep playing and overtake it — this is especially
+  // true when the "lead" was inflated by the opponent's own Spy cards
+  // landing on our board, which costs them nothing to keep doing.
+  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint && cardEdge >= 0;
+
+  // Scale the roll by how real the lead/deficit actually is — a 2-point
+  // margin barely moves the needle, a 20+ point margin is close to certain.
+  // Without this, a tiny/illusory lead (or deficit) triggered the exact
+  // same coinflip as a commanding one. BUT a big card-count edge is its own
+  // form of conviction independent of the current point margin — being up
+  // 5 cards while only down 1 point is still a great spot to bank, since
+  // that hand advantage will crush rounds 2-3. Self-play logs showed the AI
+  // stuck at ~4% pass chance in exactly this situation (huge card lead,
+  // razor-thin point margin) and just kept dumping cards instead of banking
+  // the lead it had already earned. Take the stronger of the two signals.
+  const marginScale = Math.min(1, margin / 15);
+  const cardEdgeScale = Math.min(1, Math.max(cardEdge, 0) / 3);
+  const conviction = Math.max(marginScale, cardEdgeScale);
+
+  // Single random decision per turn (was two independent coinflips before,
+  // which could compound into erratic-looking play) — at most one of these
+  // situations applies on any given turn anyway.
+  const passChance = (canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0) * conviction;
+  if (passChance > 0 && Math.random() < passChance) {
     return { type: "PASS", player: aiKey };
   }
 
-  if (myTotal <= oppTotal) return play(ranked[0].card);
-  // Under match-point pressure, don't gamble on a random pass while still ahead —
-  // keep playing to protect the lead instead of risking the whole match.
-  if (!oppAtMatchPoint && cardEdge <= 0 && Math.random() < 0.55) return { type: "PASS", player: aiKey };
-  return play(ranked[ranked.length - 1].card);
+  // Even while behind, never force through an actively harmful card (e.g. a
+  // global Scorch that would torch our own strongest unit for a worse trade
+  // than it costs the opponent). If the best-ranked option is still
+  // negative, passing keeps the card for a later round instead of digging
+  // the hole deeper for nothing.
+  if (myTotal <= oppTotal) {
+    if (ranked[0].impact >= 0) return play(ranked[0].card);
+    return { type: "PASS", player: aiKey };
+  }
+
+  // Protecting a lead: dump the lowest-impact card, but never one with a
+  // NEGATIVE impact (self-harming Scorch when the opponent's board is
+  // empty, a weather that guts our own row worse than theirs, etc). A
+  // negative score means "actively bad," not "safe filler" — if the worst
+  // non-harmful option doesn't exist, passing is strictly better than
+  // hurting ourselves for no reason.
+  const safeDump = [...ranked].reverse().find((r) => r.impact >= 0);
+  if (!safeDump) return { type: "PASS", player: aiKey };
+  return play(safeDump.card);
 }
 
 /* ============================ UI PIECES ================================ */
@@ -1698,6 +2319,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
             className="card-art"
             src={src}
             alt={card.name}
+            decoding="async"
+            loading="eager"
             onError={() => setArtStage((s) => s + 1)}
           />
         ) : null}
@@ -1719,7 +2342,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           <div className="card-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="card-zoom-art-wrap">
               {src ? (
-                <img className="card-zoom-art" src={src} alt={card.name} />
+                <img className="card-zoom-art" src={src} alt={card.name} decoding="async" loading="eager" />
               ) : (
                 <div className="card-zoom-fallback">{card.name}</div>
               )}
@@ -1761,7 +2384,7 @@ function CardBackStack({ count, faction }) {
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="card-back-wrap" style={{ zIndex: i }}>
           {src ? (
-            <img className="card-back-img" src={src} alt="Opponent card back" onError={() => setArtStage((s) => s + 1)} />
+            <img className="card-back-img" src={src} alt="Opponent card back" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />
           ) : (
             <div className="card-back-fallback" />
           )}
@@ -1791,6 +2414,8 @@ function DeckPile({ count, faction, hideCount }) {
                 className="card-back-img"
                 src={src}
                 alt="Deck"
+                decoding="async"
+                loading="eager"
                 onError={i === 0 ? () => setArtStage((s) => s + 1) : undefined}
               />
             ) : (
@@ -1834,7 +2459,7 @@ function DiscardTopBack({ discard, faction }) {
   return (
     <div className="discard-pile discard-pile-back">
       {src ? (
-        <img className="card-back-img" src={src} alt="Discarded card" onError={() => setArtStage((s) => s + 1)} />
+        <img className="card-back-img" src={src} alt="Discarded card" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />
       ) : (
         <div className="card-back-fallback" />
       )}
@@ -1848,7 +2473,7 @@ function LeaderUnusedBadge({ show }) {
   const [artStage, setArtStage] = useState(0);
   if (!show || artStage === 2) return null;
   const src = artStage === 0 ? LEADER_UNUSED_ICON_URL : LEADER_UNUSED_ICON_FALLBACK_URL;
-  return <img className="leader-unused-badge" src={src} alt="Leader ability available" onError={() => setArtStage((s) => s + 1)} />;
+  return <img className="leader-unused-badge" src={src} alt="Leader ability available" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />;
 }
 
 // The board no longer groups siege/ranged/close into one PlayerBoard block —
@@ -1884,16 +2509,20 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
 // empty for it, exactly like the request specifies.
 function RowHornCell({ board, rowKey }) {
   const hornCardIds = board.hornCards?.[rowKey] || [];
-  const mardroeme = board.mardroeme[rowKey];
-  if (!hornCardIds.length && !mardroeme) return null;
+  const mardroemeCardIds = board.mardroemeCards?.[rowKey] || [];
+  if (!hornCardIds.length && !mardroemeCardIds.length) return null;
   return (
     <div className="row-markers">
       {hornCardIds.map((id, i) => (
-        <div key={id + "-" + i} className="horn-card-slot">
+        <div key={"h-" + id + "-" + i} className="horn-card-slot">
           <CardTile card={cardById(id)} size="fit" />
         </div>
       ))}
-      {mardroeme && <span className="marker marker-mardroeme">🍄</span>}
+      {mardroemeCardIds.map((id, i) => (
+        <div key={"m-" + id + "-" + i} className="horn-card-slot mardroeme-card-slot">
+          <CardTile card={cardById(id)} size="fit" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -1945,10 +2574,53 @@ function WeatherCenterCell({ board }) {
   );
 }
 
-function RoundPips({ wins }) {
+// A single gem socket. `broken` is the settled state (socket art only, gem
+// gone for good); `breaking` is true only for the brief window right after
+// a loss, while breaking.gif plays over the socket.
+function GemPip({ broken, breaking }) {
+  const [backStage, setBackStage] = useState(0);
+  const [frontStage, setFrontStage] = useState(0);
+  const [breakStage, setBreakStage] = useState(0);
+  const backSrc = backStage === 0 ? GEM_BACK_URL : GEM_BACK_FALLBACK_URL;
+  const frontSrc = frontStage === 0 ? GEM_FRONT_URL : GEM_FRONT_FALLBACK_URL;
+  const breakSrc = breakStage === 0 ? GEM_BREAK_URL : GEM_BREAK_FALLBACK_URL;
   return (
-    <span className="round-pips">
-      {[0, 1].map((i) => <span key={i} className={"pip" + (i < wins ? " pip-filled" : "")} />)}
+    <span className="gem-pip">
+      <img className="gem-img gem-back" src={backSrc} alt="" decoding="async" loading="eager" onError={() => setBackStage(1)} />
+      {!broken && !breaking && (
+        <img className="gem-img gem-front" src={frontSrc} alt="" decoding="async" loading="eager" onError={() => setFrontStage(1)} />
+      )}
+      {breaking && (
+        <img className="gem-img gem-crack" src={breakSrc} alt="" decoding="async" loading="eager" onError={() => setBreakStage(1)} />
+      )}
+    </span>
+  );
+}
+
+// Two life gems for one player. `losses` is how many rounds this player has
+// lost so far (0, 1, or 2) — the first loss breaks the left gem, the second
+// breaks the right gem and ends the game. Tracks the previous loss count so
+// only the gem that *just* broke plays the crack animation; anything broken
+// from an earlier round (or from loading mid-game) shows the settled socket
+// straightaway with no replay.
+function GemPair({ losses }) {
+  const prevLossesRef = useRef(losses);
+  const [breakingIdx, setBreakingIdx] = useState(null);
+  useEffect(() => {
+    const prev = prevLossesRef.current;
+    prevLossesRef.current = losses;
+    if (losses > prev) {
+      const idx = losses - 1;
+      setBreakingIdx(idx);
+      const t = setTimeout(() => setBreakingIdx((cur) => (cur === idx ? null : cur)), GEM_BREAK_ANIM_MS);
+      return () => clearTimeout(t);
+    }
+  }, [losses]);
+  return (
+    <span className="gem-pair">
+      {[0, 1].map((i) => (
+        <GemPip key={i} broken={i < losses && breakingIdx !== i} breaking={breakingIdx === i} />
+      ))}
     </span>
   );
 }
@@ -1958,14 +2630,14 @@ function TopBar({ p1, p2, round, turnLabel }) {
     <div className="top-bar">
       <div className="tb-side">
         <span className="tb-name">{p1.name}</span>
-        <RoundPips wins={p1.wins} />
+        <GemPair losses={p1.losses} />
       </div>
       <div className="tb-center">
         <span className="tb-round">ROUND {round}</span>
         <span className="tb-turn">{turnLabel}</span>
       </div>
       <div className="tb-side tb-side-right">
-        <RoundPips wins={p2.wins} />
+        <GemPair losses={p2.losses} />
         <span className="tb-name">{p2.name}</span>
       </div>
     </div>
@@ -1987,9 +2659,20 @@ function DiscardPanel({ cardIds, onClose }) {
   );
 }
 
-function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gameWinnerName, hideButton, isTie }) {
+function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gameWinnerName, hideButton, isTie, viewerName }) {
+  // Fires once per round-end banner shown (keyed on round number so it
+  // doesn't replay on unrelated rerenders). Ties don't have a clear
+  // winner/loser, so no round win/loss clip plays for them. Skipped
+  // entirely when no viewerName is supplied (Hotseat — shared device,
+  // no single "you" to judge the outcome against).
+  const firedRef = useRef(null);
+  useEffect(() => {
+    if (!viewerName || isTie || isGameEnd || firedRef.current === round) return;
+    firedRef.current = round;
+    playSound(roundWinnerName === viewerName ? "wonRound" : "roundLoss");
+  }, [round, isTie, isGameEnd, roundWinnerName, viewerName]);
   return (
-    <div className="overlay">
+    <div className="overlay overlay-clear">
       <div className="round-banner">
         <div className="ribbon">{isGameEnd ? "VICTORY" : "ROUND " + round + " COMPLETE"}</div>
         {score && (
@@ -2009,16 +2692,69 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
   );
 }
 
-function GameOverPanel({ state, onExit }) {
+// Online mode builds its game-over banner inline (see OnlineGame) rather
+// than through GameOverPanel, so it gets this tiny sibling instead of
+// duplicating GameOverPanel's fire-once sound logic inline there.
+function OnlineGameOverSound({ iWon, isDraw }) {
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (isDraw || firedRef.current) return;
+    firedRef.current = true;
+    playSound(iWon ? "wonGame" : "gameLoss");
+  }, [iWon, isDraw]);
+  return null;
+}
+
+function GameOverPanel({ state, onExit, onPlayAgain, gameLog, viewerRole }) {
   const winnerName = state.gameWinner === "draw" ? null : state.players[state.gameWinner].name;
+  // Same fire-once pattern as RoundBanner. Draws don't have a clip; skipped
+  // when viewerRole isn't supplied (Hotseat/Online-spectator-ish contexts
+  // where "you" isn't well defined here yet).
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!viewerRole || state.gameWinner === "draw" || firedRef.current) return;
+    firedRef.current = true;
+    playSound(state.gameWinner === viewerRole ? "wonGame" : "gameLoss");
+  }, [viewerRole, state.gameWinner]);
+
+  function downloadLog() {
+    const payload = {
+      startedAt: gameLog?.startedAt || null,
+      finishedAt: new Date().toISOString(),
+      players: {
+        p1: { name: state.players.p1.name, faction: state.players.p1.faction, leaderId: state.players.p1.leaderId },
+        p2: { name: state.players.p2.name, faction: state.players.p2.faction, leaderId: state.players.p2.leaderId },
+      },
+      roundWins: state.roundWins,
+      winner: state.gameWinner === "draw" ? "draw" : state.gameWinner,
+      // Per-decision snapshots captured as the AI acted, for later review of its play.
+      aiDecisions: (gameLog && gameLog.decisions) || [],
+      // Full narrative event log shown in-game.
+      eventLog: state.log,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kwent-game-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <div className="overlay">
+    <div className="overlay overlay-clear">
       <div className="round-banner gameover">
         <div className="ribbon">GAME OVER</div>
         <div className="banner-sub big">
           {winnerName ? `${winnerName} wins ${state.roundWins.p1} – ${state.roundWins.p2}!` : `It's a draw, ${state.roundWins.p1} – ${state.roundWins.p2}!`}
         </div>
-        <button type="button" className="btn btn-gold" onClick={onExit}>Back to menu</button>
+        <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+          {onPlayAgain && <button type="button" className="btn btn-gold" onClick={onPlayAgain}>Play again</button>}
+          <button type="button" className="btn" onClick={onExit}>Back to menu</button>
+          <button type="button" className="btn" onClick={downloadLog}>Download game log</button>
+        </div>
       </div>
     </div>
   );
@@ -2046,7 +2782,7 @@ function cardMatchesAbilityFilter(card, filterKey) {
   return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
 }
 
-function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck }) {
+function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
   const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
   const [deckName, setDeckName] = useState("");
@@ -2074,11 +2810,16 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
   const leaders = useMemo(() => leadersForFaction(faction), [faction]);
   const count = selectedIds.length;
+  const unitCount = useMemo(
+    () => selectedIds.filter((id) => { const c = cardById(id); return c && (c.cardType === "Basic" || c.cardType === "Hero"); }).length,
+    [selectedIds]
+  );
   const needsLeader = leaders.length > 0;
-  const canConfirm = count >= DECK_SIZE && (!needsLeader || !!leaderId);
+  const canConfirm = unitCount >= DECK_SIZE && (!needsLeader || !!leaderId);
 
   return (
     <div className="screen deckbuilder">
+      {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
 
       {!lockFaction && (
@@ -2112,7 +2853,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       </div>
 
       <div className="deck-count">
-        Selected: <strong>{count}</strong> / {DECK_SIZE} minimum
+        Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards
         {onRandomize && (
           <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
             🎲 Random deck
@@ -2215,13 +2956,39 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         <button type="button" className="btn btn-gold btn-lg" disabled={!canConfirm} onClick={onConfirm}>
           {busyLabel || "Confirm deck"}
         </button>
-        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} cards{needsLeader ? " and a leader" : ""}.</span>}
+        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count){needsLeader ? " and a leader" : ""}.</span>}
       </div>
     </div>
   );
 }
 
 function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLabel }) {
+  // Plays once, right when the very first hand is dealt (mulligan only ever
+  // happens at the start of Round 1 — see the single "phase: mulligan" site
+  // in gameReducer — so "on mount, before any swaps" reliably means "the
+  // opening hand"). Zero Heroes -> starting_with_basic (guarded to fire only
+  // once for the whole game, no matter how many times this component
+  // mounts). One or more Heroes -> getting_a_hero, once per Hero, same as
+  // any other hero-gain moment.
+  const firedRef = useRef(false);
+  const prevHandRef = useRef(hand || []);
+  useEffect(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    const heroes = (hand || []).filter((id) => cardById(id)?.cardType === "Hero");
+    if (heroes.length) heroes.forEach(() => playSound("gettingAHero"));
+    else playStartingBasicOnce();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Subsequent hand changes are swap-drawn replacement cards — if a swap
+  // draws a Hero, that's its own getting_a_hero moment too.
+  useEffect(() => {
+    if (!firedRef.current) return; // skip the run that coincides with the mount effect above
+    const prev = prevHandRef.current;
+    const newHeroes = (hand || []).filter((id) => !prev.includes(id) && cardById(id)?.cardType === "Hero");
+    newHeroes.forEach(() => playSound("gettingAHero"));
+    prevHandRef.current = hand || [];
+  }, [hand]);
   const remaining = MAX_MULLIGAN - swapsUsed;
   const sortedHand = sortIdsByPower(hand);
   return (
@@ -2332,17 +3099,104 @@ function PassDeviceGate({ name, onContinue }) {
    an Agile unit / Commander's Horn / Mardroeme, which board card a Decoy
    swaps for, which discard-pile card a Medic revives) before dispatching
    the actual PLAY_CARD action with those options attached. */
+const FORFEIT_HOLD_MS = 3000;
+
+/* Press-and-hold forfeit button: has to be held for FORFEIT_HOLD_MS straight,
+   with a visible fill so it's obvious the hold is registering (and can't be
+   triggered by a stray click). Releasing early cancels and resets. */
+function HoldToForfeitButton({ onForfeit, disabled }) {
+  const [holding, setHolding] = useState(false);
+  const [progress, setProgress] = useState(0); // 0-100
+  const rafRef = useRef(null);
+  const startRef = useRef(null);
+  const doneRef = useRef(false);
+
+  const stop = () => {
+    setHolding(false);
+    setProgress(0);
+    doneRef.current = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  };
+
+  const tick = () => {
+    const elapsed = Date.now() - startRef.current;
+    const pct = Math.min(100, (elapsed / FORFEIT_HOLD_MS) * 100);
+    setProgress(pct);
+    if (pct >= 100) {
+      if (!doneRef.current) {
+        doneRef.current = true;
+        onForfeit && onForfeit();
+      }
+      stop();
+      return;
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const start = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    setHolding(true);
+    startRef.current = Date.now();
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  if (!onForfeit) return null;
+
+  return (
+    <button
+      type="button"
+      className={"btn btn-forfeit" + (holding ? " holding" : "")}
+      disabled={disabled}
+      style={{ "--forfeit-progress": progress + "%" }}
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      title="Hold for 3 seconds to forfeit the game"
+    >
+      <span className="forfeit-fill" />
+      <span className="forfeit-label">{holding ? "Hold to forfeit…" : "Forfeit"}</span>
+    </button>
+  );
+}
+
 function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
-  isMyTurn, onPlayCard, onPass, onUseLeader, canAct, opponentThinking,
+  isMyTurn, onPlayCard: onPlayCardRaw, onPass: onPassRaw, onForfeit, onUseLeader: onUseLeaderRaw, canAct: canActRaw, opponentThinking,
 }) {
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
+  // Move pacing: don't let the next card/leader/pass action fire until
+  // whatever sound is currently playing has actually finished — otherwise
+  // rapid-fire plays cut each other's audio off mid-clip. Re-renders every
+  // 150ms while something's playing purely so the "can I act yet" gate
+  // (and any disabled-button styling that depends on canAct) stays current;
+  // idle the rest of the time.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (soundGateRemainingMs() <= 0) return;
+    const t = setInterval(() => {
+      forceTick((n) => n + 1);
+      if (soundGateRemainingMs() <= 0) clearInterval(t);
+    }, 150);
+    return () => clearInterval(t);
+  });
+  const soundGated = soundGateRemainingMs() > 0;
+  const canAct = canActRaw && !soundGated;
+  const onPlayCard = (...args) => { if (soundGateRemainingMs() > 0) return; onPlayCardRaw(...args); };
+  const onUseLeader = (...args) => { if (soundGateRemainingMs() > 0) return; onUseLeaderRaw(...args); };
+  const onPass = (...args) => { if (soundGateRemainingMs() > 0) return; onPassRaw(...args); };
   const me = state.players[viewerRole];
   const opp = state.players[opponentRole];
   const myLeader = cardById(me.leaderId);
   const oppLeader = cardById(opp.leaderId);
   const spyDoubled = matchHasLeader(state, "L01");
+  const myTotal = boardTotal(me.board, spyDoubled);
+  const oppTotal = boardTotal(opp.board, spyDoubled);
 
   // Track the most recently played card on each side so it can be flash-highlighted —
   // makes it obvious what the opponent (or AI) just did, since turns can otherwise fly by.
@@ -2353,17 +3207,17 @@ function PlayBoard({
     const curOppIds = [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)];
     const curMeIds = [...me.board.close, ...me.board.ranged, ...me.board.siege, ...me.board.specials.map((s) => s.cardId)];
     if (prevIdsRef.current.opp) {
-      const newOppId = curOppIds.find((id) => !prevIdsRef.current.opp.includes(id));
-      if (newOppId) {
-        setFlash((f) => ({ ...f, opp: newOppId }));
+      const newOppIds = curOppIds.filter((id) => !prevIdsRef.current.opp.includes(id));
+      if (newOppIds.length) {
+        setFlash((f) => ({ ...f, opp: newOppIds[0] }));
         clearTimeout(flashTimers.current.opp);
         flashTimers.current.opp = setTimeout(() => setFlash((f) => ({ ...f, opp: null })), 2200);
       }
     }
     if (prevIdsRef.current.me) {
-      const newMeId = curMeIds.find((id) => !prevIdsRef.current.me.includes(id));
-      if (newMeId) {
-        setFlash((f) => ({ ...f, me: newMeId }));
+      const newMeIds = curMeIds.filter((id) => !prevIdsRef.current.me.includes(id));
+      if (newMeIds.length) {
+        setFlash((f) => ({ ...f, me: newMeIds[0] }));
         clearTimeout(flashTimers.current.me);
         flashTimers.current.me = setTimeout(() => setFlash((f) => ({ ...f, me: null })), 2200);
       }
@@ -2371,6 +3225,93 @@ function PlayBoard({
     prevIdsRef.current = { opp: curOppIds, me: curMeIds };
   }, [opp.board, me.board]);
   useEffect(() => () => { clearTimeout(flashTimers.current.opp); clearTimeout(flashTimers.current.me); }, []);
+
+  // --- Sound: card plays, weather, leader activation, round/game outcome ---
+  // Kept as its own effect (separate from the flash-highlight one above) so
+  // sound logic doesn't get tangled up with the flash-timer bookkeeping.
+  // Uses the same "diff against previous state" approach: reliable across
+  // hotseat/AI/online since it only reacts to state actually changing, and
+  // naturally skips replays/rerenders that don't add anything new.
+  const soundPrevRef = useRef(null);
+  useEffect(() => {
+    const snapshot = {
+      meIds: [...me.board.close, ...me.board.ranged, ...me.board.siege, ...me.board.specials.map((s) => s.cardId)],
+      oppIds: [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)],
+      meHand: me.hand,
+      oppHand: opp.hand,
+      meWeather: me.board.weather,
+      meLeaderUsed: me.leaderUsed,
+      oppLeaderUsed: opp.leaderUsed,
+      meLeaderId: me.leaderId,
+      oppLeaderId: opp.leaderId,
+    };
+    const prev = soundPrevRef.current;
+    if (prev) {
+      // The whole block is wrapped, not just the per-id forEach above — ANY
+      // throw in here (weather/leader detection included) must not be able
+      // to skip the soundPrevRef.current write at the bottom of this effect,
+      // for the same reason: a skipped write means next diff compares
+      // against a stale snapshot and old, already-played cards can look
+      // "new" again.
+      try {
+      // Newly played cards (on either side) — base sound + layered ability sound.
+      const newMineIds = snapshot.meIds.filter((id) => !prev.meIds.includes(id));
+      const newOppOnlyIds = snapshot.oppIds.filter((id) => !prev.oppIds.includes(id));
+      // Note: a Spy card I play lands on the OPPONENT's board array, not mine
+      // (that's the whole point of Spy) — so it's picked up here via
+      // newOppOnlyIds, not newMineIds, and only ever appears in one of the
+      // two lists, so there's no risk of it playing twice.
+      // Wrapped per-id: one bad card must not be able to throw and abort the
+      // rest of this effect — that would skip every sound after it in this
+      // batch (a very plausible reason Spy could go silent) AND, worse,
+      // prevent soundPrevRef.current from ever being updated at the bottom
+      // of this effect, leaving the next diff comparing against a stale,
+      // several-moves-old snapshot — which could make an old card look
+      // "new" again and refire an unrelated sound entirely.
+      newMineIds.forEach((id) => {
+        try { playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds); }
+        catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
+      });
+      newOppOnlyIds.forEach((id) => {
+        try { playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds); }
+        catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
+      });
+      // Hero drawn into hand — mulligan swap, Spy's 2-card draw, a leader's
+      // draw, an automatic per-faction draw (e.g. Northern Realms on a round
+      // win), etc. All treated the same way regardless of *why* the hand
+      // grew: any newly-present Hero id plays its own overlapping instance
+      // of the sound, so several at once naturally get louder together. The
+      // very first hand (before any swap) is intentionally NOT covered here —
+      // MulliganPanel owns that moment on its own (see playStartingBasicOnce/
+      // its own getting_a_hero check), so it isn't double counted against
+      // this diff's baseline once PlayBoard first mounts.
+      const newHeroesMine = snapshot.meHand.filter((id) => !prev.meHand.includes(id) && cardById(id)?.cardType === "Hero");
+      const newHeroesOpp = snapshot.oppHand.filter((id) => !prev.oppHand.includes(id) && cardById(id)?.cardType === "Hero");
+      [...newHeroesMine, ...newHeroesOpp].forEach(() => playSound("gettingAHero"));
+      // Weather changing per row -> fog/frost/rain; all-clear -> clearWeather.
+      // (Checked once — since a weather card is also caught by the play-sound
+      // pass above via its own ability, we only need the *ability-less* board
+      // paths here, e.g. a leader picking weather from deck with no card play.)
+      ROWS.forEach((r) => {
+        const before = prev.meWeather?.[r]?.cardId ?? null;
+        const after = snapshot.meWeather?.[r]?.cardId ?? null;
+        if (before !== after && after && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) {
+          const key = weatherSoundKeyForRow(r);
+          if (key) playSound(key);
+        }
+      });
+      const wasClear = prev.meWeather && (prev.meWeather.close || prev.meWeather.ranged || prev.meWeather.siege);
+      const isClear = !(snapshot.meWeather.close || snapshot.meWeather.ranged || snapshot.meWeather.siege);
+      if (wasClear && isClear) playSound("clearWeather");
+      // Leader activation — leaderUsed flipping false -> true.
+      if (!prev.meLeaderUsed && snapshot.meLeaderUsed) playSound(snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader");
+      if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) playSound(snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader");
+      } catch (e) {
+        console.error("[kwent sound] sound-diff effect threw — snapshot still committed below", e);
+      }
+    }
+    soundPrevRef.current = snapshot;
+  }, [me.board, opp.board, me.hand, opp.hand, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
 
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
@@ -2389,6 +3330,9 @@ function PlayBoard({
     }
     if (card.ability === "horn" && !card.row) return setPending({ kind: "horn", cardId: id });
     if (card.ability === "mardroeme" && !card.row) return setPending({ kind: "mardroeme", cardId: id });
+    // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't carry both.
+    if (card.ability === "horn" && card.row && me.board.mardroeme[card.row]) return;
+    if (card.ability === "mardroeme" && card.row && me.board.horns[card.row] > 0) return;
     if (card.ability === "medic" && !me.forceRandomRevive) {
       const eligible = me.discard.filter((did) => { const c = cardById(did); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
       if (eligible.length) return setPending({ kind: "medic", cardId: id, eligible });
@@ -2430,8 +3374,6 @@ function PlayBoard({
 
   const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
 
-  const backdropSrc = tableBackdropSrc(me.faction, opp.faction);
-
   // While Decoy is pending, clicking anywhere that isn't a valid target
   // cancels it — same "click away to back out" behavior as the other
   // pending choices (agile row / horn / mardroeme / medic), which use a
@@ -2443,16 +3385,11 @@ function PlayBoard({
 
   return (
     <>
-      {backdropSrc && <div className="table-backdrop" style={{ backgroundImage: `url("${backdropSrc}")` }} />}
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
-      <TopBar
-        p1={{ name: opponentName, wins: state.roundWins[opponentRole] }}
-        p2={{ name: viewerName, wins: state.roundWins[viewerRole] }}
-        round={state.round}
-        turnLabel={isMyTurn ? "Your turn" : `${opponentName}'s turn`}
-      />
-
       <div className="board-frame">
+        <div className="hand-strip-cards opp-hand-strip" style={{ position: "absolute" }}>
+          <CardBackStack count={opp.hand.length} faction={opp.faction} />
+        </div>
         <table className="board-table">
           <colgroup>
             <col style={{ width: "10%" }} />
@@ -2465,17 +3402,23 @@ function PlayBoard({
             <col style={{ width: "20%" }} />
           </colgroup>
           <tbody>
-            {/* Row 1: 3 empty (col1-3), opp hand (col4-8, rowspan2) */}
-            <tr>
-              <td colSpan={3}></td>
-              <td colSpan={5} rowSpan={2} className="cell-opp-hand" style={{ width: "4100%" }}>
-                <div className="hand-strip-cards">
-                  <CardBackStack count={opp.hand.length} faction={opp.faction} />
-                </div>
-              </td>
-            </tr>
+            {/* Row 1: 3 empty (col1-3), opp hand cell now empty — hand-strip-cards
+                moved out of the table to an absolutely-positioned sibling of
+                .board-frame (rendered before <table>) so it no longer occupies
+                table flow / rowspan. Safari/Mac-only: this row is dropped
+                entirely (confirmed fix for the whole board sitting low on
+                Mac) since table-layout:fixed locks all rows to equal height,
+                so shrinking it via CSS has no effect there — removing it is
+                the only lever. Left in place elsewhere to avoid re-testing
+                row-to-background-texture alignment on other browsers. */}
+            {!IS_SAFARI && (
+              <tr>
+                <td colSpan={3}></td>
+                <td></td>
+              </tr>
+            )}
 
-            {/* Row 2: opp pass status (col1-3); col4-8 covered by row1 rowspan */}
+            {/* Row 2: opp pass status (col1-3); col4-8 no longer covered by a rowspan */}
             <tr>
               <td colSpan={3} className="cell-opp-pass-status">
                 {opp.passed && <div className="passed-banner">Passed</div>}
@@ -2513,8 +3456,11 @@ function PlayBoard({
 
             {/* Row 6: name, score, deck */}
             <tr>
-              <td rowSpan={2} colSpan={2} className="cell-opp-name"><span className="side-name">{opponentName}</span></td>
-              <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp">{boardTotal(opp.board, spyDoubled)}</span></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-name">
+                <span className="side-name">{opponentName}</span>
+                <GemPair losses={state.roundWins[viewerRole]} />
+              </td>
+              <td rowSpan={2} className="cell-opp-score"><span className="score-badge score-opp"><span className={oppTotal > myTotal ? "score-leading" : ""}>{oppTotal}</span></span></td>
               <td rowSpan={2} className="cell-opp-deck"><DeckPile count={opp.deck.length} faction={opp.faction} hideCount /></td>
             </tr>
 
@@ -2560,8 +3506,11 @@ function PlayBoard({
 
             {/* Row 10: my name, score, my deck (moved up one row) */}
             <tr>
-              <td rowSpan={2} colSpan={2} className="cell-my-name"><span className="side-name">{viewerName}</span></td>
-              <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me">{boardTotal(me.board, spyDoubled)}</span></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-name">
+                <span className="side-name">{viewerName}</span>
+                <GemPair losses={state.roundWins[opponentRole]} />
+              </td>
+              <td rowSpan={2} className="cell-my-score"><span className="score-badge score-me"><span className={myTotal > oppTotal ? "score-leading" : ""}>{myTotal}</span></span></td>
               <td rowSpan={2} className="cell-my-deck"><DeckPile count={me.deck.length} faction={me.faction} hideCount /></td>
             </tr>
 
@@ -2621,10 +3570,13 @@ function PlayBoard({
 
             {/* Row 16: pass button, positioned via inline style */}
             <tr>
-              <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-30% 0 0 85%" }}>
-                <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
-                  {me.passed ? "You passed" : "Pass"}
-                </button>
+              <td colSpan={3} className="cell-pass-button" style={{ overflow: "visible", margin: "-37.5% 0 0 115%" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                  <button type="button" className="btn btn-pass" disabled={!canAct || me.passed} onClick={onPass}>
+                    {me.passed ? "You passed" : "Pass"}
+                  </button>
+                  <HoldToForfeitButton onForfeit={onForfeit} disabled={false} />
+                </div>
               </td>
             </tr>
           </tbody>
@@ -2641,7 +3593,22 @@ function PlayBoard({
           {me.hand.length === 0 ? (
             <span className="hint">No cards left.</span>
           ) : (
-            <div className="hand-fit">
+            <div
+              className="hand-fit"
+              style={(() => {
+                const slotWidthPct = 9;   // must match .hand-card-slot width
+                const baseMarginPct = -1; // default overlap (matches old fixed value)
+                const n = sortedHand.length;
+                let overlapPct = baseMarginPct;
+                if (n > 1) {
+                  const naturalTotal = slotWidthPct * n + baseMarginPct * (n - 1);
+                  if (naturalTotal > 100) {
+                    overlapPct = (100 - slotWidthPct * n) / (n - 1);
+                  }
+                }
+                return { "--hand-overlap": `${overlapPct}%` };
+              })()}
+            >
               {sortedHand.map((id) => (
                 <div key={id} className="hand-card-slot">
                   <CardTile
@@ -2664,9 +3631,23 @@ function PlayBoard({
           <div className="round-banner" onClick={(e) => e.stopPropagation()}>
             <div className="ribbon">CHOOSE A ROW</div>
             <div className="coin-call-row">
-              {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => (
-                <button key={r} type="button" className="btn btn-gold" onClick={() => confirmRow(r)}>{ROW_META[r].label}</button>
-              ))}
+              {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => {
+                const blocked =
+                  (pending.kind === "horn" && me.board.mardroeme[r]) ||
+                  (pending.kind === "mardroeme" && me.board.horns[r] > 0);
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    className="btn btn-gold"
+                    disabled={blocked}
+                    title={blocked ? "A row can only carry one of Horn / Mardroeme at a time" : undefined}
+                    onClick={() => !blocked && confirmRow(r)}
+                  >
+                    {ROW_META[r].label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -2787,8 +3768,10 @@ function Home({ onSelect, onlineAvailable }) {
 
 function randomDeckIds(faction) {
   const pool = poolForFaction(faction);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, DECK_SIZE).map((c) => c.id);
+  const isUnit = (c) => c.cardType === "Basic" || c.cardType === "Hero";
+  const units = pool.filter(isUnit).sort(() => Math.random() - 0.5).slice(0, DECK_SIZE);
+  const specials = pool.filter((c) => !isUnit(c)).sort(() => Math.random() - 0.5).slice(0, 6);
+  return [...units, ...specials].map((c) => c.id);
 }
 
 function randomLeaderId(faction) {
@@ -2870,7 +3853,8 @@ function HotseatGame({ onExit }) {
     return <DeckBuilder playerLabel="Player 1" faction={builder1.faction} onFactionChange={builder1.setFaction}
       lockFaction={false} selectedIds={builder1.selected} onToggleCard={builder1.toggle}
       leaderId={builder1.leaderId} onSelectLeader={builder1.setLeaderId} onConfirm={confirmP1} onRandomize={builder1.randomize}
-      savedDecks={builder1.savedDecks} onSaveDeck={builder1.saveDeck} onLoadDeck={builder1.loadDeck} onDeleteDeck={builder1.deleteDeck} />;
+      savedDecks={builder1.savedDecks} onSaveDeck={builder1.saveDeck} onLoadDeck={builder1.loadDeck} onDeleteDeck={builder1.deleteDeck}
+      onBack={onExit} />;
   }
   if (step === "gateTo2") {
     return <PassDeviceGate name="Player 2" onContinue={() => setStep("deck2")} />;
@@ -2879,7 +3863,8 @@ function HotseatGame({ onExit }) {
     return <DeckBuilder playerLabel="Player 2" faction={builder2.faction} onFactionChange={builder2.setFaction}
       lockFaction={false} selectedIds={builder2.selected} onToggleCard={builder2.toggle}
       leaderId={builder2.leaderId} onSelectLeader={builder2.setLeaderId} onConfirm={confirmP2} onRandomize={builder2.randomize}
-      savedDecks={builder2.savedDecks} onSaveDeck={builder2.saveDeck} onLoadDeck={builder2.loadDeck} onDeleteDeck={builder2.deleteDeck} />;
+      savedDecks={builder2.savedDecks} onSaveDeck={builder2.saveDeck} onLoadDeck={builder2.loadDeck} onDeleteDeck={builder2.deleteDeck}
+      onBack={() => setStep("deck1")} />;
   }
   if (!state) return null;
 
@@ -2983,26 +3968,42 @@ function HotseatGame({ onExit }) {
         canAct={true}
         onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: me, cardId, options }))}
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: me }))}
+        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
       />
     );
   }
 
-  if (state.phase === "roundEnd") {
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+    const me = state.turn;
+    const opp = otherKey(me);
+    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
-      <RoundBanner
-        round={state.round}
-        score={state.lastRoundScore}
-        isTie={isTie}
-        roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? state.players.p1.name : state.players.p2.name)}
-        onContinue={() => { setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" })); setRevealedTurn(null); }}
-      />
+      <>
+        <PlayBoard
+          state={state}
+          viewerRole={me}
+          opponentRole={opp}
+          viewerName={state.players[me].name}
+          opponentName={state.players[opp].name}
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {state.phase === "roundEnd" && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? state.players.p1.name : state.players.p2.name)}
+            onContinue={() => { setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" })); setRevealedTurn(null); }}
+          />
+        )}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} />}
+      </>
     );
-  }
-
-  if (state.phase === "gameEnd") {
-    return <GameOverPanel state={state} onExit={onExit} />;
   }
 
   return null;
@@ -3015,6 +4016,7 @@ function AIGame({ onExit }) {
   const [state, setState] = useState(null);
   const builder = useDeckBuilderState();
   const aiTimerRef = useRef(null);
+  const gameLogRef = useRef({ startedAt: null, decisions: [] });
 
   function confirmDeck() {
     const p1cfg = { name: "You", faction: builder.faction, leaderId: builder.leaderId, deckIds: builder.selected, isAI: false };
@@ -3023,8 +4025,21 @@ function AIGame({ onExit }) {
     const { deckIds: aiPool, aiLeaderId } = chooseAiDeck(aiFaction);
     const p2cfg = { name: "AI Opponent", faction: aiFaction, leaderId: aiLeaderId, deckIds: aiPool, isAI: true };
     const initial = initGame(p1cfg, p2cfg);
+    gameLogRef.current = {
+      startedAt: new Date().toISOString(),
+      you: { faction: p1cfg.faction, leaderId: p1cfg.leaderId },
+      aiOpponent: { faction: p2cfg.faction, leaderId: p2cfg.leaderId },
+      decisions: [],
+    };
     setState(initial);
     setStep("coinflip");
+  }
+
+  function playAgain() {
+    clearTimeout(aiTimerRef.current);
+    setState(null);
+    gameLogRef.current = { startedAt: null, decisions: [] };
+    setStep("deck");
   }
 
   // AI auto-decides during Scoia'tael's pre-game starter choice, if the AI is the chooser.
@@ -3062,10 +4077,23 @@ function AIGame({ onExit }) {
   useEffect(() => {
     if (!state) return;
     if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed) {
+      // Wait at least the usual "thinking" beat, but never fire before the
+      // last move's sound has actually finished (see soundGateRemainingMs).
+      const delay = Math.max(1300, soundGateRemainingMs());
       aiTimerRef.current = setTimeout(() => {
         const action = computeAIAction(state, "p2");
+        const me = state.players.p2;
+        const opp = state.players.p1;
+        gameLogRef.current.decisions.push({
+          round: state.round,
+          myBoardTotal: boardTotal(me.board, matchHasLeader(state, "L01")),
+          oppBoardTotal: boardTotal(opp.board, matchHasLeader(state, "L01")),
+          myHandSize: me.hand.length,
+          oppHandSize: opp.hand.length,
+          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
+        });
         setState((s) => gameReducer(s, action));
-      }, 1300);
+      }, delay);
       return () => clearTimeout(aiTimerRef.current);
     }
   }, [state]);
@@ -3074,7 +4102,8 @@ function AIGame({ onExit }) {
     return <DeckBuilder playerLabel="You" faction={builder.faction} onFactionChange={builder.setFaction}
       lockFaction={false} selectedIds={builder.selected} onToggleCard={builder.toggle}
       leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId} onConfirm={confirmDeck} onRandomize={builder.randomize}
-      savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck} />;
+      savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
+      onBack={onExit} />;
   }
   if (!state) return null;
 
@@ -3141,27 +4170,42 @@ function AIGame({ onExit }) {
         canAct={state.turn === "p1"}
         onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: "p1", cardId, options }))}
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
+        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
         opponentThinking={state.turn === "p2" && !state.players.p2.passed}
       />
     );
   }
 
-  if (state.phase === "roundEnd") {
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
-      <RoundBanner
-        round={state.round}
-        score={state.lastRoundScore}
-        isTie={isTie}
-        roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
-        onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
-      />
+      <>
+        <PlayBoard
+          state={state}
+          viewerRole="p1"
+          opponentRole="p2"
+          viewerName="You"
+          opponentName="AI Opponent"
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {state.phase === "roundEnd" && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
+            viewerName="You"
+            onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
+          />
+        )}
+        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} viewerRole="p1" />}
+      </>
     );
-  }
-
-  if (state.phase === "gameEnd") {
-    return <GameOverPanel state={state} onExit={onExit} />;
   }
 
   return null;
@@ -3215,6 +4259,11 @@ function normalizePlayer(p) {
         siege: (b.hornCards && b.hornCards.siege) || [],
       },
       mardroeme: { close: false, ranged: false, siege: false, ...(b.mardroeme || {}) },
+      mardroemeCards: {
+        close: (b.mardroemeCards && b.mardroemeCards.close) || [],
+        ranged: (b.mardroemeCards && b.mardroemeCards.ranged) || [],
+        siege: (b.mardroemeCards && b.mardroemeCards.siege) || [],
+      },
     },
   };
 }
@@ -3381,6 +4430,28 @@ function OnlineGame({ onExit }) {
     setPhase("waiting-deck");
   }
 
+  // Leaves the room entirely (tears down listeners/timers and any in-flight
+  // presence state) and drops back to the host/join chooser. Used by the
+  // deck screen's Back button so a stale room isn't left dangling in Firebase
+  // while the player picks a different mode.
+  function backToChoose() {
+    listenersRef.current.forEach((unsub) => unsub());
+    listenersRef.current = [];
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    if (watchdogRef.current) clearInterval(watchdogRef.current);
+    theirLastSeenRef.current = null;
+    forfeitFiredRef.current = false;
+    transitionGuard.current = {};
+    setRoomCode("");
+    setRole(null);
+    setMeta(null);
+    setMine(null);
+    setTheirs(null);
+    setOppDisconnected(false);
+    setJoinError("");
+    setPhase("choose");
+  }
+
   // Both decks ready -> deal hands -> move to coin flip.
   useEffect(() => {
     if (phase !== "waiting-deck" && phase !== "deckbuild") return;
@@ -3392,9 +4463,7 @@ function OnlineGame({ onExit }) {
       const theirLeader = theirs?.leaderId;
       const dealtWithLeaderMod = (mine.leaderId === "L08" || theirLeader === "L08")
         ? { ...dealt, forceRandomRevive: true }
-        : mine.leaderId === "L22"
-          ? { ...dealt, board: { ...dealt.board, halveWeather: true } }
-          : dealt;
+        : dealt;
       await writeJSON(playerKey(roomCode, role), dealtWithLeaderMod);
       setMine(dealtWithLeaderMod);
       const m = await readJSON(metaKey(roomCode));
@@ -3443,6 +4512,7 @@ function OnlineGame({ onExit }) {
     const lastHello = getLastHello();
     return (
       <div className="screen online-lobby">
+        <button type="button" className="btn btn-sm deckbuilder-back" onClick={onExit}>← Back</button>
         <h2 className="screen-title">Online</h2>
         <div className="net-mode-toggle" style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
           <button
@@ -3496,6 +4566,7 @@ function OnlineGame({ onExit }) {
           onConfirm={confirmDeckOnline}
           onRandomize={builder.randomize}
           savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
+          onBack={backToChoose}
         />
       </>
     );
@@ -3547,7 +4618,7 @@ function OnlineGame({ onExit }) {
       // own independent Math.random() result and briefly disagree before the
       // database catches up.
       const iAmCaller = caller === role;
-      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={caller} myName={iAmCaller ? myName : oppName} oppName={iAmCaller ? oppName : myName}
+      return <CoinFlipPanel coinFlip={meta.coinFlip} myKey={role} myName={myName} oppName={oppName}
         onFlip={iAmCaller ? undefined : () => applyAction({ type: "COIN_FLIP" })} />;
     }
     if (starter === role) {
@@ -3590,36 +4661,65 @@ function OnlineGame({ onExit }) {
           canAct={meta.turn === role}
           onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
           onPass={() => applyAction({ type: "PASS", player: role })}
+          onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
           onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
         />
       </>
     );
   }
 
-  if (meta.phase === "roundEnd") {
-    const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
-    const p2s = meta.lastRoundScore ? meta.lastRoundScore.p2 : 0;
-    const isTie = p1s === p2s;
-    let winnerName = null;
-    if (!isTie) {
-      const p1Won = p1s > p2s;
-      const iAmP1 = role === "p1";
-      winnerName = p1Won === iAmP1 ? "You" : "Opponent";
-    }
-    return <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton />;
-  }
+  if (meta.phase === "roundEnd" || meta.phase === "gameEnd") {
+    if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
 
-  if (meta.phase === "gameEnd") {
-    const iWon = meta.gameWinner === role;
-    const isDraw = meta.gameWinner === "draw";
+    let roundBannerEl = null;
+    if (meta.phase === "roundEnd") {
+      const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
+      const p2s = meta.lastRoundScore ? meta.lastRoundScore.p2 : 0;
+      const isTie = p1s === p2s;
+      let winnerName = null;
+      if (!isTie) {
+        const p1Won = p1s > p2s;
+        const iAmP1 = role === "p1";
+        winnerName = p1Won === iAmP1 ? "You" : "Opponent";
+      }
+      roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton viewerName="You" />;
+    }
+
+    let gameOverEl = null;
+    if (meta.phase === "gameEnd") {
+      const iWon = meta.gameWinner === role;
+      const isDraw = meta.gameWinner === "draw";
+      gameOverEl = (
+        <>
+          <OnlineGameOverSound iWon={iWon} isDraw={isDraw} />
+          <div className="overlay overlay-clear">
+            <div className="round-banner gameover">
+              <div className="ribbon">GAME OVER</div>
+              <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
+              <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+            </div>
+          </div>
+        </>
+      );
+    }
+
     return (
-      <div className="overlay">
-        <div className="round-banner gameover">
-          <div className="ribbon">GAME OVER</div>
-          <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
-          <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
-        </div>
-      </div>
+      <>
+        <PlayBoard
+          state={composeState(meta, mine, theirs, role, oppRole)}
+          viewerRole={role}
+          opponentRole={oppRole}
+          viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
+          opponentName={role === "p1" ? "Guest" : "Host"}
+          isMyTurn={false}
+          canAct={false}
+          onPlayCard={() => {}}
+          onPass={() => {}}
+          onUseLeader={() => {}}
+        />
+        {roundBannerEl}
+        {gameOverEl}
+      </>
     );
   }
 
@@ -3652,30 +4752,15 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
   box-sizing: border-box;
   padding: 0;
   position: relative;
-  z-index: 0; /* Forces .gwent-root to form its own stacking context so
-                 .table-backdrop's negative z-index is scoped locally and
-                 actually sits behind gwent-root's content, instead of
-                 gwent-root (a positioned element) outranking it in an
-                 ancestor stacking context and hiding it entirely. */
+  z-index: 0; /* Establishes its own stacking context. */
   overflow-x: hidden;
 }
 .gwent-root *, .gwent-root *::before, .gwent-root *::after { box-sizing: border-box; }
 html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
-/* Faction-matchup background image, rendered behind everything else in
-   .gwent-root. Fixed + inset:0 so it fills the full viewport even though
-   .screen itself is a narrow centered column. */
-.table-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background-size: cover;
-  background-position: center;
-  pointer-events: none;
-}
-
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
+.deckbuilder-back { margin-bottom: 10px; }
 
 /* ---- Home ---- */
 .home-hero { text-align: center; padding: 28px 8px 8px; }
@@ -3698,8 +4783,39 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .btn-lg { padding: 12px 22px; font-size: 1rem; }
 .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
 .btn-ghost { background: transparent; }
-.btn-pass { font-family: var(--font-display); background: var(--danger); border: 1px solid #7a2323; color: #f4e6e6; padding: 8px 18px; border-radius: 20px; cursor: pointer; }
+.btn-pass { font-family: var(--font-display); background: var(--danger); border: 1px solid #7a2323; color: #f4e6e6; padding: 8px 18px; border-radius: 20px; cursor: pointer; white-space: nowrap; }
 .btn-pass:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-forfeit {
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  font-family: var(--font-display);
+  background: #1c1a1a;
+  border: 1px solid #4a4444;
+  color: #b8afaf;
+  padding: 6px 16px;
+  border-radius: 18px;
+  cursor: pointer;
+  font-size: 85%;
+  user-select: none;
+  touch-action: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-forfeit:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-forfeit .forfeit-fill {
+  position: absolute;
+  inset: 0;
+  width: var(--forfeit-progress, 0%);
+  background: linear-gradient(90deg, #7a2323, #c23c3c);
+  transition: width 0.05s linear;
+  z-index: 0;
+}
+.btn-forfeit .forfeit-label { position: relative; z-index: 1; }
+.btn-forfeit.holding {
+  color: #fff;
+  border-color: #c23c3c;
+  box-shadow: 0 0 10px rgba(194, 60, 60, 0.6);
+}
 
 /* ---- Card tiles ---- */
 .card-tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; text-align: left; background: linear-gradient(160deg, var(--parchment), #d8cba3); color: var(--ink); border: none; border-left: 4px solid var(--accent); border-radius: 6px; padding: 6px 7px 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; }
@@ -3760,7 +4876,14 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ---- Pass gate / overlays / banners ---- */
 .overlay { position: fixed; inset: 0; background: rgba(6,7,4,0.86); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
-.round-banner { text-align: center; background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 34px 28px; max-width: 380px; }
+.overlay-clear { background: transparent; pointer-events: none; }
+.overlay-clear .round-banner { pointer-events: auto; }
+@keyframes bannerPop {
+  0% { transform: scale(0.7); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.round-banner { text-align: center; background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--gold-dim); border-radius: 14px; padding: 34px 28px; max-width: 380px; animation: bannerPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .round-banner .ribbon { font-family: var(--font-display); letter-spacing: 0.14em; color: var(--gold); font-size: 1.1rem; margin-bottom: 14px; }
 .banner-score { font-family: var(--font-mono); font-size: 2.4rem; display: flex; gap: 14px; justify-content: center; align-items: center; margin-bottom: 10px; }
 .banner-score .vs { color: var(--muted); font-size: 1.2rem; }
@@ -3774,7 +4897,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    (board rows, your hand, the opponent's card-back fan, deck/discard
    piles) is sized with plain %/aspect-ratio CSS — no JS measurement. */
 .play-board {
-  max-width: 70%; margin: 0 auto; padding: 6px 8px 8px;
+  max-width: 100%; margin: 0 auto; padding: 0;
   height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 4px;
   overflow: hidden; box-sizing: border-box;
 }
@@ -3784,9 +4907,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .tb-center { flex: 1; text-align: center; }
 .tb-round { display: block; font-family: var(--font-display); color: var(--gold); font-size: 0.85rem; letter-spacing: 0.08em; }
 .tb-turn { display: block; font-size: 0.75rem; color: var(--muted); }
-.round-pips { display: inline-flex; gap: 3px; }
-.pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--gold-dim); display: inline-block; }
-.pip-filled { background: var(--gold); }
+.gem-pair { display: inline-flex; gap: 5px; margin: -15% 0% 0 -12%; }
+.gem-pip { position: relative; display: inline-block; width: 6cqh; height: 5cqh; }
+.gem-img { position: absolute; inset: 0; width: 270%; height: 300%; object-fit: contain; pointer-events: none; margin: -60% 0 0 0%; }
+.gem-back { z-index: 0; }
+.gem-front { z-index: 1; }
+.gem-crack { z-index: 2; }
 
 /* boardls.png is the single full-board texture (both players' shelves +
    center divider) rendered once behind everything. .board-frame is a
@@ -3821,6 +4947,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .board-table td[rowspan="3"] { height: 18.75%; }
 
 .cell-opp-leader .card-tile, .cell-my-leader .card-tile { width: 80%; height: 65%; margin: 30% 0 0 17%; }
+.cell-opp-leader .card-art, .cell-my-leader .card-art { height: 137.5%; }
 
 /* ===== Board/*.jpg cell textures =====
    Portrait/icon assets (leader art, weather icon, deck/discard backs) are
@@ -3868,7 +4995,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* Row label / horn / cards cells are plain <td> content now — no wrapper
    div needed, the <td> itself is the positioned box. */
-.row-label { position: relative; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); width: 100%; height: 100%; }
+.row-label { position: relative; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 95%; color: var(--muted); width: 100%; height: 100%; }
 .row-total { color: var(--gold); font-weight: 700; }
 .row-markers { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
 .marker { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
@@ -3911,12 +5038,32 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-unused-badge { width: 75%; height: 75%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -40% 3%; }
 .cell-opp-leader-badge .leader-unused-badge { transform: rotate(180deg); }
 
-.side-name { font-family: var(--font-display); font-size: 60%; color: var(--gold); letter-spacing: 0.04em; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-.score-badge { font-size: 1.2rem; color: var(--gold); font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.side-name { font-family: var(--font-display); font-size: 95%; color: var(--gold); letter-spacing: 0.04em; display: flex; justify-content: center; width: 100%; height: 30%; align-items: flex-start; }
+.board-table td.cell-opp-score, .board-table td.cell-my-score { overflow: visible; }
+.score-badge { font-size: 135%; color: var(--gold); font-weight: 700; line-height: 1; display: flex; justify-content: center; width: 100%; height: 100%; align-items: flex-start; }
+.score-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7em;
+  min-height: 1.7em;
+  padding: 0 0.15em;
+  box-sizing: border-box;
+  color: #1a1206;
+  background: radial-gradient(ellipse at center, #ffe27a 0%, #ffb930 70%, #d98c0f 100%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px #ffdd7a, 0 0 18px 4px rgba(255, 200, 60, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.6);
+  font-size: 90%;
+  animation: score-leading-pulse 1.6s ease-in-out infinite;
+}
+@keyframes score-leading-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px #ffdd7a, 0 0 18px 4px rgba(255, 200, 60, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.6); }
+  50% { box-shadow: 0 0 0 3px #ffdd7a, 0 0 26px 8px rgba(255, 200, 60, 1), inset 0 0 8px rgba(255, 255, 255, 0.8); }
+}
 
 .cell-weather-center { display: flex; background-image: ${boardImg("weather")}; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .weather-center-list { display: flex; align-items: center; justify-content: center; gap: 2px; width: 82%; height: 67%; margin: 13% auto auto auto; flex-direction: row; }
-.weather-clear { display: flex; justify-content: center; align-self: center; margin: 25% 0 0 0; opacity: 0.6; }
+.weather-clear { display: flex; justify-content: center; align-self: center; margin: 30% 0 0 0; opacity: 0.6; }
 
 /* Weather overlay: absolutely positioned on .board-frame instead of a td
    background, so it can be placed/sized independently of the table's
@@ -3935,13 +5082,14 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   z-index: 1;
 }
 
-.cell-opp-hand, .cell-my-hand { display: flex; align-items: center; gap: 10px; padding: 4px 4px; }
-.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 100%; }
-.hand-fit { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
-.hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: -1%; }
+.hand-strip-cards { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 0; height: 30%; width: 97%; position: relative; z-index: 5; }
+.opp-hand-strip { top: -6.75%; }
+.hand-fit { display: flex; width: calc(100% - 13.5%); height: 100%; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; margin: -11% 0% 0 13.5%; transition: margin-top 0.25s ease; }
+.hand-strip-cards:hover .hand-fit { margin-top: -30%; }
+.hand-card-slot { position: relative; height: 100%; width: 9%; flex: 0 0 auto; margin-left: var(--hand-overlap, -1%); }
 .hand-card-slot:first-child { margin-left: 0; }
-.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-evenly; margin-left: 10%; }
-.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-left: -6%; margin-top: -12%; }
+.card-back-row { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; margin-left: 13.5%; }
+.card-back-wrap { position: relative; height: 100%; width: 9%; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); flex: 0 0 auto; margin-top: -12.5%; }
 .card-back-wrap:first-child { margin-left: 0; }
 .card-back-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-back-fallback { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, #2a2f1e, #2a2f1e 4px, #343a24 4px, #343a24 8px); }
@@ -3950,7 +5098,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deck-pile-stack { position: relative; flex: 0 0 auto; height: 90%; width: auto; aspect-ratio: 0.537 / 1; }
 .deck-pile-card { position: absolute; inset: 0; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 .deck-pile-count { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); white-space: nowrap; line-height: 1; }
-.deck-count-standalone { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 13%; width: 100%; height: 100%; }
+.deck-count-standalone { font-family: var(--font-mono); font-size: 85%; color: var(--muted); display: flex; align-items: flex-start; justify-content: flex-start; margin-left: 18%; width: 100%; height: 100%; }
 .discard-pile { display: flex; position: relative; flex: 0 0 auto; margin: 0; height: 100%; width: 48%; justify-content: center; }
 .discard-pile-back { position: absolute; top: 50%; right: 59.5%; transform: translateY(-50%); height: 12cqh; width: auto; aspect-ratio: 0.537 / 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--gold-dim); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
 
@@ -4037,6 +5185,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   font-size: 0.68rem; padding: 4px 10px; border-radius: 10px; animation: toast-fade 2.2s ease-in-out;
 }
 @keyframes toast-fade { 0% { opacity: 0; } 12% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Safari/Mac-only overrides. @supports (-webkit-hyphens: none) is true in
+   Safari (desktop + iOS) and false in Chrome/Firefox/Edge, so these only
+   apply there. (The top-row deletion for this same fix set lives in JS via
+   IS_SAFARI, since @supports can't remove DOM elements.) */
+@supports (-webkit-hyphens: none) {
+  .leader-unused-badge { height: 15%; }
+  .side-name { font-size: 90%; }
+  .weather-overlay { top: 41%; }
+  .opp-hand-strip { top: -12.75%; }
+  .hand-fit { margin: -6% 0% 0 13.5%; }
+}
 `;
 
 /* ================================ APP ==================================== */
@@ -4045,6 +5205,11 @@ export default function App() {
   const [mode, setMode] = useState(null);
   const [resetKey, setResetKey] = useState(0);
   const onlineAvailable = true; // backed by Firebase Realtime Database now
+
+  // Fire off the network fetch for every sound clip as soon as the app
+  // loads, well before any of them are actually needed — see
+  // preloadAllSounds' comment for why this matters.
+  useEffect(() => { preloadAllSounds(); }, []);
 
   function exitToMenu() {
     setMode(null);
