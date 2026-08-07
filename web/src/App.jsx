@@ -49,8 +49,18 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // and CDN caching, which is more reliable for hotlinking into a web app
 // than raw.githubusercontent.com directly. We still keep the raw GitHub URL
 // as an automatic fallback in case a path hasn't propagated to the CDN yet.
-const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@main/";
-const IMAGE_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/main/";
+// Pinned to an exact commit SHA rather than a floating branch (@main).
+// jsDelivr's GitHub-branch CDN mode ("gh") turned out to ignore query
+// strings entirely for its cache key — confirmed by testing ?v= busting
+// directly and it still served stale content — so query-string cache-
+// busting was never going to work here. A commit-pinned URL is treated as
+// immutable by jsDelivr, so this guarantees fresh, correct content with no
+// caching ambiguity, permanently. Trade-off: the site now only picks up
+// whatever was in the repo AT this commit — bump KWENT_PINNED_COMMIT to the
+// latest commit SHA whenever new assets need to actually go live.
+const KWENT_PINNED_COMMIT = "4d9e6a5d4f73f6ced5ad10d4be0412fe32aa501f";
+const IMAGE_BASE_URL = `https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@${KWENT_PINNED_COMMIT}/`;
+const IMAGE_FALLBACK_BASE_URL = `https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/${KWENT_PINNED_COMMIT}/`;
 // Safari detection for the handful of fixes that can't be done in pure CSS
 // (e.g. removing a table row). Matches desktop + mobile Safari, excludes
 // Chrome/Edge/Firefox/Android WebViews which also mention "Safari" in UA.
@@ -83,14 +93,9 @@ const boardImg = (name) => `url('${IMAGE_BASE_URL}Board/${encodeURIComponent(nam
 // Every clip lives in /sounds at repo root, served the same way as card art.
 const SOUND_BASE_URL = IMAGE_BASE_URL + "sounds/";
 const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
-// Bump this whenever a sound file gets replaced in the repo (same filename,
-// new content) — it's appended as a query string on every sound URL below,
-// so a bump makes every URL new to jsDelivr's edge cache and the browser's
-// own cache, guaranteeing a fresh fetch with no manual purge needed. Cheap
-// and global on purpose: bumping busts ALL sound files at once rather than
-// needing to track versions per-file, which is fine since re-fetching a few
-// dozen small clips costs nothing.
-const SOUND_ASSET_VERSION = 3;
+// No per-asset versioning needed anymore — the base URL itself is now
+// pinned to an exact commit (see KWENT_PINNED_COMMIT above), which is what
+// actually guarantees freshness for every asset, sounds included.
 const SOUND_FILES = {
   bond: "bond.m4a",
   clearWeather: "clear_weather.m4a",
@@ -137,8 +142,8 @@ const _soundPools = {};
 // sound playing" — playback itself was always immediate, it was the browser
 // fetching the file for the first time that was slow). Safe to call
 // repeatedly; browser HTTP cache + our pool both dedupe the actual work.
-function soundUrl(file) { return SOUND_BASE_URL + file + "?v=" + SOUND_ASSET_VERSION; }
-function soundFallbackUrl(file) { return SOUND_FALLBACK_BASE_URL + file + "?v=" + SOUND_ASSET_VERSION; }
+function soundUrl(file) { return SOUND_BASE_URL + file; }
+function soundFallbackUrl(file) { return SOUND_FALLBACK_BASE_URL + file; }
 function preloadAllSounds() {
   if (typeof Audio === "undefined") return;
   Object.entries(SOUND_FILES).forEach(([key, file]) => {
@@ -520,7 +525,7 @@ const CARDS = [
 {id:"c177",name:"Havekar Smuggler (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:"muster",abilityMeta:{},img:"Havekar Smuggler3.png"},
 {id:"c178",name:"Ida Emean aep Sivney",faction:"scoiatael",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Ida Emean aep Sivney.png"},
 {id:"c179",name:"Iorveth",faction:"scoiatael",power:10.0,row:"ranged",cardType:"Hero",ability:null,abilityMeta:{},img:"Iorveth.png"},
-{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:10.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
+{id:"c180",name:"Isengrim Faoiltiarna",faction:"scoiatael",power:6.0,row:"close",cardType:"Hero",ability:"moraleBoost",abilityMeta:{},img:"Isengrim Faoiltiarna.png"},
 {id:"c181",name:"Mahakaman Defender (1)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender1.png"},
 {id:"c182",name:"Mahakaman Defender (2)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender2.png"},
 {id:"c183",name:"Mahakaman Defender (3)",faction:"scoiatael",power:5.0,row:"close",cardType:"Basic",ability:null,abilityMeta:{},img:"Mahakaman Defender3.png"},
