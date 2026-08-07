@@ -58,7 +58,7 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // caching ambiguity, permanently. Trade-off: the site now only picks up
 // whatever was in the repo AT this commit — bump KWENT_PINNED_COMMIT to the
 // latest commit SHA whenever new assets need to actually go live.
-const KWENT_PINNED_COMMIT = "4d9e6a5d4f73f6ced5ad10d4be0412fe32aa501f";
+const KWENT_PINNED_COMMIT = "8d4b100665575ba61b6eba0fcf8d76bba52156f0";
 const IMAGE_BASE_URL = `https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@${KWENT_PINNED_COMMIT}/`;
 const IMAGE_FALLBACK_BASE_URL = `https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/${KWENT_PINNED_COMMIT}/`;
 // Safari detection for the handful of fixes that can't be done in pure CSS
@@ -99,6 +99,7 @@ const SOUND_FALLBACK_BASE_URL = IMAGE_FALLBACK_BASE_URL + "sounds/";
 const SOUND_FILES = {
   bond: "bond.m4a",
   clearWeather: "clear_weather.m4a",
+  coin: "coin.m4a",
   crachAnCraite: "crach_an_craite.m4a",
   decoy: "decoy.m4a",
   fog: "fog.m4a",
@@ -108,6 +109,7 @@ const SOUND_FILES = {
   horn: "horn.m4a",
   leader: "leader.m4a",
   mardroeme: "mardroeme.m4a",
+  mardroemeAlone: "mardroeme_alone.m4a",
   morale: "moral.m4a",
   muster: "muster.m4a",
   playingBasic: "playing_basic.m4a",
@@ -123,11 +125,12 @@ const SOUND_FILES = {
 };
 // Exact clip lengths (ms), measured with ffprobe against the actual files —
 // used to gate move pacing (see soundBusyUntil below) so the next card can't
-// land until the current sound has actually finished playing.
+// land until the current sound has actually finished playing. Also used
+// directly by CoinFlipPanel to time the spin animation/result reveal.
 const SOUND_DURATIONS_MS = {
-  bond: 1947, clearWeather: 3378, crachAnCraite: 2285, decoy: 1966, fog: 3000,
+  bond: 1947, clearWeather: 3378, coin: 1208, crachAnCraite: 2285, decoy: 1966, fog: 3000,
   frost: 2798, gameLoss: 3180, gettingAHero: 2754, horn: 2102, leader: 2459,
-  mardroeme: 1878, morale: 1262, muster: 1238, playingBasic: 679,
+  mardroeme: 1878, mardroemeAlone: 1604, morale: 1262, muster: 1238, playingBasic: 679,
   playingHero: 2638, rain: 1806, revival: 2449, roundLoss: 2756, scorch: 1759,
   spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
@@ -241,15 +244,20 @@ function weatherSoundKeyForRow(row) {
 // something — a lone Bond unit with no matching sibling in its row, a
 // Morale card played into an empty/all-Hero row, or a Muster card with no
 // siblings left to fetch are silent no-ops and shouldn't sound like they
-// triggered. Every other ability always "does something" the instant it's
-// played, so this only needs to special-case these three. `batchIds` is the
-// full list of card ids that landed on the board in this same diff pass —
-// used only for Muster, to check whether any siblings actually arrived
-// alongside it.
-function abilityActuallyActivates(card, board, row, batchIds) {
+// triggered. Same idea for row-scoped Scorch (scorchRow/scorchRowThreshold):
+// no burn sound if nothing actually got destroyed. scorchGlobal is
+// deliberately EXEMPT — it always plays regardless of whether it found a
+// target, per instruction. `batchIds` is the full list of ids that landed
+// on the board in this diff pass (for Muster); `opposingRemovedIds` is the
+// list of ids that vanished from the OTHER side's board in this same pass
+// (for row Scorch, which always hits the opponent's side).
+function abilityActuallyActivates(card, board, row, batchIds, opposingRemovedIds) {
   if (card.ability === "muster") {
     const fetch = musterFetchIds(card.id);
     return !!(batchIds && batchIds.some((id) => id !== card.id && fetch.includes(id)));
+  }
+  if (card.ability === "scorchRow" || card.ability === "scorchRowThreshold") {
+    return !!(opposingRemovedIds && opposingRemovedIds.length > 0);
   }
   if (!board || !row) return true;
   if (card.ability === "tightBond") {
@@ -277,17 +285,30 @@ const NO_BASE_SOUND_ABILITIES = new Set(["weather", "clearWeather", "horn"]);
 // specific sound on top if the ability actually has an effect (see
 // abilityActuallyActivates above). `board`/`row`/`batchIds` are optional
 // context used only for the Bond/Morale/Muster activation checks.
-function playCardSounds(card, board, row, batchIds) {
+// `ownRemovedIds`/`opposingRemovedIds` are ids that vanished from this
+// card's own side / the other side in this same diff pass — used for
+// Mardroeme (did a Berserker on MY side actually transform?) and row Scorch
+// (did anything on the OPPONENT's side actually die?) respectively.
+function playCardSounds(card, board, row, batchIds, ownRemovedIds, opposingRemovedIds) {
   if (!card) return;
   if (!NO_BASE_SOUND_ABILITIES.has(card.ability)) {
     playSound(card.cardType === "Hero" ? "playingHero" : "playingBasic");
+  }
+  if (card.ability === "mardroeme") {
+    // A transform necessarily replaces a Berserker's board id with its
+    // Transformed-variant id in the same row — which shows up as that old
+    // id vanishing from this side's board in this very diff pass. No
+    // vanished id on this side means nothing transformed.
+    const transformed = !!(ownRemovedIds && ownRemovedIds.length > 0);
+    playSound(transformed ? "mardroeme" : "mardroemeAlone");
+    return;
   }
   let abilityKey = ABILITY_SOUND_KEY[card.ability];
   if (card.ability === "weather") abilityKey = weatherSoundKeyForRow(Array.isArray(card.abilityMeta?.row) ? card.abilityMeta.row[0] : card.abilityMeta?.row) || null;
   // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
   // clip exists for it, so both layer in together as the closest fit.
   const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
-  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds)) {
+  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds, opposingRemovedIds)) {
     if (isStorm) { playSound("fog"); playSound("rain"); }
     else playSound(abilityKey);
   }
@@ -3039,6 +3060,29 @@ function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLa
 function CoinFlipPanel({ coinFlip, myKey, oppName, myName, isMyCallTurn, onCall, onFlip, onAck, singleDeviceLabel }) {
   const { caller, call, result, callerWon, starter, resolved } = coinFlip;
 
+  // The coin should visually spin (and play coin.m4a) only once the flip has
+  // actually happened — not while just sitting there waiting for someone to
+  // press "Flip the coin". `resolved` in game state flips true the instant
+  // the flip is dispatched (no artificial delay there — other logic reads
+  // it too), so the reveal delay lives here in the UI instead: catch
+  // `resolved` going false -> true, play the sound, and hold off showing the
+  // result text for exactly as long as the clip runs. This is keyed off the
+  // state transition rather than the raw click, so in online mode the
+  // player who ISN'T the one clicking (they just see "Waiting for X to
+  // flip…") gets the same synced spin+sound the instant it resolves on
+  // their screen too, not just the one who pressed the button.
+  const [showResult, setShowResult] = useState(false);
+  const prevResolvedRef = useRef(resolved);
+  useEffect(() => {
+    if (!prevResolvedRef.current && resolved) {
+      playSound("coin");
+      const t = setTimeout(() => setShowResult(true), SOUND_DURATIONS_MS.coin);
+      prevResolvedRef.current = resolved;
+      return () => clearTimeout(t);
+    }
+    prevResolvedRef.current = resolved;
+  }, [resolved]);
+
   if (!caller) {
     return (
       <div className="screen coinflip">
@@ -3057,12 +3101,23 @@ function CoinFlipPanel({ coinFlip, myKey, oppName, myName, isMyCallTurn, onCall,
       <div className="screen coinflip">
         <h2 className="screen-title">Coin toss</h2>
         <p className="mulligan-hint">{caller === myKey ? "You" : oppName} called <strong>{call}</strong>.</p>
-        <div className={"coin" + (resolved ? " coin-landed" : "")} />
+        <div className="coin" />
         {onFlip ? (
           <button type="button" className="btn btn-gold btn-lg" onClick={onFlip}>Flip the coin</button>
         ) : (
           <p className="hint">Waiting for {oppName} to flip…</p>
         )}
+      </div>
+    );
+  }
+
+  if (!showResult) {
+    return (
+      <div className="screen coinflip">
+        <h2 className="screen-title">Coin toss</h2>
+        <p className="mulligan-hint">{caller === myKey ? "You" : oppName} called <strong>{call}</strong>.</p>
+        <div className="coin coin-spinning" />
+        <p className="hint">Flipping…</p>
       </div>
     );
   }
@@ -3256,6 +3311,8 @@ function PlayBoard({
       oppIds: [...opp.board.close, ...opp.board.ranged, ...opp.board.siege, ...opp.board.specials.map((s) => s.cardId)],
       meHand: me.hand,
       oppHand: opp.hand,
+      meDiscard: me.discard,
+      oppDiscard: opp.discard,
       meWeather: me.board.weather,
       meLeaderUsed: me.leaderUsed,
       oppLeaderUsed: opp.leaderUsed,
@@ -3274,6 +3331,13 @@ function PlayBoard({
       // Newly played cards (on either side) — base sound + layered ability sound.
       const newMineIds = snapshot.meIds.filter((id) => !prev.meIds.includes(id));
       const newOppOnlyIds = snapshot.oppIds.filter((id) => !prev.oppIds.includes(id));
+      // Ids that vanished from each side's board in this same pass — used to
+      // tell whether row Scorch actually killed something (opponent's side)
+      // and whether Mardroeme actually transformed a Berserker (this side's
+      // own board, since a transform swaps the old id for a new one in the
+      // same row).
+      const removedMineIds = prev.meIds.filter((id) => !snapshot.meIds.includes(id));
+      const removedOppIds = prev.oppIds.filter((id) => !snapshot.oppIds.includes(id));
       // Note: a Spy card I play lands on the OPPONENT's board array, not mine
       // (that's the whole point of Spy) — so it's picked up here via
       // newOppOnlyIds, not newMineIds, and only ever appears in one of the
@@ -3286,12 +3350,28 @@ function PlayBoard({
       // several-moves-old snapshot — which could make an old card look
       // "new" again and refire an unrelated sound entirely.
       newMineIds.forEach((id) => {
-        try { playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds); }
+        try { playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds); }
         catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
       });
       newOppOnlyIds.forEach((id) => {
-        try { playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds); }
+        try { playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds); }
         catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
+      });
+      // scorchGlobal special cards (Scorch (1)/(2)/(3)) never touch the
+      // board at all when played — no row, no board.specials entry, they go
+      // straight to the discard pile — so the board-diff pass above can
+      // never see them land. Caught here instead, off the discard pile diff.
+      // No activation gate: scorchGlobal always plays regardless of whether
+      // it found a target, per instruction — only row Scorch is gated.
+      const newMineDiscards = snapshot.meDiscard.filter((id) => !prev.meDiscard.includes(id));
+      const newOppDiscards = snapshot.oppDiscard.filter((id) => !prev.oppDiscard.includes(id));
+      newMineDiscards.forEach((id) => {
+        const c = cardById(id);
+        if (c?.ability === "scorchGlobal") playCardSounds(c, null, null, null, null, null);
+      });
+      newOppDiscards.forEach((id) => {
+        const c = cardById(id);
+        if (c?.ability === "scorchGlobal") playCardSounds(c, null, null, null, null, null);
       });
       // Hero drawn into hand — mulligan swap, Spy's 2-card draw, a leader's
       // draw, an automatic per-faction draw (e.g. Northern Realms on a round
@@ -3328,7 +3408,7 @@ function PlayBoard({
       }
     }
     soundPrevRef.current = snapshot;
-  }, [me.board, opp.board, me.hand, opp.hand, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
+  }, [me.board, opp.board, me.hand, opp.hand, me.discard, opp.discard, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
 
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
@@ -5147,7 +5227,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 /* ---- Coin flip ---- */
 .screen.coinflip { text-align: center; }
 .coin-call-row { display: flex; gap: 12px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
-.coin { width: 84px; height: 84px; border-radius: 50%; margin: 18px auto; background: radial-gradient(circle at 35% 30%, #f0d896, var(--gold) 60%, var(--gold-dim) 100%); border: 3px solid var(--gold-dim); box-shadow: 0 4px 10px rgba(0,0,0,0.5); animation: coin-spin 0.9s ease-in-out; }
+.coin { width: 84px; height: 84px; border-radius: 50%; margin: 18px auto; background: radial-gradient(circle at 35% 30%, #f0d896, var(--gold) 60%, var(--gold-dim) 100%); border: 3px solid var(--gold-dim); box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+.coin-spinning { animation: coin-spin 1.208s ease-in-out; }
 @keyframes coin-spin { 0% { transform: rotateY(0deg); } 100% { transform: rotateY(1080deg); } }
 
 /* ---- v3 additions: hover-zoom explainer, play animation, passed banner, discard view ---- */
