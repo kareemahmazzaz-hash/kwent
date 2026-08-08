@@ -2356,7 +2356,7 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2369,6 +2369,11 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
   const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
+  // Kept in the DOM (and in its normal layout slot — MedicRevivalGhost
+  // measures this exact element's rect as its landing target) but invisible
+  // until the ghost clone actually arrives, so the player never sees the
+  // real card and the flying ghost at the same time.
+  if (arriving) fitStyle.opacity = 0;
 
   const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
   // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
@@ -2628,7 +2633,7 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -2644,6 +2649,7 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
             disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
             justPlayed={id === flashId}
             justRevived={id === revivedId}
+            arriving={id === arrivingId}
           />
         </div>
       ))}
@@ -3451,6 +3457,15 @@ function PlayBoard({
   const boardFrameRef = useRef(null);
   const revivedTimers = useRef({});
   useEffect(() => () => { clearTimeout(revivedTimers.current.opp); clearTimeout(revivedTimers.current.me); }, []);
+  // Reveals the (until now hidden-via-opacity) real in-row tile and starts
+  // its glow — called once the ghost has actually landed, never before, so
+  // the reveal and the glow's own fade-in are the only "arrival" the player
+  // ever sees.
+  const revealRevived = (side, cardId) => {
+    setRevived((r) => ({ ...r, [side]: cardId }));
+    clearTimeout(revivedTimers.current[side]);
+    revivedTimers.current[side] = setTimeout(() => setRevived((r) => ({ ...r, [side]: null })), 2200);
+  };
 
   // --- Sound: card plays, weather, leader activation, round/game outcome ---
   // Kept as its own effect (separate from the flash-highlight one above) so
@@ -3541,6 +3556,15 @@ function PlayBoard({
         // different side than the card lands on, so this is computed
         // separately from toSide rather than reusing it.
         const fromSide = viewerRole === revive.player ? "me" : "opp";
+        // NOTE: the real in-row tile for `cid` stays hidden (opacity:0, via
+        // RowCardsCell's arrivingId prop) for as long as ghost[toSide] is
+        // set — it only gets revealed (and only THEN starts its glow, via
+        // `revived`) from the ghost's own onDone callback below, once it's
+        // actually landed. Setting `revived` here too would start the glow
+        // animation on a card the player can't see yet, and — worse — the
+        // animation's own opacity keyframes would fight the inline
+        // opacity:0 used to hide it, causing exactly the "two cards at once"
+        // glitch this whole rework exists to avoid.
         try {
           const frameEl = boardFrameRef.current;
           const fromEl = document.querySelector(fromSide === "me" ? ".cell-my-discard" : ".cell-opp-discard");
@@ -3558,13 +3582,14 @@ function PlayBoard({
                 fromRect: { left: fromRect.left - frameRect.left, top: fromRect.top - frameRect.top, width: fromRect.width, height: fromRect.height },
               },
             }));
+          } else {
+            // Couldn't measure — no ghost, so reveal immediately instead of
+            // leaving the real card hidden forever with nothing to unhide it.
+            revealRevived(toSide, cid);
           }
-        } catch (e) { /* non-fatal — the fly animation is decoration, never block on it */ }
-        setRevived((r) => ({ ...r, [toSide]: cid }));
-        clearTimeout(revivedTimers.current[toSide]);
-        revivedTimers.current[toSide] = setTimeout(() => {
-          setRevived((r) => ({ ...r, [toSide]: null }));
-        }, 2200);
+        } catch (e) {
+          revealRevived(toSide, cid);
+        }
       }
       newMineIds.forEach((id) => {
         try {
@@ -3718,7 +3743,7 @@ function PlayBoard({
                 cardId={ghost.me.cardId}
                 fromRect={ghost.me.fromRect}
                 frameRef={boardFrameRef}
-                onDone={() => setGhost((g) => ({ ...g, me: null }))}
+                onDone={() => { setGhost((g) => ({ ...g, me: null })); revealRevived("me", ghost.me.cardId); }}
               />
             )}
             {ghost.opp && (
@@ -3728,7 +3753,7 @@ function PlayBoard({
                 cardId={ghost.opp.cardId}
                 fromRect={ghost.opp.fromRect}
                 frameRef={boardFrameRef}
-                onDone={() => setGhost((g) => ({ ...g, opp: null }))}
+                onDone={() => { setGhost((g) => ({ ...g, opp: null })); revealRevived("opp", ghost.opp.cardId); }}
               />
             )}
           </div>
@@ -3780,7 +3805,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} /></td>
               <td></td>
             </tr>
 
@@ -3797,7 +3822,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -3819,7 +3844,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} />
               </td>
             </tr>
 
@@ -3846,6 +3871,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  arrivingId={ghost.me?.cardId}
                 />
               </td>
               <td></td>
@@ -3873,6 +3899,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  arrivingId={ghost.me?.cardId}
                 />
               </td>
               <td></td>
@@ -3900,6 +3927,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  arrivingId={ghost.me?.cardId}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
