@@ -987,6 +987,24 @@ function musterFetchIds(playedId) {
   return [];
 }
 
+// Cards a Medic-style revive is allowed to target: any non-Hero, non-Special
+// card that actually has a row (i.e. a real unit, not a Leader/weather/etc).
+// Shared by the reducer (initial play + each RESOLVE_MEDIC_REVIVE link), the
+// AI's auto-pick heuristic, and the picker UI so eligibility never drifts
+// between the three.
+function medicEligible(discard) {
+  return discard.filter((id) => {
+    const c = cardById(id);
+    return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
+  });
+}
+// AI's revive heuristic: always grab the highest-power eligible card.
+function bestMedicRevive(discard) {
+  const eligible = medicEligible(discard);
+  if (!eligible.length) return null;
+  return [...eligible].sort((a, b) => (cardById(b)?.power || 0) - (cardById(a)?.power || 0))[0];
+}
+
 function resolvePlayCard(state, actingKey, cardId, options = {}) {
   const spyDoubled = matchHasLeader(state, "L01");
   const card = cardById(cardId);
@@ -1105,59 +1123,16 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       break;
     }
     case "medic": {
+      // Step 1 of 2: just place the Medic unit itself. The revive (and any
+      // chain that follows if the revived card is itself a Medic) is now a
+      // separate, player-chosen step — see RESOLVE_MEDIC_REVIVE below. If
+      // there's nothing eligible in the discard, awaitingMedicRevive never
+      // gets set and the move ends here, same as before.
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
-      // Chain: if the revived card is itself a Medic, it immediately revives
-      // another card too, and so on, until either the discard has nothing
-      // eligible left or a link in the chain isn't a Medic. Only the very
-      // first pick can come from `options.reviveId` (player's choice);
-      // everything after that in the chain is automatic for now — v38's
-      // interactive two-step rework will make each link player-chosen.
-      let chainState = ns;
-      let chainCount = 0;
-      let preferredId = options.reviveId;
-      let chaining = true;
-      while (chaining) {
-        const eligible = chainState.players[actingKey].discard.filter((id) => {
-          const c = cardById(id);
-          return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
-        });
-        if (!eligible.length) {
-          if (chainCount === 0) log.push(`${actor.name} plays ${card.name} (Medic) — no eligible card in the discard pile.`);
-          break;
-        }
-        const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (preferredId && eligible.includes(preferredId) ? preferredId : eligible[0]);
-        preferredId = null;
-        const reviveCard = cardById(reviveId);
-        if (reviveCard.ability === "spy") {
-          // Reviving a Spy through Medic plays it exactly like a normal Spy:
-          // it goes on the OPPONENT's side, and the medic's controller still
-          // draws the usual 2 cards for it.
-          chainState = withPlayer(chainState, oppKey, (p) => ({
-            ...p,
-            board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
-          }));
-          chainState = withPlayer(chainState, actingKey, (p) => {
-            const drawn = p.deck.slice(0, 2);
-            return {
-              ...p,
-              discard: p.discard.filter((id) => id !== reviveId),
-              deck: p.deck.slice(2),
-              hand: [...p.hand, ...drawn],
-            };
-          });
-          log.push(`${actor.name}'s Medic revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
-        } else {
-          chainState = withPlayer(chainState, actingKey, (p) => ({
-            ...p,
-            discard: p.discard.filter((id) => id !== reviveId),
-            board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId),
-          }));
-          log.push(`${actor.name}'s Medic revives ${reviveCard.name} from the discard pile.`);
-        }
-        chainCount++;
-        chaining = reviveCard.ability === "medic";
-      }
-      ns = chainState;
+      log.push(`${actor.name} plays ${card.name}.`);
+      const eligible = medicEligible(ns.players[actingKey].discard);
+      if (eligible.length) ns = { ...ns, awaitingMedicRevive: { player: actingKey } };
+      else log.push(`${actor.name}'s Medic finds no eligible card in the discard pile.`);
       break;
     }
     case "scorchGlobal": {
@@ -1211,6 +1186,57 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
 
   ns = { ...ns, log: [...ns.log, ...log] };
   ns = withPlayer(ns, actingKey, (p) => ({ ...p, passed: p.hand.length === 0 ? true : p.passed }));
+  return ns;
+}
+
+/* Step 2 of 2 for Medic: resolves exactly one revive link. Called once per
+   pick — either from the player's tap on the picker (`reviveId` given) or
+   from an automatic pick (AI, or forceRandomRevive under L08) with a random/
+   best id already chosen by the caller. If the revived card is itself a
+   Medic with further eligible targets, awaitingMedicRevive is re-armed for
+   another round instead of clearing, which is what makes the chain player-
+   choosable link by link rather than auto-resolving in one shot. Sets
+   `lastMedicRevive` — a transient marker (not gameplay state, purely for the
+   sound/animation diff effect in PlayBoard) recording which id just came
+   back and whether it revived as a Spy, so that id gets the dedicated
+   revival cue instead of the generic "card was played" one. */
+function resolveMedicRevive(state, actingKey, reviveId) {
+  if (!state.awaitingMedicRevive || state.awaitingMedicRevive.player !== actingKey) return state;
+  const actor = state.players[actingKey];
+  const oppKey = otherKey(actingKey);
+  const eligible = medicEligible(actor.discard);
+  if (!eligible.length) return { ...state, awaitingMedicRevive: null };
+  const pick = actor.forceRandomRevive
+    ? eligible[Math.floor(Math.random() * eligible.length)]
+    : (reviveId && eligible.includes(reviveId) ? reviveId : eligible[0]);
+  const reviveCard = cardById(pick);
+  let ns = state;
+  const log = [];
+  if (reviveCard.ability === "spy") {
+    // Reviving a Spy through Medic plays it exactly like a normal Spy: it
+    // goes on the OPPONENT's side, and the medic's controller still draws
+    // the usual 2 cards for it.
+    ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), pick) }));
+    ns = withPlayer(ns, actingKey, (p) => {
+      const drawn = p.deck.slice(0, 2);
+      return { ...p, discard: p.discard.filter((id) => id !== pick), deck: p.deck.slice(2), hand: [...p.hand, ...drawn] };
+    });
+    log.push(`${actor.name}'s Medic revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
+  } else {
+    ns = withPlayer(ns, actingKey, (p) => ({
+      ...p,
+      discard: p.discard.filter((id) => id !== pick),
+      board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), pick),
+    }));
+    log.push(`${actor.name}'s Medic revives ${reviveCard.name} from the discard pile.`);
+  }
+  const stillChaining = reviveCard.ability === "medic" && medicEligible(ns.players[actingKey].discard).length > 0;
+  ns = {
+    ...ns,
+    log: [...ns.log, ...log],
+    awaitingMedicRevive: stillChaining ? { player: actingKey } : null,
+    lastMedicRevive: { player: actingKey, cardId: pick, isSpy: reviveCard.ability === "spy" },
+  };
   return ns;
 }
 
@@ -1565,7 +1591,28 @@ function coinChooseStarter(state, starterKey) {
 
 /* -------------------------------- REDUCER -------------------------------- */
 
+// Shared by PLAY_CARD and RESOLVE_MEDIC_REVIVE: ends the acting player's
+// turn (and checks for round-end) UNLESS a Medic revive is still awaiting
+// the next pick — in which case the turn stays put so the chain can
+// continue without handing control to the opponent mid-resolution.
+function finishTurnAfterMove(ns, actingPlayer) {
+  if (ns.awaitingMedicRevive) return ns;
+  if (ns.players.p1.passed && ns.players.p2.passed) return finishRound(ns);
+  const nextKey = otherKey(actingPlayer);
+  return { ...ns, turn: ns.players[nextKey].passed ? actingPlayer : nextKey };
+}
+
 function gameReducer(state, action) {
+  // lastMedicRevive is a one-shot marker for the sound/animation diff effect
+  // — it should only ever describe the card revived by the MOST RECENT
+  // action. Left uncleared, a later unrelated action that happens to bring
+  // that same card id back onto a board (e.g. Decoy swapping it out and back
+  // in) would wrongly replay the revival cue instead of its normal sound.
+  // Clearing it here, for every action except the one that just set it,
+  // keeps it valid for exactly one render.
+  if (state?.lastMedicRevive && action.type !== "RESOLVE_MEDIC_REVIVE") {
+    state = { ...state, lastMedicRevive: null };
+  }
   switch (action.type) {
     case "COIN_CALL":
       return coinCall(state, action.player, action.call);
@@ -1600,11 +1647,15 @@ function gameReducer(state, action) {
     }
 
     case "PLAY_CARD": {
-      let ns = resolvePlayCard(state, action.player, action.cardId, action.options || {});
-      if (ns.players.p1.passed && ns.players.p2.passed) return finishRound(ns);
-      const nextKey = otherKey(action.player);
-      ns = { ...ns, turn: ns.players[nextKey].passed ? action.player : nextKey };
-      return ns;
+      const ns = resolvePlayCard(state, action.player, action.cardId, action.options || {});
+      return finishTurnAfterMove(ns, action.player);
+    }
+    // Step 2 of Medic's two-step flow (see resolveMedicRevive) — one
+    // dispatch per revive link, so it can be re-fired for a chained Medic
+    // without switching the turn out from under the player mid-chain.
+    case "RESOLVE_MEDIC_REVIVE": {
+      const ns = resolveMedicRevive(state, action.player, action.reviveId);
+      return finishTurnAfterMove(ns, action.player);
     }
     case "USE_LEADER": {
       if (action.options && action.options.ackReveal) {
@@ -1675,6 +1726,8 @@ function initGame(p1cfg, p2cfg) {
     lastRoundScore: null,
     gameWinner: null,
     coinFlip: { caller: null, call: null, result: null, callerWon: null, starter: null, resolved: false },
+    awaitingMedicRevive: null,
+    lastMedicRevive: null,
     log: scoiaChooser
       ? [`${(scoiaChooser === "p1" ? p1 : p2).name}'s Scoia'tael scouts choose who opens Round 1 — no coin toss needed.`]
       : ["A new game begins. Call the coin toss to decide who opens Round 1."],
@@ -2296,7 +2349,7 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2341,6 +2394,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (selected ? " is-selected" : "") +
           (faded ? " is-faded" : "") +
           (justPlayed ? " card-just-played" : "") +
+          (justRevived ? " card-just-revived" : "") +
           (card.cardType === "Hero" ? " is-hero" : "") +
           (artStage === 2 ? " no-art" : "")
         }
@@ -2566,7 +2620,7 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -2581,6 +2635,7 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId }) {
             onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
             disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
             justPlayed={id === flashId}
+            justRevived={id === revivedId}
           />
         </div>
       ))}
@@ -3238,7 +3293,8 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
 
 function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
-  isMyTurn, onPlayCard: onPlayCardRaw, onPass: onPassRaw, onForfeit, onUseLeader: onUseLeaderRaw, canAct: canActRaw, opponentThinking,
+  isMyTurn, onPlayCard: onPlayCardRaw, onPass: onPassRaw, onForfeit, onUseLeader: onUseLeaderRaw,
+  onResolveMedicRevive: onResolveMedicReviveRaw, canAct: canActRaw, opponentThinking,
 }) {
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
@@ -3258,12 +3314,38 @@ function PlayBoard({
     return () => clearInterval(t);
   });
   const soundGated = soundGateRemainingMs() > 0;
-  const canAct = canActRaw && !soundGated;
   const onPlayCard = (...args) => { if (soundGateRemainingMs() > 0) return; onPlayCardRaw(...args); };
   const onUseLeader = (...args) => { if (soundGateRemainingMs() > 0) return; onUseLeaderRaw(...args); };
   const onPass = (...args) => { if (soundGateRemainingMs() > 0) return; onPassRaw(...args); };
+  const onResolveMedicRevive = (...args) => { if (soundGateRemainingMs() > 0) return; onResolveMedicReviveRaw && onResolveMedicReviveRaw(...args); };
   const me = state.players[viewerRole];
   const opp = state.players[opponentRole];
+  // True while it's specifically MY Medic chain waiting on its next pick —
+  // gates every other action (pass, play, leader) the same way the old
+  // single-shot `pending` overlay used to, just driven off shared game state
+  // now instead of local UI state (so it survives reloads/online sync).
+  const medicChainPending = !!(state.awaitingMedicRevive && state.awaitingMedicRevive.player === viewerRole);
+  const canAct = canActRaw && !soundGated && !medicChainPending;
+
+  // forceRandomRevive (L08 Invader of the North) skips the picker entirely —
+  // each link auto-resolves with a random eligible target instead of
+  // waiting on a tap, but still goes through its own RESOLVE_MEDIC_REVIVE
+  // dispatch (paced behind the current sound) so the sound/animation stays
+  // one-link-at-a-time instead of collapsing back into a single instant
+  // batch. AI's own chain (p2 with no PlayBoard mounted) is driven from
+  // AIGame's turn effect instead — this only covers a human-controlled seat.
+  const medicAutoTimerRef = useRef(null);
+  useEffect(() => {
+    if (!medicChainPending || !me.forceRandomRevive) return;
+    const delay = Math.max(700, soundGateRemainingMs());
+    medicAutoTimerRef.current = setTimeout(() => {
+      const eligible = medicEligible(me.discard);
+      if (!eligible.length) return;
+      const pick = eligible[Math.floor(Math.random() * eligible.length)];
+      onResolveMedicRevive(pick);
+    }, delay);
+    return () => clearTimeout(medicAutoTimerRef.current);
+  }, [medicChainPending, me.forceRandomRevive, me.discard]);
   const myLeader = cardById(me.leaderId);
   const oppLeader = cardById(opp.leaderId);
   const spyDoubled = matchHasLeader(state, "L01");
@@ -3297,6 +3379,14 @@ function PlayBoard({
     prevIdsRef.current = { opp: curOppIds, me: curMeIds };
   }, [opp.board, me.board]);
   useEffect(() => () => { clearTimeout(flashTimers.current.opp); clearTimeout(flashTimers.current.me); }, []);
+
+  // Distinct "brought back from the discard" highlight for Medic revives —
+  // layered on top of (not instead of) the generic flash above, set from
+  // within the sound-diff effect below since that's where lastMedicRevive
+  // gets matched against the ids that actually landed in this pass.
+  const [revived, setRevived] = useState({ me: null, opp: null });
+  const revivedTimers = useRef({});
+  useEffect(() => () => { clearTimeout(revivedTimers.current.opp); clearTimeout(revivedTimers.current.me); }, []);
 
   // --- Sound: card plays, weather, leader activation, round/game outcome ---
   // Kept as its own effect (separate from the flash-highlight one above) so
@@ -3368,8 +3458,27 @@ function PlayBoard({
         const row = rowOfCardInBoard(board, id);
         if (row && prevMardroeme?.[row]) playSound("mardroeme");
       };
+      // Medic revive (see resolveMedicRevive): the revived card gets its own
+      // dedicated cue — revival.m4a, plus spy.m4a layered on top if it came
+      // back as a Spy — instead of the generic playingBasic/Hero(+ability)
+      // treatment every other new id gets below. Guarded on the id actually
+      // being fresh in THIS diff pass so a stale lastMedicRevive left over
+      // from a prior action can't replay itself.
+      const revive = state.lastMedicRevive;
+      const revivedMineFresh = revive && newMineIds.includes(revive.cardId) ? revive.cardId : null;
+      const revivedOppFresh = revive && newOppOnlyIds.includes(revive.cardId) ? revive.cardId : null;
+      if (revivedMineFresh || revivedOppFresh) {
+        playSound("revival");
+        if (revive.isSpy) playSound("spy");
+        const side = revivedMineFresh ? "me" : "opp";
+        const cid = revivedMineFresh || revivedOppFresh;
+        setRevived((r) => ({ ...r, [side]: cid }));
+        clearTimeout(revivedTimers.current[side]);
+        revivedTimers.current[side] = setTimeout(() => setRevived((r) => ({ ...r, [side]: null })), 2200);
+      }
       newMineIds.forEach((id) => {
         try {
+          if (id === revivedMineFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds);
           arrivalTransformSound(id, me.board, prev.meMardroeme);
         }
@@ -3377,6 +3486,7 @@ function PlayBoard({
       });
       newOppOnlyIds.forEach((id) => {
         try {
+          if (id === revivedOppFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds);
           arrivalTransformSound(id, opp.board, prev.oppMardroeme);
         }
@@ -3455,16 +3565,16 @@ function PlayBoard({
     // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't carry both.
     if (card.ability === "horn" && card.row && me.board.mardroeme[card.row]) return;
     if (card.ability === "mardroeme" && card.row && me.board.horns[card.row] > 0) return;
-    if (card.ability === "medic" && !me.forceRandomRevive) {
-      const eligible = me.discard.filter((did) => { const c = cardById(did); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
-      if (eligible.length) return setPending({ kind: "medic", cardId: id, eligible });
-    }
+    // Medic no longer needs a pre-play picker here — the card just gets
+    // played normally, and the revive (if any) opens as its own step driven
+    // by state.awaitingMedicRevive (see the medicChainPending render block
+    // below), which also covers every subsequent link in a Medic-revives-
+    // Medic chain, not just the first.
     onPlayCard(id, {});
   };
 
   const confirmRow = (row) => { onPlayCard(pending.cardId, { chosenRow: row }); setPending(null); };
   const confirmDecoy = (targetId) => { onPlayCard(pending.cardId, { targetId }); setPending(null); };
-  const confirmMedic = (reviveId) => { onPlayCard(pending.cardId, { reviveId }); setPending(null); };
 
   const startLeader = () => {
     if (me.leaderId === "L04") return setPending({ kind: "leaderDiscard2", selected: [] });
@@ -3556,7 +3666,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} /></td>
               <td></td>
             </tr>
 
@@ -3573,7 +3683,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -3595,7 +3705,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} />
               </td>
             </tr>
 
@@ -3621,6 +3731,7 @@ function PlayBoard({
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
+                  revivedId={revived.me}
                 />
               </td>
               <td></td>
@@ -3647,6 +3758,7 @@ function PlayBoard({
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
+                  revivedId={revived.me}
                 />
               </td>
               <td></td>
@@ -3673,6 +3785,7 @@ function PlayBoard({
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
+                  revivedId={revived.me}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
@@ -3779,13 +3892,13 @@ function PlayBoard({
         <div className="hint pending-hint">Pick one of your own units on the board to swap with Decoy. Click anywhere else to cancel.</div>
       )}
 
-      {pending?.kind === "medic" && (
-        <div className="overlay" onClick={() => setPending(null)}>
-          <div className="round-banner" onClick={(e) => e.stopPropagation()}>
+      {medicChainPending && !me.forceRandomRevive && (
+        <div className="overlay">
+          <div className="round-banner">
             <div className="ribbon">MEDIC — REVIVE A CARD</div>
             <div className="pool-grid">
-              {pending.eligible.map((id) => (
-                <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmMedic(id)} />
+              {medicEligible(me.discard).map((id) => (
+                <CardTile key={id} card={cardById(id)} size="sm" onClick={() => onResolveMedicRevive(id)} />
               ))}
             </div>
           </div>
@@ -4092,6 +4205,7 @@ function HotseatGame({ onExit }) {
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: me }))}
         onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
+        onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: me, reviveId }))}
       />
     );
   }
@@ -4186,9 +4300,25 @@ function AIGame({ onExit }) {
     }
   }, [state && state.phase]);
 
+  // AI's own Medic chain: each link resolves as its own paced dispatch
+  // (rather than the reducer looping through the whole chain in one shot)
+  // so the sound/animation for a revived card lands separately from the
+  // Medic unit's own landing sound, same as the human-controlled side.
   useEffect(() => {
     if (!state) return;
-    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed) {
+    if (state.phase === "play" && state.awaitingMedicRevive?.player === "p2") {
+      const delay = Math.max(900, soundGateRemainingMs());
+      aiTimerRef.current = setTimeout(() => {
+        const pick = bestMedicRevive(state.players.p2.discard);
+        setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p2", reviveId: pick }));
+      }, delay);
+      return () => clearTimeout(aiTimerRef.current);
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
+    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive) {
       // Wait at least the usual "thinking" beat, but never fire before the
       // last move's sound has actually finished (see soundGateRemainingMs).
       const delay = Math.max(1300, soundGateRemainingMs());
@@ -4281,6 +4411,7 @@ function AIGame({ onExit }) {
         onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
         onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
+        onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p1", reviveId }))}
         opponentThinking={state.turn === "p2" && !state.players.p2.passed}
       />
     );
@@ -4772,6 +4903,7 @@ function OnlineGame({ onExit }) {
           onPass={() => applyAction({ type: "PASS", player: role })}
           onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
           onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
+          onResolveMedicRevive={(reviveId) => applyAction({ type: "RESOLVE_MEDIC_REVIVE", player: role, reviveId })}
         />
       </>
     );
@@ -5282,6 +5414,20 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   50% { box-shadow: 0 0 0 4px var(--gold), 0 0 18px 4px rgba(230, 190, 90, 0.8); }
 }
 .card-tile.card-just-played { animation: card-flash 1.1s ease-in-out 2; z-index: 2; }
+
+/* Medic revival: a distinct green rise-in-and-glow so a card coming back
+   from the discard reads as "revived" rather than "freshly played" — layers
+   independently of card-just-played (a revived card never gets both, since
+   RowCardsCell only ever sets one of flashId/revivedId to a given id, but
+   the two keyframes are visually distinct on purpose in case that ever
+   changes). */
+@keyframes card-revive {
+  0% { opacity: 0; transform: scale(0.8) translateY(14px); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+  40% { opacity: 1; transform: scale(1.05) translateY(-3px); box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  70% { box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  100% { opacity: 1; transform: scale(1) translateY(0); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+}
+.card-tile.card-just-revived { animation: card-revive 1.3s ease-out 1; z-index: 2; }
 
 .passed-banner {
   position: absolute; top: 6%; left: 2.5%; z-index: 5;
