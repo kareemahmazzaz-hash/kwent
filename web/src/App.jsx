@@ -3660,6 +3660,31 @@ function PlayBoard({
     soundPrevRef.current = snapshot;
   }, [me.board, opp.board, me.hand, opp.hand, me.discard, opp.discard, me.leaderUsed, opp.leaderUsed, me.leaderId, opp.leaderId]);
 
+  // Medic's "choose a card" picker shouldn't pop up over the top of the
+  // medic unit's own landing sound (or, for a chained link, the previous
+  // revival's sound) — it should wait for that sound to actually finish.
+  // Declared AFTER the sound-diff effect above so it always runs second
+  // within the same commit: by the time this reads soundGateRemainingMs(),
+  // that effect has already called playSound/markSoundBusy for whatever
+  // just landed, so the remaining time here is accurate for THIS link, not
+  // a stale one. Keyed on state.awaitingMedicRevive itself (a fresh object
+  // each time the reducer (re-)arms it, even for consecutive links for the
+  // same player) rather than the derived medicChainPending boolean, since
+  // that boolean can stay continuously true across a chain link with no
+  // false-in-between for an effect dependency to catch.
+  const [medicPickerReady, setMedicPickerReady] = useState(false);
+  useEffect(() => {
+    if (!state.awaitingMedicRevive || state.awaitingMedicRevive.player !== viewerRole) {
+      setMedicPickerReady(false);
+      return;
+    }
+    const remaining = soundGateRemainingMs();
+    if (remaining <= 0) { setMedicPickerReady(true); return; }
+    setMedicPickerReady(false);
+    const t = setTimeout(() => setMedicPickerReady(true), remaining + 30);
+    return () => clearTimeout(t);
+  }, [state.awaitingMedicRevive, viewerRole]);
+
   const sortedHand = sortIdsByPower(me.hand);
   const sortedMyDiscard = sortIdsByPower(me.discard, { desc: true });
 
@@ -4034,7 +4059,7 @@ function PlayBoard({
         <div className="hint pending-hint">Pick one of your own units on the board to swap with Decoy. Click anywhere else to cancel.</div>
       )}
 
-      {medicChainPending && !me.forceRandomRevive && (
+      {medicChainPending && !me.forceRandomRevive && medicPickerReady && (
         <div className="overlay">
           <div className="round-banner">
             <div className="ribbon">MEDIC — REVIVE A CARD</div>
