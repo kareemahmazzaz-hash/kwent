@@ -58,7 +58,7 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // caching ambiguity, permanently. Trade-off: the site now only picks up
 // whatever was in the repo AT this commit — bump KWENT_PINNED_COMMIT to the
 // latest commit SHA whenever new assets need to actually go live.
-const KWENT_PINNED_COMMIT = "8d4b100665575ba61b6eba0fcf8d76bba52156f0";
+const KWENT_PINNED_COMMIT = "933fe2edf3d11f66b2b10f8699cbd02562fd52db";
 const IMAGE_BASE_URL = `https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@${KWENT_PINNED_COMMIT}/`;
 const IMAGE_FALLBACK_BASE_URL = `https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/${KWENT_PINNED_COMMIT}/`;
 // Safari detection for the handful of fixes that can't be done in pure CSS
@@ -2356,7 +2356,7 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, flyDelta }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2369,13 +2369,6 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
   const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
-  // Fly-in delta (discard pile position minus this tile's landed position,
-  // in px) — set only for the one frame the revive animation needs it;
-  // card-revive's keyframes read it via translate(var(--fly-dx), var(--fly-dy)).
-  if (justRevived && flyDelta) {
-    fitStyle["--fly-dx"] = flyDelta.dx + "px";
-    fitStyle["--fly-dy"] = flyDelta.dy + "px";
-  }
 
   const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
   // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
@@ -2635,7 +2628,7 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, revivedFlyDelta }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -2651,10 +2644,58 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
             disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
             justPlayed={id === flashId}
             justRevived={id === revivedId}
-            flyDelta={id === revivedId ? revivedFlyDelta : undefined}
           />
         </div>
       ))}
+    </div>
+  );
+}
+
+/* Medic revival's actual "flies from the discard pile to the row" motion —
+   a fixed-size ghost clone, absolutely positioned as a sibling of the board
+   table (see .medic-ghost-layer, rendered directly inside .board-frame) so
+   it's never inside any row's own overflow:hidden box and never gets
+   clipped mid-flight the way animating the real in-row tile did.
+   `frameRef` locates the destination card (already landed, real, and
+   fully rendered — see data-card-id on CardTile) and measures its rect
+   relative to .board-frame on mount; `fromRect` (the discard pile's rect,
+   same coordinate space) was already captured by the caller. Classic FLIP:
+   render at the DESTINATION rect from frame 1, apply an inverse
+   translate+scale so it visually sits at the origin, then clear that
+   transform next frame and let the transition animate it home. Unmounts
+   itself via onDone once landed — by then it's pixel-identical to the real
+   tile sitting underneath it, so the swap is invisible. */
+function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
+  const [toRect, setToRect] = useState(null);
+  const [flying, setFlying] = useState(false);
+  useEffect(() => {
+    const el = document.querySelector(`[data-card-id="${cardId}"]`);
+    const frame = frameRef.current;
+    if (!el || !frame) { onDone && onDone(); return; }
+    const elRect = el.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    setToRect({ left: elRect.left - frameRect.left, top: elRect.top - frameRect.top, width: elRect.width, height: elRect.height });
+    const raf = requestAnimationFrame(() => setFlying(true));
+    const t = setTimeout(() => onDone && onDone(), 620);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardId]);
+  if (!card || !toRect) return null;
+  const dx = fromRect.left - toRect.left;
+  const dy = fromRect.top - toRect.top;
+  const sx = fromRect.width / toRect.width;
+  const sy = fromRect.height / toRect.height;
+  return (
+    <div
+      className="medic-ghost-card"
+      style={{
+        left: toRect.left, top: toRect.top, width: toRect.width, height: toRect.height,
+        transformOrigin: "top left",
+        transform: flying ? "translate(0px, 0px) scale(1, 1)" : `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+        transition: flying ? "transform 0.55s cubic-bezier(0.2, 0.7, 0.3, 1)" : "none",
+      }}
+    >
+      <CardTile card={card} size="fit" />
     </div>
   );
 }
@@ -3401,7 +3442,13 @@ function PlayBoard({
   // within the sound-diff effect below since that's where lastMedicRevive
   // gets matched against the ids that actually landed in this pass.
   const [revived, setRevived] = useState({ me: null, opp: null });
-  const [revivedDelta, setRevivedDelta] = useState({ me: null, opp: null });
+  // Ghost clone state for the "flies in from the discard pile" motion — see
+  // MedicRevivalGhost. Separate from `revived` (which only drives the
+  // in-place glow on the real, already-landed tile) since the ghost has its
+  // own lifecycle (measures its own landing rect on mount, then unmounts
+  // itself once the flight finishes).
+  const [ghost, setGhost] = useState({ me: null, opp: null });
+  const boardFrameRef = useRef(null);
   const revivedTimers = useRef({});
   useEffect(() => () => { clearTimeout(revivedTimers.current.opp); clearTimeout(revivedTimers.current.me); }, []);
 
@@ -3494,25 +3541,29 @@ function PlayBoard({
         // different side than the card lands on, so this is computed
         // separately from toSide rather than reusing it.
         const fromSide = viewerRole === revive.player ? "me" : "opp";
-        let delta = null;
         try {
+          const frameEl = boardFrameRef.current;
           const fromEl = document.querySelector(fromSide === "me" ? ".cell-my-discard" : ".cell-opp-discard");
-          const toEl = document.querySelector(`[data-card-id="${cid}"]`);
-          if (fromEl && toEl) {
+          if (frameEl && fromEl) {
+            const frameRect = frameEl.getBoundingClientRect();
             const fromRect = fromEl.getBoundingClientRect();
-            const toRect = toEl.getBoundingClientRect();
-            delta = {
-              dx: (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2),
-              dy: (fromRect.top + fromRect.height / 2) - (toRect.top + toRect.height / 2),
-            };
+            // Stored relative to .board-frame (not the viewport) since the
+            // ghost renders as an absolutely-positioned child of it — see
+            // .medic-ghost-layer / MedicRevivalGhost.
+            setGhost((g) => ({
+              ...g,
+              [toSide]: {
+                cardId: cid,
+                card: cardById(cid),
+                fromRect: { left: fromRect.left - frameRect.left, top: fromRect.top - frameRect.top, width: fromRect.width, height: fromRect.height },
+              },
+            }));
           }
         } catch (e) { /* non-fatal — the fly animation is decoration, never block on it */ }
         setRevived((r) => ({ ...r, [toSide]: cid }));
-        setRevivedDelta((r) => ({ ...r, [toSide]: delta }));
         clearTimeout(revivedTimers.current[toSide]);
         revivedTimers.current[toSide] = setTimeout(() => {
           setRevived((r) => ({ ...r, [toSide]: null }));
-          setRevivedDelta((r) => ({ ...r, [toSide]: null }));
         }, 2200);
       }
       newMineIds.forEach((id) => {
@@ -3657,7 +3708,31 @@ function PlayBoard({
   return (
     <>
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
-      <div className="board-frame">
+      <div className="board-frame" ref={boardFrameRef}>
+        {(ghost.me || ghost.opp) && (
+          <div className="medic-ghost-layer">
+            {ghost.me && (
+              <MedicRevivalGhost
+                key={"me-" + ghost.me.cardId}
+                card={ghost.me.card}
+                cardId={ghost.me.cardId}
+                fromRect={ghost.me.fromRect}
+                frameRef={boardFrameRef}
+                onDone={() => setGhost((g) => ({ ...g, me: null }))}
+              />
+            )}
+            {ghost.opp && (
+              <MedicRevivalGhost
+                key={"opp-" + ghost.opp.cardId}
+                card={ghost.opp.card}
+                cardId={ghost.opp.cardId}
+                fromRect={ghost.opp.fromRect}
+                frameRef={boardFrameRef}
+                onDone={() => setGhost((g) => ({ ...g, opp: null }))}
+              />
+            )}
+          </div>
+        )}
         <div className="hand-strip-cards opp-hand-strip" style={{ position: "absolute" }}>
           <CardBackStack count={opp.hand.length} faction={opp.faction} />
         </div>
@@ -3705,7 +3780,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} /></td>
               <td></td>
             </tr>
 
@@ -3722,7 +3797,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -3744,7 +3819,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} />
               </td>
             </tr>
 
@@ -3771,7 +3846,6 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
-                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td></td>
@@ -3799,7 +3873,6 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
-                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td></td>
@@ -3827,7 +3900,6 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
-                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
@@ -5457,20 +5529,29 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 .card-tile.card-just-played { animation: card-flash 1.1s ease-in-out 2; z-index: 2; }
 
-/* Medic revival: flies in from the discard pile's on-screen position (set
-   per-card via the --fly-dx/--fly-dy custom properties, computed in
-   PlayBoard's sound-diff effect from actual DOM rects) and settles into its
-   row slot with a green glow — distinct from card-just-played on purpose so
-   a revived card visibly reads as "brought back" rather than "freshly
-   played". Falls back to a plain in-place rise (0,0 offset) if the discard
-   pile or landed tile couldn't be measured for any reason. */
+/* Medic revival (in-place glow only — the actual "flies in from the discard
+   pile" motion is a separate fixed-position ghost clone, see
+   MedicRevivalGhost, since a translate on the real in-row tile gets clipped
+   by that row's own overflow:hidden long before it reaches this box). Green
+   to read as "brought back" rather than "freshly played", distinct from
+   card-just-played on purpose. */
 @keyframes card-revive {
-  0% { opacity: 0; transform: translate(var(--fly-dx, 0px), var(--fly-dy, 14px)) scale(0.7); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
-  55% { opacity: 1; transform: translate(0, 0) scale(1.06); box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
-  80% { box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
-  100% { opacity: 1; transform: translate(0, 0) scale(1); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+  0% { opacity: 0; transform: scale(0.85); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+  35% { opacity: 1; transform: scale(1.06); box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  70% { box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
 }
-.card-tile.card-just-revived { animation: card-revive 1.3s cubic-bezier(0.2, 0.7, 0.3, 1) 1; z-index: 3; }
+.card-tile.card-just-revived { animation: card-revive 1.3s ease-out 1; z-index: 3; }
+
+/* Fixed-position ghost that carries the actual "from discard to row" motion
+   (see MedicRevivalGhost + .medic-ghost-layer). Lives above everything —
+   including any row's overflow:hidden, which it never enters since it's an
+   absolutely-positioned sibling of the board table, not a descendant of any
+   row. transform-origin top-left because its left/top/width/height are set
+   to the LANDED (destination) rect, and the initial translate+scale is what
+   visually places it at the discard pile instead — see the component. */
+.medic-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
+.medic-ghost-card { position: absolute; will-change: transform; }
 
 .passed-banner {
   position: absolute; top: 6%; left: 2.5%; z-index: 5;
