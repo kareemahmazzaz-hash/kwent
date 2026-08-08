@@ -131,7 +131,7 @@ const SOUND_DURATIONS_MS = {
   bond: 1947, clearWeather: 3378, coin: 1208, crachAnCraite: 2285, decoy: 1966, fog: 3000,
   frost: 2798, gameLoss: 3180, gettingAHero: 2754, horn: 2102, leader: 2459,
   mardroeme: 1878, mardroemeAlone: 1604, morale: 1262, muster: 1238, playingBasic: 679,
-  playingHero: 2638, rain: 1806, revival: 2449, roundLoss: 2756, scorch: 1759,
+  playingHero: 2638, rain: 1806, revival: 1542, roundLoss: 2756, scorch: 1759,
   spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
 // A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
@@ -166,8 +166,15 @@ function preloadAllSounds() {
 // Module-level on purpose — pacing is a global "is anything audible right
 // now" concept, not something scoped to one component instance.
 let soundBusyUntil = 0;
+// Extra breathing room after a clip's measured end before the gate opens —
+// otherwise the next move lands the instant the last sound stops, which
+// reads as rushed. Padding lives here (not per-call) so every markSoundBusy
+// caller gets it uniformly, and layered sounds (base + ability, revival +
+// spy, etc.) still only pay it once since Math.max collapses to the single
+// latest end-time across the whole batch, not once per sound in it.
+const SOUND_GATE_PADDING_MS = 500;
 function markSoundBusy(durationMs) {
-  soundBusyUntil = Math.max(soundBusyUntil, Date.now() + (durationMs || 1400));
+  soundBusyUntil = Math.max(soundBusyUntil, Date.now() + (durationMs || 1400) + SOUND_GATE_PADDING_MS);
 }
 function soundGateRemainingMs() {
   return Math.max(0, soundBusyUntil - Date.now());
@@ -2349,7 +2356,7 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, flyDelta }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2362,6 +2369,13 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
   const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
+  // Fly-in delta (discard pile position minus this tile's landed position,
+  // in px) — set only for the one frame the revive animation needs it;
+  // card-revive's keyframes read it via translate(var(--fly-dx), var(--fly-dy)).
+  if (justRevived && flyDelta) {
+    fitStyle["--fly-dx"] = flyDelta.dx + "px";
+    fitStyle["--fly-dy"] = flyDelta.dy + "px";
+  }
 
   const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
   // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
@@ -2399,6 +2413,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (artStage === 2 ? " no-art" : "")
         }
         style={fitStyle}
+        data-card-id={card.id}
         onClick={disabled ? undefined : onClick}
         aria-disabled={disabled || undefined}
         onMouseEnter={handleMouseEnter}
@@ -2620,7 +2635,7 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, revivedFlyDelta }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -2636,6 +2651,7 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
             disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
             justPlayed={id === flashId}
             justRevived={id === revivedId}
+            flyDelta={id === revivedId ? revivedFlyDelta : undefined}
           />
         </div>
       ))}
@@ -3385,6 +3401,7 @@ function PlayBoard({
   // within the sound-diff effect below since that's where lastMedicRevive
   // gets matched against the ids that actually landed in this pass.
   const [revived, setRevived] = useState({ me: null, opp: null });
+  const [revivedDelta, setRevivedDelta] = useState({ me: null, opp: null });
   const revivedTimers = useRef({});
   useEffect(() => () => { clearTimeout(revivedTimers.current.opp); clearTimeout(revivedTimers.current.me); }, []);
 
@@ -3470,11 +3487,33 @@ function PlayBoard({
       if (revivedMineFresh || revivedOppFresh) {
         playSound("revival");
         if (revive.isSpy) playSound("spy");
-        const side = revivedMineFresh ? "me" : "opp";
+        const toSide = revivedMineFresh ? "me" : "opp";
         const cid = revivedMineFresh || revivedOppFresh;
-        setRevived((r) => ({ ...r, [side]: cid }));
-        clearTimeout(revivedTimers.current[side]);
-        revivedTimers.current[side] = setTimeout(() => setRevived((r) => ({ ...r, [side]: null })), 2200);
+        // Fly-in origin: always the ACTING player's discard pile (revive.player)
+        // — for a Spy revive that lands on the opponent's board, that's a
+        // different side than the card lands on, so this is computed
+        // separately from toSide rather than reusing it.
+        const fromSide = viewerRole === revive.player ? "me" : "opp";
+        let delta = null;
+        try {
+          const fromEl = document.querySelector(fromSide === "me" ? ".cell-my-discard" : ".cell-opp-discard");
+          const toEl = document.querySelector(`[data-card-id="${cid}"]`);
+          if (fromEl && toEl) {
+            const fromRect = fromEl.getBoundingClientRect();
+            const toRect = toEl.getBoundingClientRect();
+            delta = {
+              dx: (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2),
+              dy: (fromRect.top + fromRect.height / 2) - (toRect.top + toRect.height / 2),
+            };
+          }
+        } catch (e) { /* non-fatal — the fly animation is decoration, never block on it */ }
+        setRevived((r) => ({ ...r, [toSide]: cid }));
+        setRevivedDelta((r) => ({ ...r, [toSide]: delta }));
+        clearTimeout(revivedTimers.current[toSide]);
+        revivedTimers.current[toSide] = setTimeout(() => {
+          setRevived((r) => ({ ...r, [toSide]: null }));
+          setRevivedDelta((r) => ({ ...r, [toSide]: null }));
+        }, 2200);
       }
       newMineIds.forEach((id) => {
         try {
@@ -3666,7 +3705,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} /></td>
               <td></td>
             </tr>
 
@@ -3683,7 +3722,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -3705,7 +3744,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} revivedFlyDelta={revivedDelta.opp} />
               </td>
             </tr>
 
@@ -3732,6 +3771,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td></td>
@@ -3759,6 +3799,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td></td>
@@ -3786,6 +3827,7 @@ function PlayBoard({
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
                   flashId={flash.me}
                   revivedId={revived.me}
+                  revivedFlyDelta={revivedDelta.me}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
@@ -5415,19 +5457,20 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 .card-tile.card-just-played { animation: card-flash 1.1s ease-in-out 2; z-index: 2; }
 
-/* Medic revival: a distinct green rise-in-and-glow so a card coming back
-   from the discard reads as "revived" rather than "freshly played" — layers
-   independently of card-just-played (a revived card never gets both, since
-   RowCardsCell only ever sets one of flashId/revivedId to a given id, but
-   the two keyframes are visually distinct on purpose in case that ever
-   changes). */
+/* Medic revival: flies in from the discard pile's on-screen position (set
+   per-card via the --fly-dx/--fly-dy custom properties, computed in
+   PlayBoard's sound-diff effect from actual DOM rects) and settles into its
+   row slot with a green glow — distinct from card-just-played on purpose so
+   a revived card visibly reads as "brought back" rather than "freshly
+   played". Falls back to a plain in-place rise (0,0 offset) if the discard
+   pile or landed tile couldn't be measured for any reason. */
 @keyframes card-revive {
-  0% { opacity: 0; transform: scale(0.8) translateY(14px); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
-  40% { opacity: 1; transform: scale(1.05) translateY(-3px); box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
-  70% { box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
-  100% { opacity: 1; transform: scale(1) translateY(0); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+  0% { opacity: 0; transform: translate(var(--fly-dx, 0px), var(--fly-dy, 14px)) scale(0.7); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
+  55% { opacity: 1; transform: translate(0, 0) scale(1.06); box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  80% { box-shadow: 0 0 0 3px #4caf6e, 0 0 20px 6px rgba(76, 175, 110, 0.75); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); box-shadow: 0 0 0 2px #4caf6e, 0 2px 4px rgba(0,0,0,0.4); }
 }
-.card-tile.card-just-revived { animation: card-revive 1.3s ease-out 1; z-index: 2; }
+.card-tile.card-just-revived { animation: card-revive 1.3s cubic-bezier(0.2, 0.7, 0.3, 1) 1; z-index: 3; }
 
 .passed-banner {
   position: absolute; top: 6%; left: 2.5%; z-index: 5;
