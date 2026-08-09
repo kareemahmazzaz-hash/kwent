@@ -233,9 +233,6 @@ const ABILITY_SOUND_KEY = {
   decoy: "decoy",
   spy: "spy",
   muster: "muster",
-  scorchRow: "scorch",
-  scorchGlobal: "scorch",
-  scorchRowThreshold: "scorch",
   clearWeather: "clearWeather",
   // "weather" itself is ambiguous (fog/frost/rain depend on abilityMeta.row)
   // and "medic" is being reworked into its own two-step flow (v38) — both
@@ -251,20 +248,15 @@ function weatherSoundKeyForRow(row) {
 // something — a lone Bond unit with no matching sibling in its row, a
 // Morale card played into an empty/all-Hero row, or a Muster card with no
 // siblings left to fetch are silent no-ops and shouldn't sound like they
-// triggered. Same idea for row-scoped Scorch (scorchRow/scorchRowThreshold):
-// no burn sound if nothing actually got destroyed. scorchGlobal is
-// deliberately EXEMPT — it always plays regardless of whether it found a
-// target, per instruction. `batchIds` is the full list of ids that landed
-// on the board in this diff pass (for Muster); `opposingRemovedIds` is the
-// list of ids that vanished from the OTHER side's board in this same pass
-// (for row Scorch, which always hits the opponent's side).
-function abilityActuallyActivates(card, board, row, batchIds, opposingRemovedIds) {
+// triggered. Scorch (all three variants) no longer runs through this path
+// at all — see pendingBurn/lastScorchCast, which decide its sound/visual
+// off the actual hit list computed in the reducer instead of a board diff.
+// `batchIds` is the full list of ids that landed on the board in this diff
+// pass (for Muster).
+function abilityActuallyActivates(card, board, row, batchIds) {
   if (card.ability === "muster") {
     const fetch = musterFetchIds(card.id);
     return !!(batchIds && batchIds.some((id) => id !== card.id && fetch.includes(id)));
-  }
-  if (card.ability === "scorchRow" || card.ability === "scorchRowThreshold") {
-    return !!(opposingRemovedIds && opposingRemovedIds.length > 0);
   }
   if (!board || !row) return true;
   if (card.ability === "tightBond") {
@@ -315,7 +307,7 @@ function playCardSounds(card, board, row, batchIds, ownRemovedIds, opposingRemov
   // Skellige Storm covers both ranged (fog) and siege (rain) — no dedicated
   // clip exists for it, so both layer in together as the closest fit.
   const isStorm = card.ability === "weather" && Array.isArray(card.abilityMeta?.row) && card.abilityMeta.row.length > 1;
-  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds, opposingRemovedIds)) {
+  if ((abilityKey || isStorm) && abilityActuallyActivates(card, board, row, batchIds)) {
     if (isStorm) { playSound("fog"); playSound("rain"); }
     else playSound(abilityKey);
   }
@@ -1150,15 +1142,26 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       log.push(`${actor.name} plays ${card.name} — Scorch hits the strongest unit(s) on the whole battlefield (both sides).`);
       const hitsBySide = { [actingKey]: [], [oppKey]: [] };
       hits.forEach((h) => hitsBySide[h.side].push(h.id));
-      if (hitsBySide[oppKey].length) ns = destroyCards(ns, oppKey, hitsBySide[oppKey], log);
-      if (hitsBySide[actingKey].length) ns = destroyCards(ns, actingKey, hitsBySide[actingKey], log);
+      // Scorch no longer removes its victims immediately — see pendingBurn
+      // below. The card(s) it hit stay on the board, flagged for the burn
+      // animation/sound (see PlayBoard's pendingBurn effect), and only
+      // actually get destroyed once RESOLVE_SCORCH_BURN fires a beat later.
+      // lastScorchCast always records the cast (scorchGlobal plays its sound
+      // regardless of whether it found a target, same as before) even when
+      // there's nothing to burn.
+      ns = { ...ns, lastScorchCast: { cardId } };
+      if (hitsBySide[oppKey].length || hitsBySide[actingKey].length) {
+        ns = { ...ns, pendingBurn: { actingPlayer: actingKey, victims: hitsBySide } };
+      }
       break;
     }
     case "scorchRow": {
       ns = withPlayer(ns, actingKey, (p) => ({ ...p, board: addToRow(p.board, targetRow, cardId) }));
       const hits = strongestInRow(state.players[oppKey].board, targetRow, spyDoubled);
       log.push(`${actor.name} plays ${card.name} — Scorch hits ${ROW_META[targetRow].label}.`);
-      ns = destroyCards(ns, oppKey, hits, log);
+      if (hits.length) {
+        ns = { ...ns, lastScorchCast: { cardId }, pendingBurn: { actingPlayer: actingKey, victims: { [oppKey]: hits, [actingKey]: [] } } };
+      }
       break;
     }
     case "scorchRowThreshold": {
@@ -1169,7 +1172,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       if (total >= (card.abilityMeta.threshold || 10)) {
         const hits = strongestInRow(state.players[oppKey].board, scorchTargetRow, spyDoubled);
         log.push(`${ROW_META[scorchTargetRow].label} total was ${total} — Scorch triggers!`);
-        ns = destroyCards(ns, oppKey, hits, log);
+        if (hits.length) {
+          ns = { ...ns, lastScorchCast: { cardId }, pendingBurn: { actingPlayer: actingKey, victims: { [oppKey]: hits, [actingKey]: [] } } };
+        }
       }
       break;
     }
@@ -1604,6 +1609,10 @@ function coinChooseStarter(state, starterKey) {
 // continue without handing control to the opponent mid-resolution.
 function finishTurnAfterMove(ns, actingPlayer) {
   if (ns.awaitingMedicRevive) return ns;
+  // Scorch's victims are still sitting on the board mid-burn (see
+  // pendingBurn) — hold the turn here too, same as a Medic chain, so the
+  // opponent can't act while the fire's still playing out.
+  if (ns.pendingBurn) return ns;
   if (ns.players.p1.passed && ns.players.p2.passed) return finishRound(ns);
   const nextKey = otherKey(actingPlayer);
   return { ...ns, turn: ns.players[nextKey].passed ? actingPlayer : nextKey };
@@ -1663,6 +1672,22 @@ function gameReducer(state, action) {
     case "RESOLVE_MEDIC_REVIVE": {
       const ns = resolveMedicRevive(state, action.player, action.reviveId);
       return finishTurnAfterMove(ns, action.player);
+    }
+    // Step 2 of Scorch's two-step flow (see the scorchGlobal/scorchRow/
+    // scorchRowThreshold cases in resolvePlayCard): actually removes the
+    // cards pendingBurn flagged, once PlayBoard's burn animation/sound has
+    // had time to play out. Guarded so a stray double-dispatch (e.g. both
+    // clients in Online mode racing) is a harmless no-op.
+    case "RESOLVE_SCORCH_BURN": {
+      if (!state.pendingBurn) return state;
+      const { victims, actingPlayer } = state.pendingBurn;
+      let ns = state;
+      const log = [];
+      Object.entries(victims).forEach(([key, ids]) => {
+        if (ids && ids.length) ns = destroyCards(ns, key, ids, log);
+      });
+      ns = { ...ns, pendingBurn: null, log: [...ns.log, ...log] };
+      return finishTurnAfterMove(ns, actingPlayer);
     }
     case "USE_LEADER": {
       if (action.options && action.options.ackReveal) {
@@ -1735,6 +1760,8 @@ function initGame(p1cfg, p2cfg) {
     coinFlip: { caller: null, call: null, result: null, callerWon: null, starter: null, resolved: false },
     awaitingMedicRevive: null,
     lastMedicRevive: null,
+    pendingBurn: null,
+    lastScorchCast: null,
     log: scoiaChooser
       ? [`${(scoiaChooser === "p1" ? p1 : p2).name}'s Scoia'tael scouts choose who opens Round 1 — no coin toss needed.`]
       : ["A new game begins. Call the coin toss to decide who opens Round 1."],
@@ -2356,7 +2383,7 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, fxClass }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2408,7 +2435,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (justPlayed ? " card-just-played" : "") +
           (justRevived ? " card-just-revived" : "") +
           (card.cardType === "Hero" ? " is-hero" : "") +
-          (artStage === 2 ? " no-art" : "")
+          (artStage === 2 ? " no-art" : "") +
+          (fxClass ? " " + fxClass : "")
         }
         style={fitStyle}
         data-card-id={card.id}
@@ -2633,12 +2661,20 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow, weatherEnterClass }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
   return (
-    <div className={"row-cards row-" + rowKey + (weathered ? " row-weathered" : "")} style={{ "--row-accent": meta.color }}>
+    <div
+      className={
+        "row-cards row-" + rowKey +
+        (weathered ? " row-weathered" : "") +
+        (hornGlow ? " row-horn-glow" : "") +
+        (weatherEnterClass ? " " + weatherEnterClass : "")
+      }
+      style={{ "--row-accent": meta.color }}
+    >
       {cardIds.length === 0 && <span className="row-empty">no units</span>}
       {cardIds.length > 0 && cardIds.map((id) => (
         <div key={id} className="row-card-slot">
@@ -2646,10 +2682,11 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
             card={cardById(id)}
             size="fit"
             onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
-            disabled={selectableIds ? !selectableIds.includes(id) : !onClickCard}
+            disabled={cardFx?.[id] === "card-burning" ? true : (selectableIds ? !selectableIds.includes(id) : !onClickCard)}
             justPlayed={id === flashId}
             justRevived={id === revivedId}
             arriving={id === arrivingId}
+            fxClass={cardFx ? cardFx[id] : null}
           />
         </div>
       ))}
@@ -3357,7 +3394,7 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
 function PlayBoard({
   state, viewerRole, opponentRole, viewerName, opponentName,
   isMyTurn, onPlayCard: onPlayCardRaw, onPass: onPassRaw, onForfeit, onUseLeader: onUseLeaderRaw,
-  onResolveMedicRevive: onResolveMedicReviveRaw, canAct: canActRaw, opponentThinking,
+  onResolveMedicRevive: onResolveMedicReviveRaw, onResolveScorchBurn: onResolveScorchBurnRaw, canAct: canActRaw, opponentThinking,
 }) {
   const [showDiscard, setShowDiscard] = useState(false);
   const [pending, setPending] = useState(null);
@@ -3388,7 +3425,8 @@ function PlayBoard({
   // single-shot `pending` overlay used to, just driven off shared game state
   // now instead of local UI state (so it survives reloads/online sync).
   const medicChainPending = !!(state.awaitingMedicRevive && state.awaitingMedicRevive.player === viewerRole);
-  const canAct = canActRaw && !soundGated && !medicChainPending;
+  const scorchBurnPending = !!state.pendingBurn;
+  const canAct = canActRaw && !soundGated && !medicChainPending && !scorchBurnPending;
 
   // forceRandomRevive (L08 Invader of the North) skips the picker entirely —
   // each link auto-resolves with a random eligible target instead of
@@ -3456,6 +3494,144 @@ function PlayBoard({
   const [ghost, setGhost] = useState({ me: null, opp: null });
   const boardFrameRef = useRef(null);
   const revivedTimers = useRef({});
+
+  /* ------------------------------- v39 FX ---------------------------------
+     Ability animations, synced to the same sounds already firing above.
+     `cardFx` is a flat id -> class-name map (ids are globally unique across
+     both boards, so one map covers both sides) for every per-card effect:
+     burn, hero shine, bond glow, morale +1, mardroeme's red cloud, spy fog,
+     decoy shimmer, muster pop. `rowFx` covers the two effects that apply to
+     a whole row instead of one card: horn's glow (own side only) and each
+     weather type's entrance sweep (both sides, since weather always mirrors
+     onto both boards identically). `sunlight` is board-wide, for Clear
+     Weather. `leaderGlow` is per-side, for leader activation. Every one of
+     these auto-clears itself via its own timer, keyed to the exact clip
+     duration it's syncing to (see SOUND_DURATIONS_MS). */
+  const [cardFx, setCardFx] = useState({});
+  const cardFxTimers = useRef({});
+  const setCardFxFor = (id, cls, ms) => {
+    if (!id) return;
+    setCardFx((f) => ({ ...f, [id]: cls }));
+    clearTimeout(cardFxTimers.current[id]);
+    cardFxTimers.current[id] = setTimeout(() => {
+      setCardFx((f) => { if (f[id] !== cls) return f; const nf = { ...f }; delete nf[id]; return nf; });
+    }, ms);
+  };
+  const [rowFx, setRowFx] = useState({ me: { close: null, ranged: null, siege: null }, opp: { close: null, ranged: null, siege: null } });
+  const rowFxTimers = useRef({});
+  const setRowFxFor = (side, row, cls, ms) => {
+    const key = side + ":" + row;
+    setRowFx((f) => ({ ...f, [side]: { ...f[side], [row]: cls } }));
+    clearTimeout(rowFxTimers.current[key]);
+    rowFxTimers.current[key] = setTimeout(() => {
+      setRowFx((f) => ({ ...f, [side]: { ...f[side], [row]: null } }));
+    }, ms);
+  };
+  // Weather's entrance sweep is symmetric (both sides always carry the same
+  // weather on a given row), so it's tracked once per row rather than per
+  // side — applied to both RowCardsCell instances for that row.
+  const [weatherEnterFx, setWeatherEnterFx] = useState({ close: null, ranged: null, siege: null });
+  const weatherEnterTimers = useRef({});
+  const setWeatherEnterFxFor = (row, cls, ms) => {
+    setWeatherEnterFx((f) => ({ ...f, [row]: cls }));
+    clearTimeout(weatherEnterTimers.current[row]);
+    weatherEnterTimers.current[row] = setTimeout(() => setWeatherEnterFx((f) => ({ ...f, [row]: null })), ms);
+  };
+  const [sunlight, setSunlight] = useState(false);
+  const sunlightTimer = useRef(null);
+  const [leaderGlow, setLeaderGlow] = useState({ me: false, opp: false });
+  const leaderGlowTimers = useRef({});
+  const setLeaderGlowFor = (side, ms) => {
+    setLeaderGlow((g) => ({ ...g, [side]: true }));
+    clearTimeout(leaderGlowTimers.current[side]);
+    leaderGlowTimers.current[side] = setTimeout(() => setLeaderGlow((g) => ({ ...g, [side]: false })), ms);
+  };
+  useEffect(() => () => {
+    Object.values(cardFxTimers.current).forEach(clearTimeout);
+    Object.values(rowFxTimers.current).forEach(clearTimeout);
+    Object.values(weatherEnterTimers.current).forEach(clearTimeout);
+    Object.values(leaderGlowTimers.current).forEach(clearTimeout);
+    clearTimeout(sunlightTimer.current);
+  }, []);
+
+  // One card landing can trigger several of the above at once (e.g. a Hero
+  // with Tight Bond) — this just fans a freshly-landed id out to whichever
+  // effects actually apply, using the same board/row/batchIds context the
+  // sound-diff effect already computed for it. Pure visual — never touches
+  // game state, so it's safe to call unconditionally for every new id.
+  function triggerAbilityFx(side, id, card, board, row, batchIds) {
+    if (!card) return;
+    if (card.cardType === "Hero") setCardFxFor(id, "card-hero-shine", SOUND_DURATIONS_MS.playingHero);
+    if (card.abilityMeta?.undraftable) setCardFxFor(id, "card-transform-cloud", SOUND_DURATIONS_MS.mardroeme);
+    if (card.ability === "decoy") setCardFxFor(id, "card-decoy-swap", SOUND_DURATIONS_MS.decoy);
+    if (card.ability === "spy") setCardFxFor(id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
+    if (card.ability === "muster") {
+      const fetched = musterFetchIds(card.id).filter((fid) => batchIds && batchIds.includes(fid));
+      fetched.forEach((fid) => setCardFxFor(fid, "card-muster-pop", SOUND_DURATIONS_MS.muster));
+    }
+    if (card.ability === "horn" && board) {
+      // Commander's Horn (Special, chosen row) never lands in a row array
+      // itself, so `row` (from rowOfCardInBoard) is null for it — the
+      // actual boosted row lives in board.hornCards instead. A fixed-row
+      // Horn unit is the opposite (never added to hornCards, always has a
+      // real `row`), so falling back to `row` covers that case.
+      const hornRow = ROWS.find((r) => board.hornCards[r].includes(id)) || row;
+      if (hornRow) setRowFxFor(side, hornRow, "row-horn-glow", SOUND_DURATIONS_MS.horn);
+    }
+    if (!board || !row) return;
+    if (card.ability === "tightBond" && abilityActuallyActivates(card, board, row, batchIds)) {
+      const base = bondBaseName(card.name);
+      board[row].filter((bid) => { const c = cardById(bid); return c && c.ability === "tightBond" && bondBaseName(c.name) === base; })
+        .forEach((bid) => setCardFxFor(bid, "card-bond-glow", SOUND_DURATIONS_MS.bond));
+    }
+    if (card.ability === "moraleBoost" && abilityActuallyActivates(card, board, row, batchIds)) {
+      board[row].filter((mid) => mid !== id && cardById(mid)?.cardType !== "Hero")
+        .forEach((mid) => setCardFxFor(mid, "card-morale-boost", SOUND_DURATIONS_MS.morale));
+    }
+  }
+
+  // Scorch's burn: fires once per fresh pendingBurn object (set by the
+  // reducer the instant a scorch card resolves with at least one victim —
+  // see resolvePlayCard). Flags every victim id with the burn class (they're
+  // still sitting in their normal row slot, untouched by the reducer until
+  // RESOLVE_SCORCH_BURN), plays the sound, then — after the burn has had
+  // time to actually play out — dispatches the follow-up that does the real
+  // removal. Every mounted PlayBoard (both clients in Online mode included)
+  // independently detects the same pendingBurn and fires this locally, so
+  // sound/visual always plays for whoever's watching; the resolve dispatch
+  // itself is safe to fire from more than one place since the reducer's
+  // `if (!state.pendingBurn) return state;` guard makes a second one a
+  // harmless no-op.
+  const pendingBurnRef = useRef(null);
+  const burnTimerRef = useRef(null);
+  useEffect(() => {
+    const pb = state.pendingBurn;
+    if (pb && pb !== pendingBurnRef.current) {
+      const ids = Object.values(pb.victims || {}).flat();
+      if (ids.length) {
+        playSound("scorch");
+        ids.forEach((id) => setCardFxFor(id, "card-burning", SOUND_DURATIONS_MS.scorch + 400));
+        clearTimeout(burnTimerRef.current);
+        burnTimerRef.current = setTimeout(() => {
+          onResolveScorchBurnRaw && onResolveScorchBurnRaw();
+        }, SOUND_DURATIONS_MS.scorch + 300);
+      }
+    }
+    pendingBurnRef.current = pb;
+  }, [state.pendingBurn]);
+  useEffect(() => () => clearTimeout(burnTimerRef.current), []);
+
+  // scorchGlobal plays its sound even with no target (see lastScorchCast) —
+  // the burn effect above only fires when there's actually something to
+  // burn, so this covers the "cast but missed" case on its own.
+  const lastScorchRef = useRef(null);
+  useEffect(() => {
+    const cast = state.lastScorchCast;
+    if (cast && cast !== lastScorchRef.current && !state.pendingBurn) {
+      playSound("scorch");
+    }
+    lastScorchRef.current = cast;
+  }, [state.lastScorchCast]);
   useEffect(() => () => { clearTimeout(revivedTimers.current.opp); clearTimeout(revivedTimers.current.me); }, []);
   // Reveals the (until now hidden-via-opacity) real in-row tile and starts
   // its glow — called once the ghost has actually landed, never before, so
@@ -3596,6 +3772,7 @@ function PlayBoard({
           if (id === revivedMineFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds);
           arrivalTransformSound(id, me.board, prev.meMardroeme);
+          triggerAbilityFx("me", id, cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds);
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
       });
@@ -3604,6 +3781,7 @@ function PlayBoard({
           if (id === revivedOppFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds);
           arrivalTransformSound(id, opp.board, prev.oppMardroeme);
+          triggerAbilityFx("opp", id, cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds);
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
       });
@@ -3611,8 +3789,9 @@ function PlayBoard({
       // board at all when played — no row, no board.specials entry, they go
       // straight to the discard pile — so the board-diff pass above can
       // never see them land. Caught here instead, off the discard pile diff.
-      // No activation gate: scorchGlobal always plays regardless of whether
-      // it found a target, per instruction — only row Scorch is gated.
+      // This only plays the base playing_basic cue now — the "scorch" sound
+      // itself (always, regardless of whether a target was found) and the
+      // burn visual are both handled below, off lastScorchCast/pendingBurn.
       const newMineDiscards = snapshot.meDiscard.filter((id) => !prev.meDiscard.includes(id));
       const newOppDiscards = snapshot.oppDiscard.filter((id) => !prev.oppDiscard.includes(id));
       newMineDiscards.forEach((id) => {
@@ -3642,17 +3821,35 @@ function PlayBoard({
       ROWS.forEach((r) => {
         const before = prev.meWeather?.[r]?.cardId ?? null;
         const after = snapshot.meWeather?.[r]?.cardId ?? null;
-        if (before !== after && after && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) {
+        if (before !== after && after) {
           const key = weatherSoundKeyForRow(r);
-          if (key) playSound(key);
+          // Sound only for the ability-less path (a card-driven change
+          // already got its sound above, via playCardSounds) — but the
+          // entrance sweep itself is visual-only and has no such double-fire
+          // risk, so it always plays on any row change regardless of source.
+          if (key && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) playSound(key);
+          if (key) setWeatherEnterFxFor(r, "weather-fx-" + key, SOUND_DURATIONS_MS[key]);
         }
       });
       const wasClear = prev.meWeather && (prev.meWeather.close || prev.meWeather.ranged || prev.meWeather.siege);
       const isClear = !(snapshot.meWeather.close || snapshot.meWeather.ranged || snapshot.meWeather.siege);
-      if (wasClear && isClear) playSound("clearWeather");
+      if (wasClear && isClear) {
+        playSound("clearWeather");
+        setSunlight(true);
+        clearTimeout(sunlightTimer.current);
+        sunlightTimer.current = setTimeout(() => setSunlight(false), SOUND_DURATIONS_MS.clearWeather);
+      }
       // Leader activation — leaderUsed flipping false -> true.
-      if (!prev.meLeaderUsed && snapshot.meLeaderUsed) playSound(snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader");
-      if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) playSound(snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader");
+      if (!prev.meLeaderUsed && snapshot.meLeaderUsed) {
+        const key = snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader";
+        playSound(key);
+        setLeaderGlowFor("me", SOUND_DURATIONS_MS[key]);
+      }
+      if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) {
+        const key = snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader";
+        playSound(key);
+        setLeaderGlowFor("opp", SOUND_DURATIONS_MS[key]);
+      }
       } catch (e) {
         console.error("[kwent sound] sound-diff effect threw — snapshot still committed below", e);
       }
@@ -3759,6 +3956,7 @@ function PlayBoard({
     <>
       <div className="screen play-board" onClick={cancelDecoyOnStrayClick}>
       <div className="board-frame" ref={boardFrameRef}>
+        {sunlight && <div className="sunlight-ray-layer"><div className="sunlight-ray" /></div>}
         {(ghost.me || ghost.opp) && (
           <div className="medic-ghost-layer">
             {ghost.me && (
@@ -3825,12 +4023,12 @@ function PlayBoard({
 
             {/* Row 3: leader (rowspan3, shifted to col1), siege label/horn/row, blank filler */}
             <tr>
-              <td rowSpan={3} className="cell-opp-leader"><CardTile card={oppLeader} size="xs" disabled /></td>
+              <td rowSpan={3} className="cell-opp-leader"><CardTile card={oppLeader} size="xs" disabled fxClass={leaderGlow.opp ? "card-leader-cast" : null} /></td>
               <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} weatherEnterClass={weatherEnterFx.siege} /></td>
               <td></td>
             </tr>
 
@@ -3847,7 +4045,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} weatherEnterClass={weatherEnterFx.ranged} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -3869,7 +4067,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} weatherEnterClass={weatherEnterFx.close} />
               </td>
             </tr>
 
@@ -3897,6 +4095,9 @@ function PlayBoard({
                   flashId={flash.me}
                   revivedId={revived.me}
                   arrivingId={ghost.me?.cardId}
+                  cardFx={cardFx}
+                  hornGlow={!!rowFx.me.close}
+                  weatherEnterClass={weatherEnterFx.close}
                 />
               </td>
               <td></td>
@@ -3925,6 +4126,9 @@ function PlayBoard({
                   flashId={flash.me}
                   revivedId={revived.me}
                   arrivingId={ghost.me?.cardId}
+                  cardFx={cardFx}
+                  hornGlow={!!rowFx.me.ranged}
+                  weatherEnterClass={weatherEnterFx.ranged}
                 />
               </td>
               <td></td>
@@ -3932,7 +4136,7 @@ function PlayBoard({
 
             {/* Row 12: my leader (rowspan3, shifted to col1) starts, my deck count (moved up one row) */}
             <tr>
-              <td rowSpan={3} className="cell-my-leader"><CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} /></td>
+              <td rowSpan={3} className="cell-my-leader"><CardTile card={myLeader} size="xs" onClick={startLeader} disabled={myLeaderDisabled} fxClass={leaderGlow.me ? "card-leader-cast" : null} /></td>
               <td></td>
               <td></td>
               <td className="cell-my-deck-count"><DeckCountCell count={me.deck.length} /></td>
@@ -3953,6 +4157,9 @@ function PlayBoard({
                   flashId={flash.me}
                   revivedId={revived.me}
                   arrivingId={ghost.me?.cardId}
+                  cardFx={cardFx}
+                  hornGlow={!!rowFx.me.siege}
+                  weatherEnterClass={weatherEnterFx.siege}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
@@ -4373,6 +4580,7 @@ function HotseatGame({ onExit }) {
         onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
         onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: me, reviveId }))}
+        onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
       />
     );
   }
@@ -4485,7 +4693,7 @@ function AIGame({ onExit }) {
 
   useEffect(() => {
     if (!state) return;
-    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive) {
+    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive && !state.pendingBurn) {
       // Wait at least the usual "thinking" beat, but never fire before the
       // last move's sound has actually finished (see soundGateRemainingMs).
       const delay = Math.max(1300, soundGateRemainingMs());
@@ -4579,6 +4787,7 @@ function AIGame({ onExit }) {
         onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
         onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
         onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p1", reviveId }))}
+        onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
         opponentThinking={state.turn === "p2" && !state.players.p2.passed}
       />
     );
@@ -4689,6 +4898,7 @@ const EMPTY_META = {
   phase: "deckbuild", round: 1, turn: null,
   roundWins: { p1: 0, p2: 0 }, lastRoundScore: null, gameWinner: null,
   coinFlip: { caller: null, call: null, result: null, callerWon: null, starter: null, resolved: false },
+  pendingBurn: null, lastScorchCast: null,
   log: [],
 };
 
@@ -5071,6 +5281,7 @@ function OnlineGame({ onExit }) {
           onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
           onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
           onResolveMedicRevive={(reviveId) => applyAction({ type: "RESOLVE_MEDIC_REVIVE", player: role, reviveId })}
+          onResolveScorchBurn={() => applyAction({ type: "RESOLVE_SCORCH_BURN" })}
         />
       </>
     );
@@ -5438,6 +5649,189 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    so the frost tint doesn't spill into the untextured gap. */
 .cell-opp-close-row .row-cards.row-weathered::before { top: 0; bottom: auto; height: 89%; }
 .cell-my-close-row .row-cards.row-weathered::before { top: auto; bottom: 0; height: 89%; }
+
+/* ---------------------------- v39 ANIMATIONS -----------------------------
+   Ability visuals, synced from PlayBoard to the exact sound clip each one
+   is layered under (see SOUND_DURATIONS_MS / triggerAbilityFx). These all
+   need to paint outside the card's own box (glows, floating text) so
+   overflow is opened back up just for the duration each class is applied —
+   .card-tile's overflow:hidden is otherwise load-bearing for clipping the
+   art to its rounded corners. */
+.card-tile.card-burning, .card-tile.card-hero-shine, .card-tile.card-transform-cloud,
+.card-tile.card-spy-fog, .card-tile.card-bond-glow, .card-tile.card-morale-boost,
+.card-tile.card-muster-pop, .card-tile.card-decoy-swap, .card-tile.card-leader-cast {
+  overflow: visible;
+}
+@keyframes fxFadeInOut { 0% { opacity: 0; } 20% { opacity: 1; } 70% { opacity: 0.8; } 100% { opacity: 0; } }
+
+/* Scorch — burns in place, in its own row slot, right up until the delayed
+   RESOLVE_SCORCH_BURN dispatch actually removes it from the board (see
+   PlayBoard's pendingBurn effect) — so the fire finishes before the card
+   itself ever disappears. */
+@keyframes cardBurn {
+  0%   { filter: brightness(1) saturate(1); }
+  15%  { filter: brightness(1.25) saturate(1.4); }
+  40%  { filter: brightness(1.1) saturate(1.6) sepia(0.3); }
+  70%  { filter: brightness(0.9) saturate(1.8) sepia(0.55); }
+  100% { filter: brightness(0.35) saturate(0.25) grayscale(0.65); opacity: 0.2; transform: scale(0.92); }
+}
+.card-tile.card-burning { animation: cardBurn 1.75s ease-in forwards; z-index: 4; pointer-events: none; }
+.card-tile.card-burning::after {
+  content: "";
+  position: absolute; inset: -8%;
+  background: radial-gradient(circle at 50% 62%, rgba(255,170,60,0.9), rgba(255,80,10,0.55) 45%, rgba(120,20,0,0) 75%);
+  mix-blend-mode: screen;
+  animation: cardBurn-glow 1.75s ease-in forwards;
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes cardBurn-glow { 0% { opacity: 0; } 20% { opacity: 0.9; } 60% { opacity: 0.75; } 100% { opacity: 0; } }
+
+/* Hero landing — radiant gold pulse. */
+@keyframes cardHeroShine {
+  0%, 100% { box-shadow: 0 0 0 rgba(255,225,140,0); filter: brightness(1); }
+  25%, 75% { box-shadow: 0 0 22px 8px rgba(255,225,140,0.9); filter: brightness(1.18); }
+  50%      { box-shadow: 0 0 12px 4px rgba(255,225,140,0.5); filter: brightness(1.05); }
+}
+.card-tile.card-hero-shine { animation: cardHeroShine 2.6s ease-in-out 1; z-index: 3; }
+
+/* Mardroeme's red cloud — the transform itself already happened atomically
+   in state (old Berserker id -> Transformed Vildkaarl id, same slot), so
+   this just lays the roaring red mist over the already-landed result and
+   fades it away, timed to the roar in mardroeme.m4a. */
+@keyframes cardTransformCloud { 0% { opacity: 0; } 18% { opacity: 1; } 65% { opacity: 0.85; } 100% { opacity: 0; } }
+.card-tile.card-transform-cloud::after {
+  content: "";
+  position: absolute; inset: -10%;
+  background: radial-gradient(circle at 50% 50%, rgba(190,25,25,0.9), rgba(130,10,10,0.6) 50%, rgba(60,0,0,0) 80%);
+  animation: cardTransformCloud 1.9s ease-in-out 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Spy — a grey fog cloud swirls in around the card as it lands on the
+   opponent's side. */
+.card-tile.card-spy-fog::after {
+  content: "";
+  position: absolute; inset: -12%;
+  background: radial-gradient(circle, rgba(185,190,195,0.85), rgba(125,130,135,0.4) 55%, rgba(90,95,100,0) 80%);
+  animation: fxFadeInOut 2.6s ease-in-out 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Bond — every sibling in the group pulses gold together, not just the one
+   just played. */
+@keyframes cardBondGlow { 0%, 100% { box-shadow: 0 0 0 rgba(255,205,90,0); } 50% { box-shadow: 0 0 16px 6px rgba(255,205,90,0.75); } }
+.card-tile.card-bond-glow { animation: cardBondGlow 1.9s ease-in-out 1; z-index: 3; }
+
+/* Morale — a floating +1 off every other non-Hero card in the row. */
+@keyframes cardMoraleFloat {
+  0%   { opacity: 0; transform: translate(-50%, 0) scale(0.7); }
+  20%  { opacity: 1; transform: translate(-50%, -10%) scale(1.1); }
+  70%  { opacity: 1; transform: translate(-50%, -55%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80%) scale(0.9); }
+}
+.card-tile.card-morale-boost::after {
+  content: "+1";
+  position: absolute;
+  left: 50%; top: 20%;
+  transform: translate(-50%, 0);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #6dffb0;
+  text-shadow: 0 0 6px rgba(0,0,0,0.85), 0 0 10px rgba(109,255,176,0.8);
+  animation: cardMoraleFloat 1.25s ease-out 1;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Muster — every fetched sibling pops in with a golden shimmer as it lands,
+   distinct from the plain card-appear every other card gets. */
+@keyframes cardMusterPop {
+  0%   { transform: scale(0.85); filter: brightness(1); }
+  40%  { transform: scale(1.08); filter: brightness(1.45); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.card-tile.card-muster-pop { animation: cardMusterPop 1.2s ease-out 1; z-index: 3; }
+.card-tile.card-muster-pop::after {
+  content: "";
+  position: absolute; inset: -8%;
+  background: radial-gradient(circle, rgba(255,210,110,0.75), rgba(255,210,110,0) 70%);
+  animation: fxFadeInOut 1.2s ease-out 1;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Decoy — a violet/silver shimmer swirl as the swap lands. */
+.card-tile.card-decoy-swap::after {
+  content: "";
+  position: absolute; inset: -10%;
+  background: radial-gradient(circle, rgba(195,165,255,0.75), rgba(145,115,225,0.35) 55%, rgba(95,65,185,0) 80%);
+  animation: fxFadeInOut 2s ease-in-out 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Leader cast — a pulsing gold aura around the portrait itself. */
+@keyframes cardLeaderCast { 0%, 100% { box-shadow: 0 0 0 rgba(255,215,120,0); } 50% { box-shadow: 0 0 20px 8px rgba(255,215,120,0.85); } }
+.card-tile.card-leader-cast { animation: cardLeaderCast 2.4s ease-in-out 1; z-index: 3; }
+
+/* Horn — a pulsing gold aura across the whole boosted row (own side only). */
+@keyframes rowHornGlow { 0%, 100% { box-shadow: inset 0 0 0 rgba(255,205,90,0); } 50% { box-shadow: inset 0 0 26px 10px rgba(255,205,90,0.55); } }
+.row-cards.row-horn-glow { animation: rowHornGlow 2.1s ease-in-out 1; }
+
+/* Weather's entrance sweep — layered on top of (not instead of) the
+   existing persistent ::before tint, one sweep per row when its weather
+   actually changes. Frost/close = light blue drifting crystals, fog/ranged
+   = grey mist rolling in, rain/siege = dark heavy rain streaks. */
+@keyframes weatherFxSweep {
+  0%   { opacity: 0; transform: translateX(-12%); }
+  30%  { opacity: 1; transform: translateX(0%); }
+  75%  { opacity: 0.85; }
+  100% { opacity: 0; transform: translateX(8%); }
+}
+.row-cards.weather-fx-frost::after,
+.row-cards.weather-fx-fog::after,
+.row-cards.weather-fx-rain::after {
+  content: "";
+  position: absolute; inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  animation: weatherFxSweep ease-out 1;
+}
+.row-cards.weather-fx-frost::after {
+  background: repeating-linear-gradient(115deg, rgba(190,225,255,0.6) 0 6%, rgba(190,225,255,0) 6% 14%);
+  animation-duration: 2.8s;
+}
+.row-cards.weather-fx-fog::after {
+  background: radial-gradient(ellipse at 30% 50%, rgba(210,212,215,0.8), rgba(140,142,145,0.35) 60%, rgba(90,92,95,0) 85%);
+  animation-duration: 3s;
+}
+.row-cards.weather-fx-rain::after {
+  background: repeating-linear-gradient(100deg, rgba(35,40,55,0.6) 0 2%, rgba(35,40,55,0) 2% 6%);
+  animation-duration: 1.8s;
+}
+
+/* Clear Weather — a sunbeam sweeps across the whole board once both sides
+   have thawed out. */
+.sunlight-ray-layer { position: absolute; inset: 0; z-index: 55; pointer-events: none; overflow: hidden; }
+@keyframes sunlightSweep {
+  0%   { opacity: 0; transform: translateX(-60%) rotate(18deg); }
+  15%  { opacity: 0.9; }
+  70%  { opacity: 0.7; }
+  100% { opacity: 0; transform: translateX(60%) rotate(18deg); }
+}
+.sunlight-ray {
+  position: absolute;
+  top: -40%; left: 50%;
+  width: 45%; height: 180%;
+  background: linear-gradient(90deg, rgba(255,240,180,0) 0%, rgba(255,240,180,0.55) 45%, rgba(255,250,220,0.85) 50%, rgba(255,240,180,0.55) 55%, rgba(255,240,180,0) 100%);
+  animation: sunlightSweep 3.4s ease-in-out 1;
+  mix-blend-mode: screen;
+}
+
 
 .row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
