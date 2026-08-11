@@ -6191,8 +6191,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .smoke-cloud-anchor { position: absolute; pointer-events: none; }
 .smoke-viewport-unclipped {
   position: absolute;
-  top: -45%; left: -45%;
-  width: 190%; height: 190%;
+  top: -7.5%; left: -7.5%;
+  width: 115%; height: 115%;
   pointer-events: none;
   overflow: visible;
   will-change: transform, opacity;
