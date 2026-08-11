@@ -2743,15 +2743,58 @@ function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
   );
 }
 
+/* Lobe config for each smoke type — several irregular, offset, rotated
+   "puffs" (not one flat gradient) so the smoke reads as billowing and
+   asymmetric, per-type color palette. Same idea as the reference snippet's
+   GreySmokeOverlay/RedSmokeOverlay, generalized to data + one renderer so
+   spy/decoy/transform all share the same billow mechanics and only the
+   colors/rotation direction differ. */
+const SMOKE_LOBE_CONFIG = {
+  spy: {
+    animClass: "anim-smoke-billow-grey",
+    core: "radial-gradient(circle, #121315 0%, #3a3d42 60%, #1a1c1e 100%)",
+    lobes: [
+      { top: "-5%", left: "-10%", width: "85%", height: "85%", background: "radial-gradient(circle, #4a4e54 0%, #1e2023 70%)", borderRadius: "40% 60% 50% 50%", blur: "6px", rotate: "20deg" },
+      { bottom: "-8%", right: "-10%", width: "90%", height: "85%", background: "radial-gradient(circle, #5a5f66 0%, #25282c 75%)", borderRadius: "60% 40% 70% 30%", blur: "7px", rotate: "-35deg" },
+      { top: "-8%", right: "-5%", width: "80%", height: "80%", background: "radial-gradient(circle, #34373c 0%, #111214 80%)", borderRadius: "50%", blur: "5px" },
+      { bottom: "-5%", left: "-5%", width: "75%", height: "75%", background: "radial-gradient(circle, #2d3035 0%, #161719 75%)", borderRadius: "50% 50% 30% 70%", blur: "6px" },
+    ],
+    highlight: "radial-gradient(circle, rgba(115, 120, 130, 0.9) 0%, transparent 70%)",
+  },
+  decoy: {
+    animClass: "anim-smoke-billow-grey",
+    core: "radial-gradient(circle, #d4d6d9 0%, #f0f1f2 60%, #c6c8cc 100%)",
+    lobes: [
+      { top: "-5%", left: "-10%", width: "85%", height: "85%", background: "radial-gradient(circle, #eceef0 0%, #cfd1d5 70%)", borderRadius: "40% 60% 50% 50%", blur: "6px", rotate: "20deg" },
+      { bottom: "-8%", right: "-10%", width: "90%", height: "85%", background: "radial-gradient(circle, #f5f6f7 0%, #d8dade 75%)", borderRadius: "60% 40% 70% 30%", blur: "7px", rotate: "-35deg" },
+      { top: "-8%", right: "-5%", width: "80%", height: "80%", background: "radial-gradient(circle, #e0e2e5 0%, #c2c4c8 80%)", borderRadius: "50%", blur: "5px" },
+      { bottom: "-5%", left: "-5%", width: "75%", height: "75%", background: "radial-gradient(circle, #dadcdf 0%, #bfc1c5 75%)", borderRadius: "50% 50% 30% 70%", blur: "6px" },
+    ],
+    highlight: "radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, transparent 70%)",
+  },
+  transform: {
+    animClass: "anim-smoke-billow-red",
+    core: "radial-gradient(circle, #2b0000 0%, #8b0000 55%, #150000 100%)",
+    lobes: [
+      { top: "-12%", left: "0%", width: "90%", height: "85%", background: "radial-gradient(circle, #a80a0a 0%, #3d0202 75%)", borderRadius: "50% 50% 40% 60%", blur: "6px", rotate: "-15deg" },
+      { bottom: "-12%", right: "-12%", width: "90%", height: "90%", background: "radial-gradient(circle, #6b0404 0%, #1a0000 80%)", borderRadius: "60% 40% 50% 50%", blur: "7px", rotate: "40deg" },
+      { top: "-5%", right: "-5%", width: "75%", height: "75%", background: "radial-gradient(circle, #800000 0%, #200000 80%)", borderRadius: "50%", blur: "5px" },
+      { bottom: "-5%", left: "-5%", width: "80%", height: "80%", background: "radial-gradient(circle, #400000 0%, #0a0000 85%)", borderRadius: "50%", blur: "6px" },
+    ],
+    highlight: "radial-gradient(circle, rgba(225, 30, 30, 0.85) 0%, transparent 65%)",
+  },
+};
+
 /* Spy / Decoy / Mardroeme's smoke cloud — same escape-the-clipping trick as
    MedicRevivalGhost above, but simpler: the card doesn't move, so this just
    measures the real tile's rect once on mount (relative to .board-frame)
-   and paints an oversized, unclipped cloud layer on top of it, then
-   unmounts itself via onDone after `ms` (the exact sound duration it's
-   synced to — see SOUND_DURATIONS_MS / triggerAbilityFx). Duration is
-   passed through as a CSS custom property rather than hardcoded per-type
-   keyframe timings, so it always stays exactly in lockstep with the sound
-   regardless of which of the three types it is. */
+   and paints an oversized, unclipped, opaque billowing cloud on top of it
+   (several offset/rotated lobes, not one flat gradient — see
+   SMOKE_LOBE_CONFIG), then unmounts itself via onDone after `ms` (the exact
+   sound duration it's synced to — see SOUND_DURATIONS_MS / triggerAbilityFx).
+   Duration is passed through as a CSS custom property rather than
+   hardcoded per-type keyframe timings, so it always stays exactly in
+   lockstep with the sound regardless of which of the three types it is. */
 function AbilitySmokeGhost({ cardId, type, ms, frameRef, onDone }) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
@@ -2766,9 +2809,26 @@ function AbilitySmokeGhost({ cardId, type, ms, frameRef, onDone }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardId]);
   if (!rect) return null;
+  const cfg = SMOKE_LOBE_CONFIG[type];
+  if (!cfg) return null;
   return (
     <div className="smoke-cloud-anchor" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}>
-      <div className={"smoke-cloud smoke-" + type} style={{ "--smoke-dur": (ms / 1000) + "s" }} />
+      <div className={"smoke-viewport-unclipped " + cfg.animClass} style={{ "--smoke-dur": (ms / 1000) + "s" }}>
+        <div className="smoke-lobe smoke-core" style={{ background: cfg.core }} />
+        {cfg.lobes.map((l, i) => (
+          <div
+            key={i}
+            className="smoke-lobe"
+            style={{
+              top: l.top, left: l.left, bottom: l.bottom, right: l.right,
+              width: l.width, height: l.height, background: l.background,
+              borderRadius: l.borderRadius, filter: `blur(${l.blur})`,
+              transform: l.rotate ? `rotate(${l.rotate})` : undefined,
+            }}
+          />
+        ))}
+        <div className="smoke-lobe smoke-highlight" style={{ background: cfg.highlight }} />
+      </div>
     </div>
   );
 }
@@ -3592,10 +3652,11 @@ function PlayBoard({
      reason MedicRevivalGhost exists). So the smoke itself is rendered as a
      separate portal layer, a sibling inside `.board-frame` (see
      AbilitySmokeGhost / .smoke-fx-layer below) — it measures the real card's
-     rect once on mount and paints an oversized cloud on top of it, immune to
-     any row/cell clipping. The card-local tint (the card actually turning
-     grey/red) stays a simple in-place class on the tile itself, since it
-     never exceeds the card's own box and doesn't need to escape anything. */
+     rect once on mount and paints an oversized, opaque, billowing cloud on
+     top of it, immune to any row/cell clipping. The card itself goes fully
+     opaque too (art AND text hidden, swapped for a flat color — grey/red)
+     via a simple in-place class on the tile, since that never exceeds the
+     card's own box and doesn't need to escape anything. */
   const [smokeFx, setSmokeFx] = useState({});
   const smokeFxKeyRef = useRef(0);
   const setSmokeFxFor = (id, type, ms) => {
@@ -5800,41 +5861,36 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   filter: blur(0.5px);
 }
 
-/* Mardroeme / Spy / Decoy — the card itself washes to the ability's color
-   (red / dark grey / very light grey) in place, via a tint that never
-   exceeds the card's own box (so no clipping concerns here — this part
-   stays a simple class on the real tile). The actual smoke/fog CLOUD that
-   spills out around and beyond the card is handled separately by
+/* Mardroeme / Spy / Decoy — the card itself goes fully opaque (art + text
+   both hidden, swapped for a flat color) for the duration of the effect —
+   NOT a translucent tint. z-index 10 puts it above .card-tile-inner's text
+   layer (z-index 1) and .card-art (z-index 0) so the whole card disappears
+   under the flat color, not just the artwork. The actual smoke/fog CLOUD
+   that spills out around and beyond the card is handled separately by
    AbilitySmokeGhost + .smoke-fx-layer (rendered as a portal directly inside
    .board-frame, escaping the row/cell's hard overflow:hidden) — see the
-   "v39.2 smoke" block further down. mix-blend-mode: multiply darkens toward
-   the tint color (works for the red transform-cloud and the dark-grey spy
-   fog); mix-blend-mode: screen lightens toward it instead, which is what
-   actually reads as "very light grey" on the decoy rather than just
-   vanishing the way multiply would with a pale color. */
-@keyframes cardTransformCloud { 0% { opacity: 0; } 18% { opacity: 1; } 65% { opacity: 0.85; } 100% { opacity: 0; } }
+   "v39.2 smoke" block further down. */
+@keyframes cardTransformCloud { 0% { opacity: 0; } 18% { opacity: 1; } 65% { opacity: 1; } 100% { opacity: 0; } }
 .card-tile.card-transform-cloud::before {
   content: "";
   position: absolute; inset: 0;
-  background: #8c1616;
-  mix-blend-mode: multiply;
+  background: #5c0808;
   animation: cardTransformCloud 1.878s ease-in-out 1;
   pointer-events: none;
   border-radius: inherit;
-  z-index: 1;
+  z-index: 10;
 }
 
-/* Spy — the card itself darkens toward a dark, sooty grey as it lands on
-   the opponent's side. */
+/* Spy — the card goes fully opaque, dark sooty grey, as it lands on the
+   opponent's side. */
 .card-tile.card-spy-fog::before {
   content: "";
   position: absolute; inset: 0;
-  background: #34363a;
-  mix-blend-mode: multiply;
+  background: #26292d;
   animation: fxFadeInOut 2.667s ease-in-out 1;
   pointer-events: none;
   border-radius: inherit;
-  z-index: 1;
+  z-index: 10;
 }
 
 /* Bond — every sibling in the group pulses gold together, not just the one
@@ -5881,16 +5937,15 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   z-index: 1;
 }
 
-/* Decoy — the card itself washes to a very light grey as the swap lands. */
+/* Decoy — the card goes fully opaque, very light grey, as the swap lands. */
 .card-tile.card-decoy-swap::before {
   content: "";
   position: absolute; inset: 0;
-  background: #d3d5d8;
-  mix-blend-mode: screen;
+  background: #d6d8db;
   animation: fxFadeInOut 1.966s ease-in-out 1;
   pointer-events: none;
   border-radius: inherit;
-  z-index: 1;
+  z-index: 10;
 }
 
 /* Leader cast — a pulsing gold aura around the portrait itself. */
@@ -6121,81 +6176,47 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ------------------------------ v39.2 smoke -------------------------------
    Spy fog / Decoy swap / Mardroeme's transform cloud — the actual billowing
-   smoke, as opposed to the in-place card tint above. Rendered by
+   smoke, as opposed to the in-place opaque card cover above. Rendered by
    AbilitySmokeGhost as a portal directly inside .board-frame (same escape
    as the Medic ghost layer just above), anchored to the real card's
    measured rect, so it's free to spill top-to-bottom and all around the
    card without being cut off by the row's or board cell's overflow:hidden.
-   Each cloud is layered from several soft, unevenly-sized/positioned
-   radial-gradient "puffs" (not one smooth blob) so it actually reads as
-   billowing smoke with visible clumps, plus a fine grain layer on top
-   (::after, blended with overlay mix-blend-mode) for texture/detail. Duration comes in
-   via the --smoke-dur custom property set inline per-instance, so it's
-   always exactly as long as the sound it's synced to. */
+   Built from several irregular, offset, rotated "lobe" divs (position/size/
+   color/rotation all supplied per-instance from SMOKE_LOBE_CONFIG) rather
+   than one flat gradient, so it billows asymmetrically like real smoke
+   instead of pulsing as a uniform blob. Duration comes in via the
+   --smoke-dur custom property set inline per-instance, so it's always
+   exactly as long as the sound it's synced to. */
 .smoke-fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 59; }
 .smoke-cloud-anchor { position: absolute; pointer-events: none; }
-.smoke-cloud {
+.smoke-viewport-unclipped {
   position: absolute;
-  left: 50%; top: 50%;
-  width: 240%; height: 240%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  filter: blur(2.4px);
-  animation: cloudSwirl var(--smoke-dur, 2s) ease-in-out 1 both;
+  top: -45%; left: -45%;
+  width: 190%; height: 190%;
+  pointer-events: none;
+  overflow: visible;
+  will-change: transform, opacity;
+  animation-duration: var(--smoke-dur, 2s);
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-iteration-count: 1;
 }
-.smoke-cloud::after {
-  content: "";
-  position: absolute; inset: 0;
-  border-radius: inherit;
-  background-image:
-    repeating-radial-gradient(circle at 18% 24%, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 1px, transparent 1.6px, transparent 6px),
-    repeating-radial-gradient(circle at 62% 58%, rgba(0,0,0,0.16) 0px, rgba(0,0,0,0.16) 1px, transparent 1.6px, transparent 7px),
-    repeating-radial-gradient(circle at 40% 78%, rgba(255,255,255,0.1) 0px, rgba(255,255,255,0.1) 1px, transparent 1.4px, transparent 5px);
-  mix-blend-mode: overlay;
-  opacity: 0.7;
-  animation: grainDrift var(--smoke-dur, 2s) linear 1 both;
+.smoke-lobe { position: absolute; }
+.smoke-lobe.smoke-core { inset: 10%; border-radius: 50%; filter: blur(8px); opacity: 1; }
+.smoke-lobe.smoke-highlight { top: 22%; left: 20%; width: 60%; height: 60%; border-radius: 50%; filter: blur(4px); }
+.anim-smoke-billow-grey { animation-name: smokeBillowGrey; }
+.anim-smoke-billow-red { animation-name: smokeBillowRed; }
+@keyframes smokeBillowGrey {
+  0%   { opacity: 0; transform: scale(0.2) rotate(0deg); }
+  15%  { opacity: 1; }
+  75%  { opacity: 1; transform: scale(1.18) rotate(45deg); }
+  100% { opacity: 0; transform: scale(1.35) rotate(70deg); }
 }
-@keyframes cloudSwirl {
-  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.45) rotate(0deg); }
-  14%  { opacity: 0.95; transform: translate(-50%, -50%) scale(0.75) rotate(-5deg); }
-  45%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(2deg); }
-  75%  { opacity: 0.8; transform: translate(-52%, -49%) scale(1.16) rotate(-3deg); }
-  100% { opacity: 0; transform: translate(-49%, -52%) scale(1.3) rotate(4deg); }
-}
-@keyframes grainDrift {
-  0%   { opacity: 0; background-position: 0% 0%, 0% 0%, 0% 0%; }
-  20%  { opacity: 0.7; }
-  100% { opacity: 0; background-position: 8% 12%, -10% 6%, 6% -8%; }
-}
-/* Spy — dark, sooty grey wisps. */
-.smoke-cloud.smoke-spy {
-  background-image:
-    radial-gradient(circle at 30% 34%, rgba(78,81,85,0.92) 0%, rgba(78,81,85,0.6) 26%, rgba(78,81,85,0) 56%),
-    radial-gradient(circle at 68% 28%, rgba(52,54,58,0.9) 0%, rgba(52,54,58,0.55) 28%, rgba(52,54,58,0) 58%),
-    radial-gradient(circle at 50% 60%, rgba(100,103,108,0.85) 0%, rgba(100,103,108,0.5) 30%, rgba(100,103,108,0) 60%),
-    radial-gradient(circle at 22% 70%, rgba(40,42,46,0.85) 0%, rgba(40,42,46,0.5) 26%, rgba(40,42,46,0) 55%),
-    radial-gradient(circle at 78% 68%, rgba(90,93,98,0.8) 0%, rgba(90,93,98,0.45) 26%, rgba(90,93,98,0) 55%),
-    radial-gradient(circle at 50% 10%, rgba(115,118,122,0.6) 0%, rgba(115,118,122,0) 48%);
-}
-/* Decoy — very light, airy grey wisps. */
-.smoke-cloud.smoke-decoy {
-  background-image:
-    radial-gradient(circle at 30% 34%, rgba(232,234,236,0.92) 0%, rgba(232,234,236,0.55) 26%, rgba(232,234,236,0) 56%),
-    radial-gradient(circle at 68% 28%, rgba(210,212,216,0.88) 0%, rgba(210,212,216,0.5) 28%, rgba(210,212,216,0) 58%),
-    radial-gradient(circle at 50% 60%, rgba(244,245,246,0.85) 0%, rgba(244,245,246,0.45) 30%, rgba(244,245,246,0) 60%),
-    radial-gradient(circle at 22% 70%, rgba(198,200,204,0.8) 0%, rgba(198,200,204,0.45) 26%, rgba(198,200,204,0) 55%),
-    radial-gradient(circle at 78% 68%, rgba(220,222,225,0.78) 0%, rgba(220,222,225,0.4) 26%, rgba(220,222,225,0) 55%),
-    radial-gradient(circle at 50% 10%, rgba(250,250,251,0.55) 0%, rgba(250,250,251,0) 48%);
-}
-/* Mardroeme transform — roaring red/orange mist. */
-.smoke-cloud.smoke-transform {
-  background-image:
-    radial-gradient(circle at 30% 34%, rgba(210,35,25,0.92) 0%, rgba(210,35,25,0.6) 26%, rgba(210,35,25,0) 56%),
-    radial-gradient(circle at 68% 28%, rgba(140,12,12,0.9) 0%, rgba(140,12,12,0.55) 28%, rgba(140,12,12,0) 58%),
-    radial-gradient(circle at 50% 60%, rgba(235,70,35,0.82) 0%, rgba(235,70,35,0.45) 30%, rgba(235,70,35,0) 60%),
-    radial-gradient(circle at 22% 70%, rgba(95,6,6,0.85) 0%, rgba(95,6,6,0.5) 26%, rgba(95,6,6,0) 55%),
-    radial-gradient(circle at 78% 68%, rgba(175,20,20,0.8) 0%, rgba(175,20,20,0.45) 26%, rgba(175,20,20,0) 55%),
-    radial-gradient(circle at 50% 10%, rgba(255,120,60,0.55) 0%, rgba(255,120,60,0) 48%);
+@keyframes smokeBillowRed {
+  0%   { opacity: 0; transform: scale(0.25) rotate(0deg); }
+  15%  { opacity: 1; }
+  75%  { opacity: 1; transform: scale(1.22) rotate(-50deg); }
+  100% { opacity: 0; transform: scale(1.4) rotate(-85deg); }
 }
 
 .passed-banner {
