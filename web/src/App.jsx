@@ -5687,13 +5687,42 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 @keyframes cardBurn-glow { 0% { opacity: 0; } 20% { opacity: 0.9; } 60% { opacity: 0.75; } 100% { opacity: 0; } }
 
-/* Hero landing — radiant gold pulse. */
-@keyframes cardHeroShine {
+/* Hero landing — a spark travels once around the card border like a lit
+   fuse, trailed by a fading echo dot, over a soft ambient bloom that
+   breathes underneath so the card doesn't go dark between passes. Timed
+   to SOUND_DURATIONS_MS.playingHero (2.6s). */
+@keyframes cardHeroAmbient {
   0%, 100% { box-shadow: 0 0 0 rgba(255,225,140,0); filter: brightness(1); }
-  25%, 75% { box-shadow: 0 0 22px 8px rgba(255,225,140,0.9); filter: brightness(1.18); }
-  50%      { box-shadow: 0 0 12px 4px rgba(255,225,140,0.5); filter: brightness(1.05); }
+  50%      { box-shadow: 0 0 14px 5px rgba(255,205,110,0.55); filter: brightness(1.08); }
 }
-.card-tile.card-hero-shine { animation: cardHeroShine 2.6s ease-in-out 1; z-index: 3; }
+.card-tile.card-hero-shine { animation: cardHeroAmbient 2.6s ease-in-out 1; z-index: 3; }
+@keyframes cardHeroSparkTravel {
+  0%   { offset-distance: 0%; opacity: 0; }
+  4%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+.card-tile.card-hero-shine::before, .card-tile.card-hero-shine::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 9px; height: 9px;
+  margin: -4.5px;
+  border-radius: 50%;
+  background: #fff8dd;
+  box-shadow: 0 0 8px 3px rgba(255,220,120,0.95), 0 0 16px 7px rgba(255,180,60,0.6);
+  offset-path: inset(0 round 6px);
+  animation: cardHeroSparkTravel 2.6s linear 1;
+  pointer-events: none;
+  z-index: 6;
+}
+.card-tile.card-hero-shine::after {
+  width: 7px; height: 7px;
+  margin: -3.5px;
+  opacity: 0.55;
+  animation-delay: -0.09s;
+  filter: blur(0.5px);
+}
 
 /* Mardroeme's red cloud — the transform itself already happened atomically
    in state (old Berserker id -> Transformed Vildkaarl id, same slot), so
