@@ -2743,6 +2743,36 @@ function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
   );
 }
 
+/* Spy / Decoy / Mardroeme's smoke cloud — same escape-the-clipping trick as
+   MedicRevivalGhost above, but simpler: the card doesn't move, so this just
+   measures the real tile's rect once on mount (relative to .board-frame)
+   and paints an oversized, unclipped cloud layer on top of it, then
+   unmounts itself via onDone after `ms` (the exact sound duration it's
+   synced to — see SOUND_DURATIONS_MS / triggerAbilityFx). Duration is
+   passed through as a CSS custom property rather than hardcoded per-type
+   keyframe timings, so it always stays exactly in lockstep with the sound
+   regardless of which of the three types it is. */
+function AbilitySmokeGhost({ cardId, type, ms, frameRef, onDone }) {
+  const [rect, setRect] = useState(null);
+  useEffect(() => {
+    const el = document.querySelector(`[data-card-id="${cardId}"]`);
+    const frame = frameRef.current;
+    if (!el || !frame) { onDone && onDone(); return; }
+    const elRect = el.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    setRect({ left: elRect.left - frameRect.left, top: elRect.top - frameRect.top, width: elRect.width, height: elRect.height });
+    const t = setTimeout(() => onDone && onDone(), ms);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardId]);
+  if (!rect) return null;
+  return (
+    <div className="smoke-cloud-anchor" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}>
+      <div className={"smoke-cloud smoke-" + type} style={{ "--smoke-dur": (ms / 1000) + "s" }} />
+    </div>
+  );
+}
+
 // Central "weather cards" cell — weather now hits both boards' same row
 // identically, so this reads off either side's board.weather (they're kept
 // in sync) instead of showing a per-side/per-row marker.
@@ -3554,6 +3584,29 @@ function PlayBoard({
     clearTimeout(sunlightTimer.current);
   }, []);
 
+  /* ------------------------------ v39.2 FX ---------------------------------
+     Spy/Decoy/Mardroeme's smoke clouds need to visibly spill out past the
+     card's own edges (top/bottom/all around) — but the real card tile lives
+     inside `.row-cards` / the board `<td>`, both of which are hard
+     `overflow: hidden` (load-bearing for the table's %-height layout, same
+     reason MedicRevivalGhost exists). So the smoke itself is rendered as a
+     separate portal layer, a sibling inside `.board-frame` (see
+     AbilitySmokeGhost / .smoke-fx-layer below) — it measures the real card's
+     rect once on mount and paints an oversized cloud on top of it, immune to
+     any row/cell clipping. The card-local tint (the card actually turning
+     grey/red) stays a simple in-place class on the tile itself, since it
+     never exceeds the card's own box and doesn't need to escape anything. */
+  const [smokeFx, setSmokeFx] = useState({});
+  const smokeFxKeyRef = useRef(0);
+  const setSmokeFxFor = (id, type, ms) => {
+    if (!id) return;
+    smokeFxKeyRef.current += 1;
+    setSmokeFx((f) => ({ ...f, [id]: { type, ms, key: smokeFxKeyRef.current } }));
+  };
+  const clearSmokeFxFor = (id) => {
+    setSmokeFx((f) => { if (!f[id]) return f; const nf = { ...f }; delete nf[id]; return nf; });
+  };
+
   // One card landing can trigger several of the above at once (e.g. a Hero
   // with Tight Bond) — this just fans a freshly-landed id out to whichever
   // effects actually apply, using the same board/row/batchIds context the
@@ -3562,9 +3615,18 @@ function PlayBoard({
   function triggerAbilityFx(side, id, card, board, row, batchIds) {
     if (!card) return;
     if (card.cardType === "Hero") setCardFxFor(id, "card-hero-shine", SOUND_DURATIONS_MS.playingHero);
-    if (card.abilityMeta?.undraftable) setCardFxFor(id, "card-transform-cloud", SOUND_DURATIONS_MS.mardroeme);
-    if (card.ability === "decoy") setCardFxFor(id, "card-decoy-swap", SOUND_DURATIONS_MS.decoy);
-    if (card.ability === "spy") setCardFxFor(id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
+    if (card.abilityMeta?.undraftable) {
+      setCardFxFor(id, "card-transform-cloud", SOUND_DURATIONS_MS.mardroeme);
+      setSmokeFxFor(id, "transform", SOUND_DURATIONS_MS.mardroeme);
+    }
+    if (card.ability === "decoy") {
+      setCardFxFor(id, "card-decoy-swap", SOUND_DURATIONS_MS.decoy);
+      setSmokeFxFor(id, "decoy", SOUND_DURATIONS_MS.decoy);
+    }
+    if (card.ability === "spy") {
+      setCardFxFor(id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
+      setSmokeFxFor(id, "spy", SOUND_DURATIONS_MS.spy);
+    }
     if (card.ability === "muster") {
       const fetched = musterFetchIds(card.id).filter((fid) => batchIds && batchIds.includes(fid));
       fetched.forEach((fid) => setCardFxFor(fid, "card-muster-pop", SOUND_DURATIONS_MS.muster));
@@ -3979,6 +4041,20 @@ function PlayBoard({
                 onDone={() => { setGhost((g) => ({ ...g, opp: null })); revealRevived("opp", ghost.opp.cardId); }}
               />
             )}
+          </div>
+        )}
+        {Object.keys(smokeFx).length > 0 && (
+          <div className="smoke-fx-layer">
+            {Object.entries(smokeFx).map(([id, cfg]) => (
+              <AbilitySmokeGhost
+                key={id + "-" + cfg.key}
+                cardId={id}
+                type={cfg.type}
+                ms={cfg.ms}
+                frameRef={boardFrameRef}
+                onDone={() => clearSmokeFxFor(id)}
+              />
+            ))}
           </div>
         )}
         <div className="hand-strip-cards opp-hand-strip" style={{ position: "absolute" }}>
@@ -5724,29 +5800,41 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   filter: blur(0.5px);
 }
 
-/* Mardroeme's red cloud — the transform itself already happened atomically
-   in state (old Berserker id -> Transformed Vildkaarl id, same slot), so
-   this just lays the roaring red mist over the already-landed result and
-   fades it away, timed to the roar in mardroeme.m4a. */
+/* Mardroeme / Spy / Decoy — the card itself washes to the ability's color
+   (red / dark grey / very light grey) in place, via a tint that never
+   exceeds the card's own box (so no clipping concerns here — this part
+   stays a simple class on the real tile). The actual smoke/fog CLOUD that
+   spills out around and beyond the card is handled separately by
+   AbilitySmokeGhost + .smoke-fx-layer (rendered as a portal directly inside
+   .board-frame, escaping the row/cell's hard overflow:hidden) — see the
+   "v39.2 smoke" block further down. mix-blend-mode: multiply darkens toward
+   the tint color (works for the red transform-cloud and the dark-grey spy
+   fog); mix-blend-mode: screen lightens toward it instead, which is what
+   actually reads as "very light grey" on the decoy rather than just
+   vanishing the way multiply would with a pale color. */
 @keyframes cardTransformCloud { 0% { opacity: 0; } 18% { opacity: 1; } 65% { opacity: 0.85; } 100% { opacity: 0; } }
-.card-tile.card-transform-cloud::after {
+.card-tile.card-transform-cloud::before {
   content: "";
-  position: absolute; inset: -10%;
-  background: radial-gradient(circle at 50% 50%, rgba(190,25,25,0.9), rgba(130,10,10,0.6) 50%, rgba(60,0,0,0) 80%);
-  animation: cardTransformCloud 1.9s ease-in-out 1;
+  position: absolute; inset: 0;
+  background: #8c1616;
+  mix-blend-mode: multiply;
+  animation: cardTransformCloud 1.878s ease-in-out 1;
   pointer-events: none;
-  z-index: 2;
+  border-radius: inherit;
+  z-index: 1;
 }
 
-/* Spy — a grey fog cloud swirls in around the card as it lands on the
-   opponent's side. */
-.card-tile.card-spy-fog::after {
+/* Spy — the card itself darkens toward a dark, sooty grey as it lands on
+   the opponent's side. */
+.card-tile.card-spy-fog::before {
   content: "";
-  position: absolute; inset: -12%;
-  background: radial-gradient(circle, rgba(185,190,195,0.85), rgba(125,130,135,0.4) 55%, rgba(90,95,100,0) 80%);
-  animation: fxFadeInOut 2.6s ease-in-out 1;
+  position: absolute; inset: 0;
+  background: #34363a;
+  mix-blend-mode: multiply;
+  animation: fxFadeInOut 2.667s ease-in-out 1;
   pointer-events: none;
-  z-index: 2;
+  border-radius: inherit;
+  z-index: 1;
 }
 
 /* Bond — every sibling in the group pulses gold together, not just the one
@@ -5793,14 +5881,16 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   z-index: 1;
 }
 
-/* Decoy — a violet/silver shimmer swirl as the swap lands. */
-.card-tile.card-decoy-swap::after {
+/* Decoy — the card itself washes to a very light grey as the swap lands. */
+.card-tile.card-decoy-swap::before {
   content: "";
-  position: absolute; inset: -10%;
-  background: radial-gradient(circle, rgba(195,165,255,0.75), rgba(145,115,225,0.35) 55%, rgba(95,65,185,0) 80%);
-  animation: fxFadeInOut 2s ease-in-out 1;
+  position: absolute; inset: 0;
+  background: #d3d5d8;
+  mix-blend-mode: screen;
+  animation: fxFadeInOut 1.966s ease-in-out 1;
   pointer-events: none;
-  z-index: 2;
+  border-radius: inherit;
+  z-index: 1;
 }
 
 /* Leader cast — a pulsing gold aura around the portrait itself. */
@@ -6028,6 +6118,85 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    visually places it at the discard pile instead — see the component. */
 .medic-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
 .medic-ghost-card { position: absolute; will-change: transform; }
+
+/* ------------------------------ v39.2 smoke -------------------------------
+   Spy fog / Decoy swap / Mardroeme's transform cloud — the actual billowing
+   smoke, as opposed to the in-place card tint above. Rendered by
+   AbilitySmokeGhost as a portal directly inside .board-frame (same escape
+   as the Medic ghost layer just above), anchored to the real card's
+   measured rect, so it's free to spill top-to-bottom and all around the
+   card without being cut off by the row's or board cell's overflow:hidden.
+   Each cloud is layered from several soft, unevenly-sized/positioned
+   radial-gradient "puffs" (not one smooth blob) so it actually reads as
+   billowing smoke with visible clumps, plus a fine grain layer on top
+   (::after, blended with overlay mix-blend-mode) for texture/detail. Duration comes in
+   via the --smoke-dur custom property set inline per-instance, so it's
+   always exactly as long as the sound it's synced to. */
+.smoke-fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 59; }
+.smoke-cloud-anchor { position: absolute; pointer-events: none; }
+.smoke-cloud {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 240%; height: 240%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  filter: blur(2.4px);
+  animation: cloudSwirl var(--smoke-dur, 2s) ease-in-out 1 both;
+}
+.smoke-cloud::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background-image:
+    repeating-radial-gradient(circle at 18% 24%, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 1px, transparent 1.6px, transparent 6px),
+    repeating-radial-gradient(circle at 62% 58%, rgba(0,0,0,0.16) 0px, rgba(0,0,0,0.16) 1px, transparent 1.6px, transparent 7px),
+    repeating-radial-gradient(circle at 40% 78%, rgba(255,255,255,0.1) 0px, rgba(255,255,255,0.1) 1px, transparent 1.4px, transparent 5px);
+  mix-blend-mode: overlay;
+  opacity: 0.7;
+  animation: grainDrift var(--smoke-dur, 2s) linear 1 both;
+}
+@keyframes cloudSwirl {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.45) rotate(0deg); }
+  14%  { opacity: 0.95; transform: translate(-50%, -50%) scale(0.75) rotate(-5deg); }
+  45%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(2deg); }
+  75%  { opacity: 0.8; transform: translate(-52%, -49%) scale(1.16) rotate(-3deg); }
+  100% { opacity: 0; transform: translate(-49%, -52%) scale(1.3) rotate(4deg); }
+}
+@keyframes grainDrift {
+  0%   { opacity: 0; background-position: 0% 0%, 0% 0%, 0% 0%; }
+  20%  { opacity: 0.7; }
+  100% { opacity: 0; background-position: 8% 12%, -10% 6%, 6% -8%; }
+}
+/* Spy — dark, sooty grey wisps. */
+.smoke-cloud.smoke-spy {
+  background-image:
+    radial-gradient(circle at 30% 34%, rgba(78,81,85,0.92) 0%, rgba(78,81,85,0.6) 26%, rgba(78,81,85,0) 56%),
+    radial-gradient(circle at 68% 28%, rgba(52,54,58,0.9) 0%, rgba(52,54,58,0.55) 28%, rgba(52,54,58,0) 58%),
+    radial-gradient(circle at 50% 60%, rgba(100,103,108,0.85) 0%, rgba(100,103,108,0.5) 30%, rgba(100,103,108,0) 60%),
+    radial-gradient(circle at 22% 70%, rgba(40,42,46,0.85) 0%, rgba(40,42,46,0.5) 26%, rgba(40,42,46,0) 55%),
+    radial-gradient(circle at 78% 68%, rgba(90,93,98,0.8) 0%, rgba(90,93,98,0.45) 26%, rgba(90,93,98,0) 55%),
+    radial-gradient(circle at 50% 10%, rgba(115,118,122,0.6) 0%, rgba(115,118,122,0) 48%);
+}
+/* Decoy — very light, airy grey wisps. */
+.smoke-cloud.smoke-decoy {
+  background-image:
+    radial-gradient(circle at 30% 34%, rgba(232,234,236,0.92) 0%, rgba(232,234,236,0.55) 26%, rgba(232,234,236,0) 56%),
+    radial-gradient(circle at 68% 28%, rgba(210,212,216,0.88) 0%, rgba(210,212,216,0.5) 28%, rgba(210,212,216,0) 58%),
+    radial-gradient(circle at 50% 60%, rgba(244,245,246,0.85) 0%, rgba(244,245,246,0.45) 30%, rgba(244,245,246,0) 60%),
+    radial-gradient(circle at 22% 70%, rgba(198,200,204,0.8) 0%, rgba(198,200,204,0.45) 26%, rgba(198,200,204,0) 55%),
+    radial-gradient(circle at 78% 68%, rgba(220,222,225,0.78) 0%, rgba(220,222,225,0.4) 26%, rgba(220,222,225,0) 55%),
+    radial-gradient(circle at 50% 10%, rgba(250,250,251,0.55) 0%, rgba(250,250,251,0) 48%);
+}
+/* Mardroeme transform — roaring red/orange mist. */
+.smoke-cloud.smoke-transform {
+  background-image:
+    radial-gradient(circle at 30% 34%, rgba(210,35,25,0.92) 0%, rgba(210,35,25,0.6) 26%, rgba(210,35,25,0) 56%),
+    radial-gradient(circle at 68% 28%, rgba(140,12,12,0.9) 0%, rgba(140,12,12,0.55) 28%, rgba(140,12,12,0) 58%),
+    radial-gradient(circle at 50% 60%, rgba(235,70,35,0.82) 0%, rgba(235,70,35,0.45) 30%, rgba(235,70,35,0) 60%),
+    radial-gradient(circle at 22% 70%, rgba(95,6,6,0.85) 0%, rgba(95,6,6,0.5) 26%, rgba(95,6,6,0) 55%),
+    radial-gradient(circle at 78% 68%, rgba(175,20,20,0.8) 0%, rgba(175,20,20,0.45) 26%, rgba(175,20,20,0) 55%),
+    radial-gradient(circle at 50% 10%, rgba(255,120,60,0.55) 0%, rgba(255,120,60,0) 48%);
+}
 
 .passed-banner {
   position: absolute; top: 6%; left: 2.5%; z-index: 5;
