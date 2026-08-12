@@ -2405,17 +2405,30 @@ function abilityDescriptionFor(card) {
 // .anim-ability-icon-pop when triggerAbilityFx sets that card's fxClass.
 // ==========================================================================
 
-// Muster Icon: Twin Knights Helmets
+// Muster Icon: Twin Knights (game-icons.net "buddy knight" design, CC
+// Attribution). Original 850x650 artwork uniformly scaled + centered into
+// the shared 0 0 100 100 ability-icon viewBox; a mask carves the same
+// front-visor cutout the source SVG uses to separate the two helmets.
+// Note: the source path data for the chainmail/visor grid texture on the
+// helmets was corrupted in the copy Kareem supplied (stray characters break
+// a few path commands), so that texture is omitted here — silhouette reads
+// fine at ability-icon size regardless.
 function MusterIconSVG() {
   return (
     <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
-        <path d="M22 35 C22 20, 42 20, 42 35 L42 62 C42 65, 38 68, 32 72 L22 62 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" />
-        <path d="M26 42 L38 42 L38 47 L32 50 L26 47 Z" fill="#1A1A1A" />
-        <line x1="32" y1="35" x2="32" y2="42" stroke="#1A1A1A" strokeWidth="2.5" />
-        <path d="M50 35 C50 20, 70 20, 70 35 L70 62 C70 65, 66 68, 60 72 L50 62 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" />
-        <path d="M54 42 L66 42 L66 47 L60 50 L54 47 Z" fill="#1A1A1A" />
-        <line x1="60" y1="35" x2="60" y2="42" stroke="#1A1A1A" strokeWidth="2.5" />
+      <defs>
+        <mask id="musterAbilityCutout">
+          <path fill="#fff" d="M0 0h850v650H0z" />
+          <path fill="none" stroke="#000" strokeLinecap="round" strokeLinejoin="round" strokeWidth="50" d="M442 435c55 15 70 115 70 215" />
+        </mask>
+      </defs>
+      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))" transform="translate(0 11.7647) scale(0.117647)">
+        <g mask="url(#musterAbilityCutout)" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="21">
+          <path d="M604.8 92.8c-29.157 0-58.611 10.746-111.976 32h223.952c-53.366-21.254-82.82-32-111.976-32m-128.525 44.8L451.2 438.4c44.8 22.4 89.6 25.2 134.4 25.55V272h-96v-38.4H720V272h-96v191.95c44.8-.35 89.6-3.15 134.4-25.55l-25.075-300.8zM598.4 272v192" />
+          <path d="M456 428c-44 12-56 92-56 172h409.6c0-80-12-160-56-172-41.6 52-89.6 76-148.8 76S497.6 480 456 428" />
+        </g>
+        <path fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="21" d="M256 16c-36.446 0-73.264 13.433-139.97 40h279.94C329.263 29.433 292.445 16 256 16M95.344 72 64 448c56 28 112 31.5 168 31.938V240H112v-48h288v48H280v239.938C336 479.5 392 476 448 448L416.656 72zM248 240v240" />
+        <path fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="21" d="M70 435C15 450 0 550 0 650h512c0-100-15-200-70-215-52 65-112 95-186 95s-134-30-186-95" />
       </g>
     </svg>
   );
@@ -2436,17 +2449,16 @@ function MoraleIconSVG() {
 
 // Bond Icon: Clasped Handshake, popped up over the card the same way as
 // Muster/Morale via .anim-ability-icon-pop when a card-bond-glow fx fires.
-// Path data is a scaled-down (512 -> 100 viewBox) version of a detailed
-// handshake glyph, recolored to match the white-fill/dark-outline look of
-// MusterIconSVG/MoraleIconSVG so all three ability icons read consistently
-// when popped up over card art.
+// Path data is a vaadin-icons handshake glyph (Apache License 2.0,
+// https://github.com/vaadin/vaadin-icons), svgo-optimized and uniformly
+// scaled from its native 16x16 viewBox up into the shared 0 0 100 100
+// ability-icon viewBox, with a matching dark outline added so it reads
+// consistently with MusterIconSVG/MoraleIconSVG when popped up over card art.
 function BondIconSVG() {
   return (
     <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
-        <path d="M96.855 32.539c-0.625-2.832-2.871-5.02-5.723-5.547L65.82 22.402c-2.656-0.488-5.352 0.43-7.129 2.441L50 34.668l-8.691-9.824c-1.777-2.012-4.473-2.93-7.129-2.441L8.867 26.992c-2.852 0.527-5.098 2.715-5.723 5.547-0.645 2.891 0.43 5.879 2.754 7.656l20.488 15.684c1.523 1.172 3.418 1.797 5.352 1.797h5.488l4.629 14.805c0.898 2.891 3.477 4.902 6.504 5.098h1.777c3.027-0.195 5.605-2.207 6.504-5.098l4.629-14.805h5.488c1.934 0 3.828-0.625 5.352-1.797l20.488-15.684c2.324-1.777 3.398-4.766 2.754-7.656zM42.695 59.336l-3.574 11.445c-0.254 0.82-0.996 1.387-1.855 1.445h-0.508c-0.859-0.059-1.602-0.625-1.855-1.445l-3.574-11.445 11.367 0zm21.992 0l-3.574 11.445c-0.254 0.82-0.996 1.387-1.855 1.445h-0.508c-0.859-0.059-1.602-0.625-1.855-1.445l-3.574-11.445 11.367 0zm22.266-21.504l-18.047 13.809H34.609L16.562 37.832l21.875-4.023 11.562 13.066c2.383 2.695 6.602 2.695 8.984 0l11.562-13.066 21.875 4.023z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="1.6" strokeLinejoin="round" />
-        <path d="M44.688 46.523c-1.211-1.367-3.301-1.523-4.707-0.352l-7.305 6.094c-1.406 1.172-1.602 3.262-0.43 4.668 1.172 1.406 3.262 1.602 4.668 0.43l7.305-6.094c1.426-1.191 1.602-3.281 0.469-4.746z" fill="#1A1A1A" />
-        <path d="M55.312 46.523c1.211-1.367 3.301-1.523 4.707-0.352l7.305 6.094c1.406 1.172 1.602 3.262 0.43 4.668-1.172 1.406-3.262 1.602-4.668 0.43l-7.305-6.094c-1.426-1.191-1.602-3.281-0.469-4.746z" fill="#1A1A1A" />
+      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))" transform="scale(6.25)">
+        <path fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="0.26" strokeLinejoin="round" d="M13 3a5.4 5.4 0 0 1-1.902 1.178c-.748.132-2.818-.828-3.838.152-.17.17-.38.34-.6.51-.48-.21-1.22-.53-1.76-.84S3 3 3 3L0 6.5s.74 1 1.2 1.66c.3.44.67 1.11.91 1.56l-.34.4a.88.88 0 0 0 .15 1 .83.83 0 0 0 1.002-.002.62.62 0 0 0 .077.881 1 1 0 0 0 1.006-.002.806.806 0 0 0-.003 1.005 1.01 1.01 0 0 0 .892-.114.82.82 0 0 0 .187.912 1.1 1.1 0 0 0 1.054-.092l.516-.467c.472.47 1.123.761 1.842.761l.061-.001a1.31 1.31 0 0 0 1.094-.791c.146.056.312.094.488.094.236 0 .455-.068.64-.185.585-.387.445-.687.445-.687a1.07 1.07 0 0 0 1.229-.279.996.996 0 0 0 .138-1.215.04.04 0 0 0 .021.005c.421 0 .787-.232.978-.574a1.56 1.56 0 0 0-.191-1.48l.003.005c.82-.16.79-.57 1.19-1.17a4.7 4.7 0 0 1 1.387-1.208zm-.05 7.06c-.44.44-.78.25-1.53-.32S9.18 8.1 9.18 8.1c.061.305.202.57.401.781.319.359 1.269 1.179 1.719 1.599.28.26 1 .78.58 1.18s-.75 0-1.44-.56-2.23-1.94-2.23-1.94l-.002.059c0 .258.104.491.272.661.17.2 1.12 1.12 1.52 1.54s.75.67.41 1-1.03-.19-1.41-.58c-.59-.57-1.76-1.63-1.76-1.63l-.001.053c0 .284.098.544.263.75.288.378.848.868 1.188 1.248s.54.7 0 1-1.34-.44-1.69-.8v-.002a.4.4 0 0 0-.1-.269.9.9 0 0 0-.906-.188A.61.61 0 0 0 6 11.1a.754.754 0 0 0-.912.001.61.61 0 0 0-.085-.95 1 1 0 0 0-1.174.08.66.66 0 0 0-.068-.911 1 1 0 0 0-1.186-.128L1.91 8.069c-.46-.73-1-1.49-1-1.49l2.28-2.77s.81.5 1.48.88c.33.19.9.44 1.33.64-.68.51-1.25 1-1.08 1.34a1.83 1.83 0 0 0 2.087.036 2.4 2.4 0 0 1 1.343-.403c.347 0 .677.072.976.203.554.374 1.574 1.294 2.504 1.874 1.17.85 1.4 1.4 1.12 1.68z" />
       </g>
     </svg>
   );
