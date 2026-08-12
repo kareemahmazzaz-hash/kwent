@@ -2417,6 +2417,18 @@ function MoraleIconSVG() {
   );
 }
 
+// Bond Icon: Clasped Handshake, popped up over the card the same way as
+// Muster/Morale via .anim-ability-icon-pop when a card-bond-glow fx fires.
+function BondIconSVG() {
+  return (
+    <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
+        <path d="M15 45 L35 30 L50 40 L65 28 L85 45 L70 60 L50 48 L30 60 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" strokeLinejoin="round" />
+      </g>
+    </svg>
+  );
+}
+
 // ==========================================================================
 // Scorch fire overlay — rendered inside CardTile whenever fxClass is
 // "card-burning", on top of the existing cardBurn char/darken animation
@@ -2660,6 +2672,9 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         )}
         {fxClass === "card-morale-plus-one" && (
           <div className="anim-morale-plus-one">+1</div>
+        )}
+        {fxClass === "card-bond-glow" && (
+          <div className="anim-ability-icon-pop"><BondIconSVG /></div>
         )}
       </button>
       {zoomed && (
@@ -6161,8 +6176,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 90%;
-  height: 90%;
+  width: 105%;
+  height: 105%;
   z-index: 150;
   pointer-events: none;
   animation: iconPopAndBounce 1.1s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
@@ -6226,10 +6241,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   inset: 0;
   pointer-events: none;
   overflow: hidden;
-  z-index: 20;
+  z-index: 0;
   border-radius: inherit;
   border: 1.5px solid rgba(90, 130, 160, 0.4);
   box-shadow: inset 0 0 16px rgba(70, 110, 140, 0.3);
+  background: rgba(120, 150, 175, 0.10);
 }
 @keyframes continuousRainDrop {
   0% { transform: translateY(-100%) translateX(0); opacity: 0; }
@@ -6251,10 +6267,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   inset: 0;
   pointer-events: none;
   overflow: hidden;
-  z-index: 20;
+  z-index: 0;
   border-radius: inherit;
   border: 1.5px solid rgba(0, 229, 255, 0.5);
   box-shadow: inset 0 0 16px rgba(0, 229, 255, 0.35);
+  background: rgba(140, 210, 255, 0.10);
 }
 @keyframes continuousSnowflakeSway {
   0% { transform: translateY(-20%) translateX(0) rotate(0deg); opacity: 0; }
@@ -6278,9 +6295,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   inset: 0;
   pointer-events: none;
   overflow: hidden;
-  z-index: 20;
+  z-index: 0;
   border-radius: inherit;
-  background: rgba(40, 50, 55, 0.13);
+  background: rgba(150, 155, 160, 0.10);
 }
 @keyframes fogSwirlCW {
   0%   { transform: rotate(0deg) scale(1) translateX(0px); }
@@ -6330,7 +6347,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 
-.row-card-slot { position: relative; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
+.row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
 .row-card-slot:first-child { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
