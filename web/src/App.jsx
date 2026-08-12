@@ -2418,21 +2418,86 @@ function MoraleIconSVG() {
 }
 
 // ==========================================================================
+// Scorch fire overlay — rendered inside CardTile whenever fxClass is
+// "card-burning", on top of the existing cardBurn char/darken animation
+// (see the CSS block). Flame tongues + rising embers + escaping smoke.
+// ==========================================================================
+function ScorchFireOverlay({ emberCount = 14 }) {
+  const embers = React.useMemo(() => Array.from({ length: emberCount }, (_, i) => ({
+    left: 10 + (i / emberCount) * 80 + (Math.random() * 6 - 3),
+    animationDelay: (i % 7) * 0.13,
+    animationDuration: 0.75 + (i % 4) * 0.18,
+    size: 3 + (i % 3),
+  })), [emberCount]);
+  return (
+    <div className="scorch-card-container">
+      <div className="scorch-char-mask" />
+      <div className="scorch-fire-core" />
+      <div className="scorch-top-smoke" />
+      <svg className="flame-layer flame-layer-back" viewBox="0 0 100 120" preserveAspectRatio="none">
+        <path
+          d="M0 120 L0 70 C10 50, 15 80, 25 40 C35 70, 40 30, 50 60 C60 20, 70 65, 75 35 C85 75, 90 45, 100 65 L100 120 Z"
+          fill="url(#fireGradientBack)"
+        />
+        <defs>
+          <linearGradient id="fireGradientBack" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stopColor="#ff1a00" stopOpacity="1" />
+            <stop offset="50%" stopColor="#ff6600" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#cc0000" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <svg className="flame-layer flame-layer-front" viewBox="0 0 100 120" preserveAspectRatio="none">
+        <path
+          d="M5 120 L5 80 C15 65, 20 90, 30 50 C40 85, 48 40, 58 75 C68 35, 78 80, 85 50 C92 80, 95 65, 95 120 Z"
+          fill="url(#fireGradientFront)"
+        />
+        <defs>
+          <linearGradient id="fireGradientFront" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stopColor="#ffff00" stopOpacity="1" />
+            <stop offset="45%" stopColor="#ff9900" stopOpacity="0.95" />
+            <stop offset="85%" stopColor="#ff3300" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#ff0000" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {embers.map((e, i) => (
+        <div
+          key={i}
+          className="ember-particle"
+          style={{
+            left: `${e.left}%`,
+            animationDelay: `${e.animationDelay}s`,
+            animationDuration: `${e.animationDuration}s`,
+            width: `${e.size}px`,
+            height: `${e.size}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ==========================================================================
 // Continuous weather overlays (rows & active weather-card slots)
 // ==========================================================================
 
 function RainOverlay({ streakCount = 20 }) {
-  const streaks = Array.from({ length: streakCount });
+  const streaks = React.useMemo(() => Array.from({ length: streakCount }, (_, i) => ({
+    left: (i / streakCount) * 100 + (Math.random() * 4 - 2),
+    animationDelay: (i % 5) * 0.08,
+    animationDuration: 0.36 + (i % 3) * 0.08,
+  })), [streakCount]);
   return (
     <div className="weather-rain-container">
-      {streaks.map((_, i) => (
+      {streaks.map((s, i) => (
         <div
           key={i}
           className="rain-streak"
           style={{
-            left: `${(i / streakCount) * 100 + (Math.random() * 4 - 2)}%`,
-            animationDelay: `${(i % 5) * 0.08}s`,
-            animationDuration: `${0.36 + (i % 3) * 0.08}s`
+            left: `${s.left}%`,
+            animationDelay: `${s.animationDelay}s`,
+            animationDuration: `${s.animationDuration}s`
           }}
         />
       ))}
@@ -2442,17 +2507,21 @@ function RainOverlay({ streakCount = 20 }) {
 
 function FrostOverlay({ flakeCount = 14 }) {
   const flakes = ['❄', '❅', '❆'];
-  const particles = Array.from({ length: flakeCount });
+  const particles = React.useMemo(() => Array.from({ length: flakeCount }, (_, i) => ({
+    left: (i / flakeCount) * 100 + (Math.random() * 3 - 1.5),
+    animationDelay: (i % 5) * 0.45,
+    animationDuration: 2.2 + (i % 4) * 0.3,
+  })), [flakeCount]);
   return (
     <div className="weather-frost-container">
-      {particles.map((_, i) => (
+      {particles.map((p, i) => (
         <div
           key={i}
           className="snowflake-particle"
           style={{
-            left: `${(i / flakeCount) * 100 + (Math.random() * 3 - 1.5)}%`,
-            animationDelay: `${(i % 5) * 0.45}s`,
-            animationDuration: `${2.2 + (i % 4) * 0.3}s`
+            left: `${p.left}%`,
+            animationDelay: `${p.animationDelay}s`,
+            animationDuration: `${p.animationDuration}s`
           }}
         >
           {flakes[i % 3]}
@@ -2462,21 +2531,38 @@ function FrostOverlay({ flakeCount = 14 }) {
   );
 }
 
-function FogOverlay() {
+// Impenetrable Fog — volumetric swirling vortex, replacing the old sliding
+// gradient-band version. Three independent SVG stroke-swirls rotate/drift
+// at different speeds and opacities so it reads as wispy rolling mist
+// instead of a flat strip sliding across the row.
+function SwirlingFogOverlay() {
   return (
-    <div className="weather-fog-container">
-      <div className="fog-layer-continuous" />
-      <div className="fog-layer-continuous" style={{ animationDirection: 'alternate-reverse', animationDuration: '8.5s', top: '-20%' }} />
+    <div className="weather-fog-swirl-container">
+      <svg className="fog-vortex-layer fog-vortex-1" viewBox="0 0 200 200">
+        <g fill="none" stroke="rgba(220, 235, 245, 0.45)" strokeWidth="18" strokeLinecap="round">
+          <path d="M 100,100 A 30,30 0 0,1 130,100 A 55,55 0 0,1 75,130 A 80,80 0 0,1 40,60" />
+          <path d="M 100,100 A 25,25 0 0,0 75,100 A 50,50 0 0,0 125,70 A 75,75 0 0,0 160,140" />
+        </g>
+      </svg>
+      <svg className="fog-vortex-layer fog-vortex-2" viewBox="0 0 200 200">
+        <g fill="none" stroke="rgba(180, 200, 215, 0.5)" strokeWidth="22" strokeLinecap="round">
+          <path d="M 100,100 A 35,35 0 0,0 100,135 A 65,65 0 0,0 150,60 A 90,90 0 0,0 50,40" />
+          <path d="M 100,100 A 20,20 0 0,1 120,100 A 45,45 0 0,1 70,140 A 70,70 0 0,1 30,80" />
+        </g>
+      </svg>
+      <svg className="fog-vortex-layer fog-vortex-3" viewBox="0 0 200 200">
+        <g fill="none" stroke="rgba(235, 245, 250, 0.35)" strokeWidth="28" strokeLinecap="round">
+          <path d="M 100,100 A 45,45 0 0,1 145,100 A 75,75 0 0,1 60,165 A 100,100 0 0,1 20,60" />
+        </g>
+      </svg>
     </div>
   );
 }
 
-// Row key -> matching continuous overlay component.
-const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: FogOverlay, siege: RainOverlay };
-// Weather card id -> matching continuous overlay component (for the
-// center "weather cards" slot — c042 Frost/close, c063 Fog/ranged,
-// c074 Rain/siege).
-const WEATHER_OVERLAY_BY_CARD_ID = { c042: FrostOverlay, c063: FogOverlay, c074: RainOverlay };
+// Row key -> matching continuous overlay component. Only used for the
+// actual board rows now — the center "weather cards" slot shows plain
+// card art with no animated overlay (see WeatherCenterCell).
+const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: SwirlingFogOverlay, siege: RainOverlay };
 
 function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, fxClass }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
@@ -2565,11 +2651,15 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
             </span>
           </div>
         )}
+        {fxClass === "card-burning" && <ScorchFireOverlay />}
         {fxClass === "card-muster-pop" && (
           <div className="anim-ability-icon-pop"><MusterIconSVG /></div>
         )}
         {fxClass === "card-morale-boost" && (
           <div className="anim-ability-icon-pop"><MoraleIconSVG /></div>
+        )}
+        {fxClass === "card-morale-plus-one" && (
+          <div className="anim-morale-plus-one">+1</div>
         )}
       </button>
       {zoomed && (
@@ -2950,15 +3040,11 @@ function WeatherCenterCell({ board }) {
   if (displayCardIds.length === 0) return <span className="hint weather-clear">Clear skies</span>;
   return (
     <div className="weather-center-list">
-      {displayCardIds.map((cid) => {
-        const Overlay = WEATHER_OVERLAY_BY_CARD_ID[cid];
-        return (
-          <div key={cid} className="weather-card-slot">
-            {Overlay && <Overlay />}
-            <CardTile card={cardById(cid)} size="fit" />
-          </div>
-        );
-      })}
+      {displayCardIds.map((cid) => (
+        <div key={cid} className="weather-card-slot">
+          <CardTile card={cardById(cid)} size="fit" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -3784,8 +3870,7 @@ function PlayBoard({
       setSmokeFxFor(id, "spy", SOUND_DURATIONS_MS.spy);
     }
     if (card.ability === "muster") {
-      const fetched = musterFetchIds(card.id).filter((fid) => batchIds && batchIds.includes(fid));
-      fetched.forEach((fid) => setCardFxFor(fid, "card-muster-pop", SOUND_DURATIONS_MS.muster));
+      setCardFxFor(id, "card-muster-pop", SOUND_DURATIONS_MS.muster);
     }
     if (card.ability === "horn" && board) {
       // Commander's Horn (Special, chosen row) never lands in a row array
@@ -3803,8 +3888,9 @@ function PlayBoard({
         .forEach((bid) => setCardFxFor(bid, "card-bond-glow", SOUND_DURATIONS_MS.bond));
     }
     if (card.ability === "moraleBoost" && abilityActuallyActivates(card, board, row, batchIds)) {
+      setCardFxFor(id, "card-morale-boost", SOUND_DURATIONS_MS.morale);
       board[row].filter((mid) => mid !== id && cardById(mid)?.cardType !== "Hero")
-        .forEach((mid) => setCardFxFor(mid, "card-morale-boost", SOUND_DURATIONS_MS.morale));
+        .forEach((mid) => setCardFxFor(mid, "card-morale-plus-one", SOUND_DURATIONS_MS.morale));
     }
   }
 
@@ -5867,7 +5953,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    art to its rounded corners. */
 .card-tile.card-burning, .card-tile.card-hero-shine, .card-tile.card-transform-cloud,
 .card-tile.card-spy-fog, .card-tile.card-bond-glow, .card-tile.card-morale-boost,
-.card-tile.card-muster-pop, .card-tile.card-decoy-swap, .card-tile.card-leader-cast {
+.card-tile.card-morale-plus-one, .card-tile.card-muster-pop, .card-tile.card-decoy-swap,
+.card-tile.card-leader-cast {
   overflow: visible;
 }
 @keyframes fxFadeInOut { 0% { opacity: 0; } 20% { opacity: 1; } 70% { opacity: 0.8; } 100% { opacity: 0; } }
@@ -5894,6 +5981,96 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   z-index: 1;
 }
 @keyframes cardBurn-glow { 0% { opacity: 0; } 20% { opacity: 0.9; } 60% { opacity: 0.75; } 100% { opacity: 0; } }
+
+/* Detailed flame/ember/smoke overlay, layered on top of the char/darken
+   animation above via ScorchFireOverlay. */
+.scorch-card-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  border-radius: inherit;
+  z-index: 100;
+}
+.scorch-char-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 90%, rgba(255, 60, 0, 0.45) 0%, transparent 60%),
+    radial-gradient(circle at 50% 100%, rgba(0, 0, 0, 0.88) 15%, rgba(20, 5, 0, 0.75) 50%, transparent 85%);
+  mix-blend-mode: multiply;
+  animation: charDarkening 0.8s ease-out forwards;
+}
+@keyframes charDarkening { 0% { opacity: 0; } 100% { opacity: 1; } }
+.scorch-fire-core {
+  position: absolute;
+  bottom: -10%;
+  left: -10%;
+  width: 120%;
+  height: 70%;
+  background: radial-gradient(ellipse at bottom, #ffe600 0%, #ff5500 40%, #8b0000 75%, transparent 100%);
+  filter: blur(8px);
+  mix-blend-mode: screen;
+  animation: fireCorePulse 0.15s ease-in-out infinite alternate;
+}
+@keyframes fireCorePulse {
+  0% { transform: scaleY(0.95) scaleX(0.98); opacity: 0.85; }
+  100% { transform: scaleY(1.08) scaleX(1.03); opacity: 1; }
+}
+@keyframes flameTongueDanceA {
+  0%   { transform: scaleY(1) scaleX(1) skewX(0deg); opacity: 0.9; }
+  25%  { transform: scaleY(1.2) scaleX(0.9) skewX(-4deg); opacity: 1; }
+  50%  { transform: scaleY(0.95) scaleX(1.1) skewX(3deg); opacity: 0.85; }
+  75%  { transform: scaleY(1.25) scaleX(0.85) skewX(-2deg); opacity: 0.95; }
+  100% { transform: scaleY(1) scaleX(1) skewX(0deg); opacity: 0.9; }
+}
+@keyframes flameTongueDanceB {
+  0%   { transform: scaleY(1.1) scaleX(0.95) skewX(3deg); opacity: 0.85; }
+  30%  { transform: scaleY(0.9) scaleX(1.15) skewX(-5deg); opacity: 0.95; }
+  60%  { transform: scaleY(1.3) scaleX(0.85) skewX(4deg); opacity: 1; }
+  100% { transform: scaleY(1.1) scaleX(0.95) skewX(3deg); opacity: 0.85; }
+}
+.flame-layer {
+  position: absolute;
+  bottom: -15px;
+  width: 100%;
+  height: 120%;
+  transform-origin: bottom center;
+  pointer-events: none;
+}
+.flame-layer-back { animation: flameTongueDanceB 0.22s ease-in-out infinite alternate; filter: drop-shadow(0 0 12px #ff3300); }
+.flame-layer-front { animation: flameTongueDanceA 0.18s ease-in-out infinite alternate; filter: drop-shadow(0 0 8px #ffaa00); }
+@keyframes emberRiseAndSway {
+  0% { transform: translateY(0) translateX(0) scale(1); opacity: 1; }
+  50% { transform: translateY(-80px) translateX(-14px) scale(0.8); opacity: 0.85; }
+  100% { transform: translateY(-160px) translateX(18px) scale(0.2); opacity: 0; }
+}
+.ember-particle {
+  position: absolute;
+  bottom: 10%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff580;
+  box-shadow: 0 0 6px #ff6600, 0 0 10px #ff3300;
+  animation: emberRiseAndSway 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+}
+@keyframes smokeWispRise {
+  0% { transform: translateY(0) scaleX(1); opacity: 0; }
+  30% { opacity: 0.4; }
+  100% { transform: translateY(-70px) scaleX(1.8); opacity: 0; }
+}
+.scorch-top-smoke {
+  position: absolute;
+  top: -20px;
+  left: 10%;
+  width: 80%;
+  height: 40px;
+  background: radial-gradient(ellipse at center, rgba(80, 70, 65, 0.6) 0%, transparent 75%);
+  filter: blur(8px);
+  animation: smokeWispRise 1.2s ease-out infinite;
+}
 
 /* Hero landing — a spark travels once around the card border like a lit
    fuse, trailed by a fading echo dot, over a soft ambient bloom that
@@ -5972,7 +6149,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 /* Morale & Muster — an ability icon pops/bounces up over the card, and
    (Muster only) the freshly-fetched sibling gets a pulsing gold glow for
    the duration of its cardFx entry. */
-.card-tile.card-morale-boost, .card-tile.card-muster-pop { z-index: 3; }
+.card-tile.card-morale-boost, .card-tile.card-muster-pop, .card-tile.card-morale-plus-one { z-index: 3; }
 @keyframes iconPopAndBounce {
   0% { transform: translate(-50%, -50%) scale(0) rotate(-10deg); opacity: 0; }
   35% { transform: translate(-50%, -50%) scale(1.35) rotate(5deg); opacity: 1; }
@@ -5984,13 +6161,33 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 45%;
-  height: 45%;
+  width: 90%;
+  height: 90%;
   z-index: 150;
   pointer-events: none;
   animation: iconPopAndBounce 1.1s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 .anim-ability-icon-pop .ability-icon-svg { width: 100%; height: 100%; display: block; }
+@keyframes moralePlusOneFloat {
+  0%   { transform: translate(-50%, -35%) scale(0.6); opacity: 0; }
+  20%  { transform: translate(-50%, -60%) scale(1.15); opacity: 1; }
+  35%  { transform: translate(-50%, -70%) scale(1); opacity: 1; }
+  80%  { transform: translate(-50%, -110%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -135%) scale(0.9); opacity: 0; }
+}
+.anim-morale-plus-one {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 150;
+  pointer-events: none;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: #ffe27a;
+  text-shadow: 0 0 6px rgba(255, 205, 90, 0.95), 0 0 12px rgba(255, 170, 50, 0.7), 0 1px 2px rgba(0,0,0,0.8);
+  animation: moralePlusOneFloat 1.4s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  white-space: nowrap;
+}
 @keyframes musterGatherGlow {
   0% { box-shadow: 0 0 4px #ffc107; transform: scale(1); }
   50% { box-shadow: 0 0 24px #ffb300, 0 0 12px #ffe082; transform: scale(1.04); }
@@ -6031,6 +6228,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   overflow: hidden;
   z-index: 20;
   border-radius: inherit;
+  border: 1.5px solid rgba(90, 130, 160, 0.4);
+  box-shadow: inset 0 0 16px rgba(70, 110, 140, 0.3);
 }
 @keyframes continuousRainDrop {
   0% { transform: translateY(-100%) translateX(0); opacity: 0; }
@@ -6070,30 +6269,47 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   text-shadow: 0 0 6px rgba(0, 229, 255, 0.9);
   animation: continuousSnowflakeSway 2.6s ease-in-out infinite;
 }
-/* --- Impenetrable Fog (Ranged Row & Active Fog Card) --- */
-.weather-fog-container {
+/* --- Impenetrable Fog (Ranged Row) — volumetric swirling vortex instead
+   of sliding gradient bands. Base tint kept light/transparent (0.13) so it
+   reads as haze, not a solid cloud; the rotating stroke-swirls carry most
+   of the visual weight. --- */
+.weather-fog-swirl-container {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
   z-index: 20;
   border-radius: inherit;
+  background: rgba(40, 50, 55, 0.13);
 }
-@keyframes continuousFogRoll {
-  0% { transform: translateX(-35%) scale(1); opacity: 0.5; }
-  50% { transform: translateX(0%) scale(1.15); opacity: 0.85; }
-  100% { transform: translateX(35%) scale(1); opacity: 0.5; }
+@keyframes fogSwirlCW {
+  0%   { transform: rotate(0deg) scale(1) translateX(0px); }
+  50%  { transform: rotate(180deg) scale(1.2) translateX(25px); }
+  100% { transform: rotate(360deg) scale(1) translateX(0px); }
 }
-.fog-layer-continuous {
+@keyframes fogSwirlCCW {
+  0%   { transform: rotate(0deg) scale(1.15) translateY(0px); }
+  50%  { transform: rotate(-180deg) scale(0.9) translateY(-20px); }
+  100% { transform: rotate(-360deg) scale(1.15) translateY(0px); }
+}
+@keyframes fogHorizontalDrift {
+  0%   { transform: translateX(-20%); }
+  50%  { transform: translateX(10%); }
+  100% { transform: translateX(-20%); }
+}
+.fog-vortex-layer {
   position: absolute;
-  width: 220%;
-  height: 100%;
-  top: -10%;
-  left: -60%;
-  background: radial-gradient(ellipse at center, rgba(220, 230, 235, 0.6) 0%, rgba(140, 155, 165, 0.3) 60%, transparent 80%);
-  filter: blur(12px);
-  animation: continuousFogRoll 6.5s ease-in-out infinite alternate;
+  width: 160%;
+  height: 220%;
+  top: -60%;
+  left: -30%;
+  opacity: 0.55;
+  filter: blur(10px);
+  mix-blend-mode: screen;
 }
+.fog-vortex-1 { animation: fogSwirlCW 12s linear infinite, fogHorizontalDrift 18s ease-in-out infinite; }
+.fog-vortex-2 { animation: fogSwirlCCW 9s linear infinite, fogHorizontalDrift 14s ease-in-out infinite reverse; opacity: 0.45; }
+.fog-vortex-3 { animation: fogSwirlCW 15s linear infinite; opacity: 0.35; }
 
 /* Clear Weather — a sunbeam sweeps across the whole board once both sides
    have thawed out. */
