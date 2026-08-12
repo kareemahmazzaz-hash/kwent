@@ -6378,7 +6378,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 
 .row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
-.row-card-slot:first-child { margin-left: 0; }
+.row-card-slot:first-of-type { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
 .leader-unused-badge { width: 75%; height: 75%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); margin: 0 0 -40% 3%; }
