@@ -1018,6 +1018,13 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
   const targetRow = card.row === "agile" ? options.chosenRow : card.row;
 
   let ns = withPlayer(state, actingKey, (p) => ({ ...p, hand: p.hand.filter((id) => id !== cardId) }));
+  // One-shot marker (mirrors lastMedicRevive) for the sound/animation diff
+  // effect in PlayBoard: records the id of the card the player actually
+  // played, distinct from any Muster siblings it fetches. Cleared here at
+  // the top of every play so a stale value from an earlier turn can never
+  // leak into this one; the "muster" case below overwrites it when it
+  // applies.
+  ns = { ...ns, lastMusterPlayed: null };
   const log = [];
 
   switch (card.ability) {
@@ -1119,6 +1126,7 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       } else {
         log.push(`${actor.name} plays ${card.name}.`);
       }
+      ns = { ...ns, lastMusterPlayed: { player: actingKey, cardId } };
       break;
     }
     case "medic": {
@@ -1629,6 +1637,14 @@ function gameReducer(state, action) {
   if (state?.lastMedicRevive && action.type !== "RESOLVE_MEDIC_REVIVE") {
     state = { ...state, lastMedicRevive: null };
   }
+  // lastMusterPlayed is the same kind of one-shot marker, already reset at
+  // the top of resolvePlayCard on every PLAY_CARD — this just guards against
+  // it lingering into some later, unrelated action (e.g. a card leaving and
+  // returning to the board via Decoy) the same way lastMedicRevive is
+  // guarded above.
+  if (state?.lastMusterPlayed && action.type !== "PLAY_CARD") {
+    state = { ...state, lastMusterPlayed: null };
+  }
   switch (action.type) {
     case "COIN_CALL":
       return coinCall(state, action.player, action.call);
@@ -1760,6 +1776,7 @@ function initGame(p1cfg, p2cfg) {
     coinFlip: { caller: null, call: null, result: null, callerWon: null, starter: null, resolved: false },
     awaitingMedicRevive: null,
     lastMedicRevive: null,
+    lastMusterPlayed: null,
     pendingBurn: null,
     lastScorchCast: null,
     log: scoiaChooser
@@ -2419,11 +2436,17 @@ function MoraleIconSVG() {
 
 // Bond Icon: Clasped Handshake, popped up over the card the same way as
 // Muster/Morale via .anim-ability-icon-pop when a card-bond-glow fx fires.
+// Path data is a scaled-down (512 -> 100 viewBox) version of a detailed
+// handshake glyph, recolored to match the white-fill/dark-outline look of
+// MusterIconSVG/MoraleIconSVG so all three ability icons read consistently
+// when popped up over card art.
 function BondIconSVG() {
   return (
     <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
       <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
-        <path d="M15 45 L35 30 L50 40 L65 28 L85 45 L70 60 L50 48 L30 60 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" strokeLinejoin="round" />
+        <path d="M96.855 32.539c-0.625-2.832-2.871-5.02-5.723-5.547L65.82 22.402c-2.656-0.488-5.352 0.43-7.129 2.441L50 34.668l-8.691-9.824c-1.777-2.012-4.473-2.93-7.129-2.441L8.867 26.992c-2.852 0.527-5.098 2.715-5.723 5.547-0.645 2.891 0.43 5.879 2.754 7.656l20.488 15.684c1.523 1.172 3.418 1.797 5.352 1.797h5.488l4.629 14.805c0.898 2.891 3.477 4.902 6.504 5.098h1.777c3.027-0.195 5.605-2.207 6.504-5.098l4.629-14.805h5.488c1.934 0 3.828-0.625 5.352-1.797l20.488-15.684c2.324-1.777 3.398-4.766 2.754-7.656zM42.695 59.336l-3.574 11.445c-0.254 0.82-0.996 1.387-1.855 1.445h-0.508c-0.859-0.059-1.602-0.625-1.855-1.445l-3.574-11.445 11.367 0zm21.992 0l-3.574 11.445c-0.254 0.82-0.996 1.387-1.855 1.445h-0.508c-0.859-0.059-1.602-0.625-1.855-1.445l-3.574-11.445 11.367 0zm22.266-21.504l-18.047 13.809H34.609L16.562 37.832l21.875-4.023 11.562 13.066c2.383 2.695 6.602 2.695 8.984 0l11.562-13.066 21.875 4.023z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M44.688 46.523c-1.211-1.367-3.301-1.523-4.707-0.352l-7.305 6.094c-1.406 1.172-1.602 3.262-0.43 4.668 1.172 1.406 3.262 1.602 4.668 0.43l7.305-6.094c1.426-1.191 1.602-3.281 0.469-4.746z" fill="#1A1A1A" />
+        <path d="M55.312 46.523c1.211-1.367 3.301-1.523 4.707-0.352l7.305 6.094c1.406 1.172 1.602 3.262 0.43 4.668-1.172 1.406-3.262 1.602-4.668 0.43l-7.305-6.094c-1.426-1.191-1.602-3.281-0.469-4.746z" fill="#1A1A1A" />
       </g>
     </svg>
   );
@@ -2630,7 +2653,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (card.cardType === "Hero" ? " is-hero" : "") +
           (artStage === 2 ? " no-art" : "") +
           (fxClass ? " " + fxClass : "") +
-          (fxClass === "card-muster-pop" ? " anim-muster-summon-glow" : "")
+          ((fxClass === "card-muster-pop" || fxClass === "card-muster-glow") ? " anim-muster-summon-glow" : "")
         }
         style={fitStyle}
         data-card-id={card.id}
@@ -3885,7 +3908,14 @@ function PlayBoard({
       setSmokeFxFor(id, "spy", SOUND_DURATIONS_MS.spy);
     }
     if (card.ability === "muster") {
-      setCardFxFor(id, "card-muster-pop", SOUND_DURATIONS_MS.muster);
+      // Only the card the player actually played gets the icon pop —
+      // Muster siblings fetched alongside it also have ability === "muster"
+      // and would otherwise trip this same branch and each get their own
+      // icon. They still get the gold "just arrived" glow (see the
+      // card-muster-glow case below and its shared CSS with
+      // card-muster-pop), just without the icon on top.
+      const isThePlayedCard = state.lastMusterPlayed?.cardId === id;
+      setCardFxFor(id, isThePlayedCard ? "card-muster-pop" : "card-muster-glow", SOUND_DURATIONS_MS.muster);
     }
     if (card.ability === "horn" && board) {
       // Commander's Horn (Special, chosen row) never lands in a row array
@@ -5968,7 +5998,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    art to its rounded corners. */
 .card-tile.card-burning, .card-tile.card-hero-shine, .card-tile.card-transform-cloud,
 .card-tile.card-spy-fog, .card-tile.card-bond-glow, .card-tile.card-morale-boost,
-.card-tile.card-morale-plus-one, .card-tile.card-muster-pop, .card-tile.card-decoy-swap,
+.card-tile.card-morale-plus-one, .card-tile.card-muster-pop, .card-tile.card-muster-glow, .card-tile.card-decoy-swap,
 .card-tile.card-leader-cast {
   overflow: visible;
 }
@@ -6164,7 +6194,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 /* Morale & Muster — an ability icon pops/bounces up over the card, and
    (Muster only) the freshly-fetched sibling gets a pulsing gold glow for
    the duration of its cardFx entry. */
-.card-tile.card-morale-boost, .card-tile.card-muster-pop, .card-tile.card-morale-plus-one { z-index: 3; }
+.card-tile.card-morale-boost, .card-tile.card-muster-pop, .card-tile.card-muster-glow, .card-tile.card-morale-plus-one { z-index: 3; }
 @keyframes iconPopAndBounce {
   0% { transform: translate(-50%, -50%) scale(0) rotate(-10deg); opacity: 0; }
   35% { transform: translate(-50%, -50%) scale(1.35) rotate(5deg); opacity: 1; }
