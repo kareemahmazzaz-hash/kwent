@@ -2383,6 +2383,101 @@ function abilityDescriptionFor(card) {
   return "A plain unit, valued purely on its printed power.";
 }
 
+// ==========================================================================
+// Ability icon SVGs (Muster & Morale) — popped up over a card via
+// .anim-ability-icon-pop when triggerAbilityFx sets that card's fxClass.
+// ==========================================================================
+
+// Muster Icon: Twin Knights Helmets
+function MusterIconSVG() {
+  return (
+    <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
+        <path d="M22 35 C22 20, 42 20, 42 35 L42 62 C42 65, 38 68, 32 72 L22 62 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" />
+        <path d="M26 42 L38 42 L38 47 L32 50 L26 47 Z" fill="#1A1A1A" />
+        <line x1="32" y1="35" x2="32" y2="42" stroke="#1A1A1A" strokeWidth="2.5" />
+        <path d="M50 35 C50 20, 70 20, 70 35 L70 62 C70 65, 66 68, 60 72 L50 62 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="3" />
+        <path d="M54 42 L66 42 L66 47 L60 50 L54 47 Z" fill="#1A1A1A" />
+        <line x1="60" y1="35" x2="60" y2="42" stroke="#1A1A1A" strokeWidth="2.5" />
+      </g>
+    </svg>
+  );
+}
+
+// Morale Icon: White Cross Flanked by Double Chevrons (< + >)
+function MoraleIconSVG() {
+  return (
+    <svg viewBox="0 0 100 100" className="ability-icon-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g filter="drop-shadow(0px 3px 6px rgba(0,0,0,0.9))">
+        <path d="M18 38 L10 50 L18 62 M28 38 L20 50 L28 62" stroke="#FFFFFF" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M42 32 H58 V42 H68 V58 H58 V68 H42 V58 H32 V42 H42 Z" fill="#FFFFFF" stroke="#1A1A1A" strokeWidth="2.5" />
+        <path d="M72 38 L80 50 L72 62 M82 38 L90 50 L82 62" stroke="#FFFFFF" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    </svg>
+  );
+}
+
+// ==========================================================================
+// Continuous weather overlays (rows & active weather-card slots)
+// ==========================================================================
+
+function RainOverlay({ streakCount = 20 }) {
+  const streaks = Array.from({ length: streakCount });
+  return (
+    <div className="weather-rain-container">
+      {streaks.map((_, i) => (
+        <div
+          key={i}
+          className="rain-streak"
+          style={{
+            left: `${(i / streakCount) * 100 + (Math.random() * 4 - 2)}%`,
+            animationDelay: `${(i % 5) * 0.08}s`,
+            animationDuration: `${0.36 + (i % 3) * 0.08}s`
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FrostOverlay({ flakeCount = 14 }) {
+  const flakes = ['❄', '❅', '❆'];
+  const particles = Array.from({ length: flakeCount });
+  return (
+    <div className="weather-frost-container">
+      {particles.map((_, i) => (
+        <div
+          key={i}
+          className="snowflake-particle"
+          style={{
+            left: `${(i / flakeCount) * 100 + (Math.random() * 3 - 1.5)}%`,
+            animationDelay: `${(i % 5) * 0.45}s`,
+            animationDuration: `${2.2 + (i % 4) * 0.3}s`
+          }}
+        >
+          {flakes[i % 3]}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FogOverlay() {
+  return (
+    <div className="weather-fog-container">
+      <div className="fog-layer-continuous" />
+      <div className="fog-layer-continuous" style={{ animationDirection: 'alternate-reverse', animationDuration: '8.5s', top: '-20%' }} />
+    </div>
+  );
+}
+
+// Row key -> matching continuous overlay component.
+const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: FogOverlay, siege: RainOverlay };
+// Weather card id -> matching continuous overlay component (for the
+// center "weather cards" slot — c042 Frost/close, c063 Fog/ranged,
+// c074 Rain/siege).
+const WEATHER_OVERLAY_BY_CARD_ID = { c042: FrostOverlay, c063: FogOverlay, c074: RainOverlay };
+
 function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, fxClass }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
@@ -2436,7 +2531,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           (justRevived ? " card-just-revived" : "") +
           (card.cardType === "Hero" ? " is-hero" : "") +
           (artStage === 2 ? " no-art" : "") +
-          (fxClass ? " " + fxClass : "")
+          (fxClass ? " " + fxClass : "") +
+          (fxClass === "card-muster-pop" ? " anim-muster-summon-glow" : "")
         }
         style={fitStyle}
         data-card-id={card.id}
@@ -2468,6 +2564,12 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
               {abilityLabel ? " · " + abilityLabel : ""}
             </span>
           </div>
+        )}
+        {fxClass === "card-muster-pop" && (
+          <div className="anim-ability-icon-pop"><MusterIconSVG /></div>
+        )}
+        {fxClass === "card-morale-boost" && (
+          <div className="anim-ability-icon-pop"><MoraleIconSVG /></div>
         )}
       </button>
       {zoomed && (
@@ -2661,20 +2763,20 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow, weatherEnterClass }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
+  const WeatherOverlay = weathered ? WEATHER_OVERLAY_BY_ROW[rowKey] : null;
   return (
     <div
       className={
         "row-cards row-" + rowKey +
-        (weathered ? " row-weathered" : "") +
-        (hornGlow ? " row-horn-glow" : "") +
-        (weatherEnterClass ? " " + weatherEnterClass : "")
+        (hornGlow ? " row-horn-glow" : "")
       }
       style={{ "--row-accent": meta.color }}
     >
+      {WeatherOverlay && <WeatherOverlay />}
       {cardIds.length === 0 && <span className="row-empty">no units</span>}
       {cardIds.length > 0 && cardIds.map((id) => (
         <div key={id} className="row-card-slot">
@@ -2848,11 +2950,15 @@ function WeatherCenterCell({ board }) {
   if (displayCardIds.length === 0) return <span className="hint weather-clear">Clear skies</span>;
   return (
     <div className="weather-center-list">
-      {displayCardIds.map((cid) => (
-        <div key={cid} className="weather-card-slot">
-          <CardTile card={cardById(cid)} size="fit" />
-        </div>
-      ))}
+      {displayCardIds.map((cid) => {
+        const Overlay = WEATHER_OVERLAY_BY_CARD_ID[cid];
+        return (
+          <div key={cid} className="weather-card-slot">
+            {Overlay && <Overlay />}
+            <CardTile card={cardById(cid)} size="fit" />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -3617,16 +3723,6 @@ function PlayBoard({
       setRowFx((f) => ({ ...f, [side]: { ...f[side], [row]: null } }));
     }, ms);
   };
-  // Weather's entrance sweep is symmetric (both sides always carry the same
-  // weather on a given row), so it's tracked once per row rather than per
-  // side — applied to both RowCardsCell instances for that row.
-  const [weatherEnterFx, setWeatherEnterFx] = useState({ close: null, ranged: null, siege: null });
-  const weatherEnterTimers = useRef({});
-  const setWeatherEnterFxFor = (row, cls, ms) => {
-    setWeatherEnterFx((f) => ({ ...f, [row]: cls }));
-    clearTimeout(weatherEnterTimers.current[row]);
-    weatherEnterTimers.current[row] = setTimeout(() => setWeatherEnterFx((f) => ({ ...f, [row]: null })), ms);
-  };
   const [sunlight, setSunlight] = useState(false);
   const sunlightTimer = useRef(null);
   const [leaderGlow, setLeaderGlow] = useState({ me: false, opp: false });
@@ -3639,7 +3735,6 @@ function PlayBoard({
   useEffect(() => () => {
     Object.values(cardFxTimers.current).forEach(clearTimeout);
     Object.values(rowFxTimers.current).forEach(clearTimeout);
-    Object.values(weatherEnterTimers.current).forEach(clearTimeout);
     Object.values(leaderGlowTimers.current).forEach(clearTimeout);
     clearTimeout(sunlightTimer.current);
   }, []);
@@ -3947,11 +4042,11 @@ function PlayBoard({
         if (before !== after && after) {
           const key = weatherSoundKeyForRow(r);
           // Sound only for the ability-less path (a card-driven change
-          // already got its sound above, via playCardSounds) — but the
-          // entrance sweep itself is visual-only and has no such double-fire
-          // risk, so it always plays on any row change regardless of source.
+          // already got its sound above, via playCardSounds). The visual
+          // side is now a persistent overlay driven straight off
+          // board.weather in RowCardsCell/WeatherCenterCell, so there's no
+          // separate one-shot fx to trigger here anymore.
           if (key && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) playSound(key);
-          if (key) setWeatherEnterFxFor(r, "weather-fx-" + key, SOUND_DURATIONS_MS[key]);
         }
       });
       const wasClear = prev.meWeather && (prev.meWeather.close || prev.meWeather.ranged || prev.meWeather.siege);
@@ -4165,7 +4260,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} weatherEnterClass={weatherEnterFx.siege} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} /></td>
               <td></td>
             </tr>
 
@@ -4182,7 +4277,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} weatherEnterClass={weatherEnterFx.ranged} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -4204,7 +4299,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} weatherEnterClass={weatherEnterFx.close} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} />
               </td>
             </tr>
 
@@ -4234,7 +4329,6 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.close}
-                  weatherEnterClass={weatherEnterFx.close}
                 />
               </td>
               <td></td>
@@ -4265,7 +4359,6 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.ranged}
-                  weatherEnterClass={weatherEnterFx.ranged}
                 />
               </td>
               <td></td>
@@ -4296,7 +4389,6 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.siege}
-                  weatherEnterClass={weatherEnterFx.siege}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
@@ -5766,27 +5858,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .cell-opp-close-row .row-cards.row-close { align-items: flex-start; }
 .row-cards.row-ranged, .row-cards.row-siege { display: flex; align-items: center; }
 
-/* Weather hue overlays — tint the row background when its weather is
-   active (frost on close, fog on ranged, rain on siege). Applied as a
-   ::before layer so it paints behind the card slots (which follow it in
-   DOM order) instead of washing over the card artwork itself. */
-.row-cards.row-weathered::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
-.row-cards.row-close.row-weathered::before   { background-color: rgba(150, 200, 235, 0.28); }  /* frost — light blue */
-.row-cards.row-ranged.row-weathered::before  { background-color: rgba(55, 58, 62, 0.4); }       /* fog — dark grey */
-.row-cards.row-siege.row-weathered::before   { background-color: rgba(180, 195, 215, 0.28); }   /* rain — light grey-blue */
-/* Close rows draw their board texture through a separate RowBgFill layer
-   clipped to 89% height (leaving a gap toward the weather divider) instead
-   of a full-bleed td background like ranged/siege — match that footprint
-   so the frost tint doesn't spill into the untextured gap. */
-.cell-opp-close-row .row-cards.row-weathered::before { top: 0; bottom: auto; height: 89%; }
-.cell-my-close-row .row-cards.row-weathered::before { top: auto; bottom: 0; height: 89%; }
-
 /* ---------------------------- v39 ANIMATIONS -----------------------------
    Ability visuals, synced from PlayBoard to the exact sound clip each one
    is layered under (see SOUND_DURATIONS_MS / triggerAbilityFx). These all
@@ -5898,43 +5969,36 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 @keyframes cardBondGlow { 0%, 100% { box-shadow: 0 0 0 rgba(255,205,90,0); } 50% { box-shadow: 0 0 16px 6px rgba(255,205,90,0.75); } }
 .card-tile.card-bond-glow { animation: cardBondGlow 1.9s ease-in-out 1; z-index: 3; }
 
-/* Morale — a floating +1 off every other non-Hero card in the row. */
-@keyframes cardMoraleFloat {
-  0%   { opacity: 0; transform: translate(-50%, 0) scale(0.7); }
-  20%  { opacity: 1; transform: translate(-50%, -10%) scale(1.1); }
-  70%  { opacity: 1; transform: translate(-50%, -55%) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -80%) scale(0.9); }
+/* Morale & Muster — an ability icon pops/bounces up over the card, and
+   (Muster only) the freshly-fetched sibling gets a pulsing gold glow for
+   the duration of its cardFx entry. */
+.card-tile.card-morale-boost, .card-tile.card-muster-pop { z-index: 3; }
+@keyframes iconPopAndBounce {
+  0% { transform: translate(-50%, -50%) scale(0) rotate(-10deg); opacity: 0; }
+  35% { transform: translate(-50%, -50%) scale(1.35) rotate(5deg); opacity: 1; }
+  65% { transform: translate(-50%, -50%) scale(0.95) rotate(0deg); opacity: 1; }
+  82% { transform: translate(-50%, -50%) scale(1.08); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
 }
-.card-tile.card-morale-boost::after {
-  content: "+1";
+.anim-ability-icon-pop {
   position: absolute;
-  left: 50%; top: 20%;
-  transform: translate(-50%, 0);
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: #6dffb0;
-  text-shadow: 0 0 6px rgba(0,0,0,0.85), 0 0 10px rgba(109,255,176,0.8);
-  animation: cardMoraleFloat 1.25s ease-out 1;
+  top: 50%;
+  left: 50%;
+  width: 45%;
+  height: 45%;
+  z-index: 150;
   pointer-events: none;
-  z-index: 5;
+  animation: iconPopAndBounce 1.1s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
-
-/* Muster — every fetched sibling pops in with a golden shimmer as it lands,
-   distinct from the plain card-appear every other card gets. */
-@keyframes cardMusterPop {
-  0%   { transform: scale(0.85); filter: brightness(1); }
-  40%  { transform: scale(1.08); filter: brightness(1.45); }
-  100% { transform: scale(1); filter: brightness(1); }
+.anim-ability-icon-pop .ability-icon-svg { width: 100%; height: 100%; display: block; }
+@keyframes musterGatherGlow {
+  0% { box-shadow: 0 0 4px #ffc107; transform: scale(1); }
+  50% { box-shadow: 0 0 24px #ffb300, 0 0 12px #ffe082; transform: scale(1.04); }
+  100% { box-shadow: 0 0 4px #ffc107; transform: scale(1); }
 }
-.card-tile.card-muster-pop { animation: cardMusterPop 1.2s ease-out 1; z-index: 3; }
-.card-tile.card-muster-pop::after {
-  content: "";
-  position: absolute; inset: -8%;
-  background: radial-gradient(circle, rgba(255,210,110,0.75), rgba(255,210,110,0) 70%);
-  animation: fxFadeInOut 1.2s ease-out 1;
-  pointer-events: none;
-  z-index: 1;
+.anim-muster-summon-glow {
+  animation: musterGatherGlow 1s ease-in-out infinite alternate;
+  border-radius: 6px;
 }
 
 /* Decoy — the card goes fully opaque, very light grey, as the swap lands. */
@@ -5956,36 +6020,79 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 @keyframes rowHornGlow { 0%, 100% { box-shadow: inset 0 0 0 rgba(255,205,90,0); } 50% { box-shadow: inset 0 0 26px 10px rgba(255,205,90,0.55); } }
 .row-cards.row-horn-glow { animation: rowHornGlow 2.1s ease-in-out 1; }
 
-/* Weather's entrance sweep — layered on top of (not instead of) the
-   existing persistent ::before tint, one sweep per row when its weather
-   actually changes. Frost/close = light blue drifting crystals, fog/ranged
-   = grey mist rolling in, rain/siege = dark heavy rain streaks. */
-@keyframes weatherFxSweep {
-  0%   { opacity: 0; transform: translateX(-12%); }
-  30%  { opacity: 1; transform: translateX(0%); }
-  75%  { opacity: 0.85; }
-  100% { opacity: 0; transform: translateX(8%); }
-}
-.row-cards.weather-fx-frost::after,
-.row-cards.weather-fx-fog::after,
-.row-cards.weather-fx-rain::after {
-  content: "";
-  position: absolute; inset: 0;
-  z-index: 0;
+/* ==========================================================================
+   CONTINUOUS WEATHER EFFECTS (Rows & Weather Cards)
+   ========================================================================== */
+/* --- Torrential Rain (Siege Row & Active Rain Card) --- */
+.weather-rain-container {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
-  animation: weatherFxSweep ease-out 1;
+  overflow: hidden;
+  z-index: 20;
+  border-radius: inherit;
 }
-.row-cards.weather-fx-frost::after {
-  background: repeating-linear-gradient(115deg, rgba(190,225,255,0.6) 0 6%, rgba(190,225,255,0) 6% 14%);
-  animation-duration: 2.8s;
+@keyframes continuousRainDrop {
+  0% { transform: translateY(-100%) translateX(0); opacity: 0; }
+  20% { opacity: 0.9; }
+  85% { opacity: 0.9; }
+  100% { transform: translateY(115%) translateX(-22px); opacity: 0; }
 }
-.row-cards.weather-fx-fog::after {
-  background: radial-gradient(ellipse at 30% 50%, rgba(210,212,215,0.8), rgba(140,142,145,0.35) 60%, rgba(90,92,95,0) 85%);
-  animation-duration: 3s;
+.rain-streak {
+  position: absolute;
+  width: 2px;
+  height: 28px;
+  background: linear-gradient(to bottom, transparent, rgba(185, 230, 255, 0.95));
+  animation: continuousRainDrop 0.45s linear infinite;
+  filter: drop-shadow(0 0 2px rgba(0, 150, 255, 0.6));
 }
-.row-cards.weather-fx-rain::after {
-  background: repeating-linear-gradient(100deg, rgba(35,40,55,0.6) 0 2%, rgba(35,40,55,0) 2% 6%);
-  animation-duration: 1.8s;
+/* --- Biting Frost (Close Combat Row & Active Frost Card) --- */
+.weather-frost-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 20;
+  border-radius: inherit;
+  border: 1.5px solid rgba(0, 229, 255, 0.5);
+  box-shadow: inset 0 0 16px rgba(0, 229, 255, 0.35);
+}
+@keyframes continuousSnowflakeSway {
+  0% { transform: translateY(-20%) translateX(0) rotate(0deg); opacity: 0; }
+  20% { opacity: 0.95; }
+  80% { opacity: 0.95; }
+  100% { transform: translateY(120%) translateX(16px) rotate(360deg); opacity: 0; }
+}
+.snowflake-particle {
+  position: absolute;
+  color: #e0f7fa;
+  font-size: 13px;
+  text-shadow: 0 0 6px rgba(0, 229, 255, 0.9);
+  animation: continuousSnowflakeSway 2.6s ease-in-out infinite;
+}
+/* --- Impenetrable Fog (Ranged Row & Active Fog Card) --- */
+.weather-fog-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 20;
+  border-radius: inherit;
+}
+@keyframes continuousFogRoll {
+  0% { transform: translateX(-35%) scale(1); opacity: 0.5; }
+  50% { transform: translateX(0%) scale(1.15); opacity: 0.85; }
+  100% { transform: translateX(35%) scale(1); opacity: 0.5; }
+}
+.fog-layer-continuous {
+  position: absolute;
+  width: 220%;
+  height: 100%;
+  top: -10%;
+  left: -60%;
+  background: radial-gradient(ellipse at center, rgba(220, 230, 235, 0.6) 0%, rgba(140, 155, 165, 0.3) 60%, transparent 80%);
+  filter: blur(12px);
+  animation: continuousFogRoll 6.5s ease-in-out infinite alternate;
 }
 
 /* Clear Weather — a sunbeam sweeps across the whole board once both sides
