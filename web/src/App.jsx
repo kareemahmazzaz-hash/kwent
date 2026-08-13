@@ -5187,32 +5187,23 @@ function HotseatGame({ onExit }) {
     );
   }
 
-  if (state.phase === "play") {
-    if (revealedTurn !== state.turn) {
-      return <PassDeviceGate name={state.players[state.turn].name} onContinue={() => setRevealedTurn(state.turn)} />;
-    }
-    const me = state.turn;
-    const opp = otherKey(me);
-    return (
-      <PlayBoard
-        state={state}
-        viewerRole={me}
-        opponentRole={opp}
-        viewerName={state.players[me].name}
-        opponentName={state.players[opp].name}
-        isMyTurn={true}
-        canAct={true}
-        onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: me, cardId, options }))}
-        onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: me }))}
-        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
-        onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
-        onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: me, reviveId }))}
-        onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
-      />
-    );
+  if (state.phase === "play" && revealedTurn !== state.turn) {
+    return <PassDeviceGate name={state.players[state.turn].name} onContinue={() => setRevealedTurn(state.turn)} />;
   }
 
-  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+  // play/roundEnd/gameEnd all render through this single shared shape now —
+  // PlayBoard used to be returned bare on "play" but wrapped in a fragment
+  // with sibling banners on "roundEnd"/"gameEnd", so React saw a different
+  // tree shape at that position on every phase change and remounted
+  // PlayBoard from scratch each time. That wiped its internal
+  // prevSweepPhaseRef (see PlayBoard's v41 sweep effect) before it ever got
+  // to observe the roundEnd -> play transition, so the round-end sweep to
+  // discard could never fire. Keeping PlayBoard in the same fragment
+  // position across every phase (banners just render null when not
+  // applicable) means it now stays mounted the whole game, so that ref
+  // survives and the sweep works.
+  if (state.phase === "play" || state.phase === "roundEnd" || state.phase === "gameEnd") {
+    const isPlay = state.phase === "play";
     const me = state.turn;
     const opp = otherKey(me);
     const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
@@ -5224,11 +5215,14 @@ function HotseatGame({ onExit }) {
           opponentRole={opp}
           viewerName={state.players[me].name}
           opponentName={state.players[opp].name}
-          isMyTurn={false}
-          canAct={false}
-          onPlayCard={() => {}}
-          onPass={() => {}}
-          onUseLeader={() => {}}
+          isMyTurn={isPlay}
+          canAct={isPlay}
+          onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: me, cardId, options }))}
+          onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: me }))}
+          onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: me }))}
+          onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: me, options }))}
+          onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: me, reviveId }))}
+          onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
         />
         {state.phase === "roundEnd" && (
           <RoundBanner
@@ -5424,28 +5418,15 @@ function AIGame({ onExit }) {
     );
   }
 
-  if (state.phase === "play") {
-    return (
-      <PlayBoard
-        state={state}
-        viewerRole="p1"
-        opponentRole="p2"
-        viewerName="You"
-        opponentName="AI Opponent"
-        isMyTurn={state.turn === "p1"}
-        canAct={state.turn === "p1"}
-        onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: "p1", cardId, options }))}
-        onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
-        onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
-        onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
-        onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p1", reviveId }))}
-        onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
-        opponentThinking={state.turn === "p2" && !state.players.p2.passed}
-      />
-    );
-  }
-
-  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+  if (state.phase === "play" || state.phase === "roundEnd" || state.phase === "gameEnd") {
+    // play/roundEnd/gameEnd all render through this single shared shape now
+    // (see HotseatGame for the full rationale) — PlayBoard used to be bare
+    // on "play" but fragment-wrapped with sibling banners on
+    // "roundEnd"/"gameEnd", so React remounted it on every phase change and
+    // lost the ref that detects the roundEnd -> play transition, which
+    // silently broke the round-end discard sweep. Keeping the same fragment
+    // shape (and PlayBoard always first in it) across all three phases
+    // keeps it mounted for the whole game.
     const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
@@ -5455,11 +5436,15 @@ function AIGame({ onExit }) {
           opponentRole="p2"
           viewerName="You"
           opponentName="AI Opponent"
-          isMyTurn={false}
-          canAct={false}
-          onPlayCard={() => {}}
-          onPass={() => {}}
-          onUseLeader={() => {}}
+          isMyTurn={state.phase === "play" && state.turn === "p1"}
+          canAct={state.phase === "play" && state.turn === "p1"}
+          onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: "p1", cardId, options }))}
+          onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
+          onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
+          onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
+          onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p1", reviveId }))}
+          onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
+          opponentThinking={state.phase === "play" && state.turn === "p2" && !state.players.p2.passed}
         />
         {state.phase === "roundEnd" && (
           <RoundBanner
@@ -5934,37 +5919,20 @@ function OnlineGame({ onExit }) {
     );
   }
 
-  if (meta.phase === "play") {
+  if (meta.phase === "play" || meta.phase === "roundEnd" || meta.phase === "gameEnd") {
     if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
-    return (
-      <>
-        {oppDisconnected && (
-          <div className="disconnect-banner">
-            {(oppRole === "p1" ? "Host" : "Guest")} has disconnected — forfeiting the game if they don't reconnect…
-          </div>
-        )}
-        <PlayBoard
-          state={composeState(meta, mine, theirs, role, oppRole)}
-          viewerRole={role}
-          opponentRole={oppRole}
-          viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
-          opponentName={role === "p1" ? "Guest" : "Host"}
-          isMyTurn={meta.turn === role}
-          canAct={meta.turn === role}
-          onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
-          onPass={() => applyAction({ type: "PASS", player: role })}
-          onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
-          onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
-          onResolveMedicRevive={(reviveId) => applyAction({ type: "RESOLVE_MEDIC_REVIVE", player: role, reviveId })}
-          onResolveScorchBurn={() => applyAction({ type: "RESOLVE_SCORCH_BURN" })}
-        />
-      </>
-    );
-  }
+    const isPlay = meta.phase === "play";
 
-  if (meta.phase === "roundEnd" || meta.phase === "gameEnd") {
-    if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
-
+    // play/roundEnd/gameEnd all render through this single shared shape now
+    // (see HotseatGame for the full rationale) — PlayBoard used to be
+    // fragment-wrapped differently on "play" (optional disconnect-banner +
+    // PlayBoard) vs "roundEnd"/"gameEnd" (PlayBoard + banner slots), so
+    // React remounted it on every phase change and lost the ref that
+    // detects the roundEnd -> play transition, which silently broke the
+    // round-end discard sweep. Keeping the same fragment shape (disconnect
+    // banner, then PlayBoard, then the round/game banner slots — each null
+    // when not applicable) across all three phases keeps it mounted for the
+    // whole game.
     let roundBannerEl = null;
     if (meta.phase === "roundEnd") {
       const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
@@ -7014,4 +6982,3 @@ export default function App() {
     </div>
   );
 }
-
