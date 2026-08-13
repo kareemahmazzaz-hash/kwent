@@ -139,13 +139,6 @@ const SOUND_DURATIONS_MS = {
   playingHero: 2638, rain: 1806, revival: 1542, roundLoss: 2756, scorch: 1759,
   spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
-// Pause before GameOverPanel appears on the game-ending round — long enough
-// for the round win/loss clip (see RoundBanner, now played on that round
-// too instead of being skipped) to finish, plus the board-sweep animation
-// that follows it (see PlayBoard's gameEnd effect). Ties skip the round
-// clip entirely (no winner/loser to announce), so they get a shorter pause.
-const GAME_END_REVEAL_DELAY_MS = SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS + 1300;
-const GAME_END_REVEAL_DELAY_TIE_MS = 900 + 1300;
 // A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
 // (e.g. Muster fetching several siblings) don't get cut off by one another —
 // each play() call grabs whichever pooled element is currently free, or
@@ -191,6 +184,13 @@ function markSoundBusy(durationMs) {
 function soundGateRemainingMs() {
   return Math.max(0, soundBusyUntil - Date.now());
 }
+// Pause before GameOverPanel appears on the game-ending round — long enough
+// for the round win/loss clip (see RoundBanner, now played on that round
+// too instead of being skipped) to finish, plus the board-sweep animation
+// that follows it (see PlayBoard's gameEnd effect). Ties skip the round
+// clip entirely (no winner/loser to announce), so they get a shorter pause.
+const GAME_END_REVEAL_DELAY_MS = SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS + 1300;
+const GAME_END_REVEAL_DELAY_TIE_MS = 900 + 1300;
 function playSound(key) {
   const file = SOUND_FILES[key];
   if (!file || typeof Audio === "undefined") return;
@@ -6992,3 +6992,4 @@ export default function App() {
     </div>
   );
 }
+
