@@ -3960,6 +3960,16 @@ function PlayBoard({
     ...Object.values(b.hornCards || {}).flat(),
     ...Object.values(b.mardroemeCards || {}).flat(),
   ]);
+  // finishRound() sets phase to "roundEnd"/"gameEnd" WITHOUT clearing the
+  // board — the board only actually gets swept to discard inside
+  // startNextRound() (fired by CONTINUE_ROUND), which flips phase straight
+  // from "roundEnd" back to "play" (next round) in the same reducer call.
+  // So there's never a render where phase === "roundEnd" and the board is
+  // actually empty — watching phase === "roundEnd" directly (as this used
+  // to) means every card is still resident and the sweep never fires.
+  // Instead, watch for the roundEnd -> play transition itself (the render
+  // right after CONTINUE_ROUND clears the board) and diff against that.
+  const prevSweepPhaseRef = useRef(state.phase);
   useEffect(() => {
     const pileRect = (selector) => {
       const frame = boardFrameRef.current;
@@ -3969,13 +3979,22 @@ function PlayBoard({
       const r = el.getBoundingClientRect();
       return { left: r.left - frameRect.left, top: r.top - frameRect.top, width: r.width, height: r.height };
     };
-    if (state.phase === "roundEnd") {
-      const key = "round-" + state.round;
+    const prevPhase = prevSweepPhaseRef.current;
+    prevSweepPhaseRef.current = state.phase;
+    if (state.phase === "play" && prevPhase === "roundEnd") {
+      // Board just cleared via CONTINUE_ROUND/startNextRound this render —
+      // me.board/opp.board below already reflect the post-clear (next
+      // round's) board, so residency filtering (Monster/Skellige "keep one
+      // card" retention) is correct here, unlike on phase === "roundEnd".
+      const key = "round-" + (state.round - 1);
       if (sweepFiredRef.current === key) return;
       sweepFiredRef.current = key;
       const snap = lastPlaySnapshotRef.current;
-      const meTo = pileRect(".cell-my-discard");
-      const oppTo = pileRect(".cell-opp-discard");
+      // Target the actual card-shaped element inside the pile cell, not
+      // the whole rowSpan={2} <td> (which is a much bigger, non-card
+      // aspect ratio and was making the ghost land stretched/oversized).
+      const meTo = pileRect(".cell-my-discard .card-tile");
+      const oppTo = pileRect(".cell-opp-discard .discard-pile-back");
       const meResident = boardResidentIds(me.board);
       const oppResident = boardResidentIds(opp.board);
       const cards = [
@@ -3994,13 +4013,16 @@ function PlayBoard({
       const delay = isTie ? 700 : (SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS);
       const t = setTimeout(() => {
         const snap = lastPlaySnapshotRef.current;
-        const meTo = pileRect(".cell-my-deck");
-        const oppTo = pileRect(".cell-opp-deck");
-        const meResident = boardResidentIds(me.board);
-        const oppResident = boardResidentIds(opp.board);
+        const meTo = pileRect(".cell-my-deck .deck-pile-stack");
+        const oppTo = pileRect(".cell-opp-deck .deck-pile-stack");
+        // Unlike roundEnd, the board is NEVER cleared in state for a
+        // game-ending round (GameOverPanel just replaces PlayBoard
+        // wholesale afterward) — so every snapshotted board card is still
+        // "resident" and a residency filter here would wrongly drop all of
+        // them. Sweep every board card unconditionally instead.
         const boardCards = [
-          ...snap.me.filter((c) => !meResident.has(c.id)).map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
-          ...snap.opp.filter((c) => !oppResident.has(c.id)).map((c) => ({ ...c, to: oppTo, side: "opp", flip: true })),
+          ...snap.me.map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
+          ...snap.opp.map((c) => ({ ...c, to: oppTo, side: "opp", flip: true })),
           ...snap.myHand.map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
         ];
         // Opponent's hand is never rendered as individual real cards (see
@@ -4508,7 +4530,7 @@ function PlayBoard({
   const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
   const confirmLeaderPickWeather = (weatherId) => { onUseLeader({ weatherId }); setPending(null); };
 
-  const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked;
+  const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked || myLeaderNoop;
 
   // While Decoy is pending, clicking anywhere that isn't a valid target
   // cancels it — same "click away to back out" behavior as the other
