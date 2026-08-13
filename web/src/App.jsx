@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { dbGet, dbSet, dbUpdate, dbListen, setNetBackend } from "./net.js";
 import { setLanServerUrl, getLastHello } from "./lan.js";
 
@@ -74,6 +74,11 @@ const IS_SAFARI =
 const BOARD_TEXTURE_URL = IMAGE_BASE_URL + "Board/board.jpg";
 const LEADER_UNUSED_ICON_URL = IMAGE_BASE_URL + "Board/bluecrown.jpg";
 const LEADER_UNUSED_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/bluecrown.jpg";
+// Shown instead of the blue crown when the leader is unused but firing it
+// right now would do nothing (its live precondition isn't met yet) — see
+// leaderConditionMet / LEADER_ALWAYS_GOOD_EARLY, reused here for players too.
+const LEADER_NOOP_ICON_URL = IMAGE_BASE_URL + "Board/redcrown.png";
+const LEADER_NOOP_ICON_FALLBACK_URL = IMAGE_FALLBACK_BASE_URL + "Board/redcrown.png";
 // Top-bar "life gem" assets: backgem.png is the socket, always visible and
 // left behind even after a gem breaks; 1.png is the intact gem shown on top
 // of it; breaking.gif plays once (13 frames @100ms = 1300ms) over the socket
@@ -134,6 +139,13 @@ const SOUND_DURATIONS_MS = {
   playingHero: 2638, rain: 1806, revival: 1542, roundLoss: 2756, scorch: 1759,
   spy: 2667, startingWithBasic: 1148, wonGame: 5119, wonRound: 2649,
 };
+// Pause before GameOverPanel appears on the game-ending round — long enough
+// for the round win/loss clip (see RoundBanner, now played on that round
+// too instead of being skipped) to finish, plus the board-sweep animation
+// that follows it (see PlayBoard's gameEnd effect). Ties skip the round
+// clip entirely (no winner/loser to announce), so they get a shorter pause.
+const GAME_END_REVEAL_DELAY_MS = SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS + 1300;
+const GAME_END_REVEAL_DELAY_TIE_MS = 900 + 1300;
 // A tiny pool of reusable <audio> elements per clip so rapid-fire triggers
 // (e.g. Muster fetching several siblings) don't get cut off by one another —
 // each play() call grabs whichever pooled element is currently free, or
@@ -2843,12 +2855,27 @@ function DiscardTopBack({ discard, faction }) {
 }
 
 // Shown next to a leader card while that player's leader ability is still
-// available; disappears the moment it's been used.
-function LeaderUnusedBadge({ show }) {
+// available; disappears the moment it's been used. Turns red (via `noop`)
+// when the ability is technically available but its live precondition isn't
+// met right now, so firing it would just burn it for nothing — see
+// leaderConditionMet, shared with the AI's own fire-timing logic.
+function LeaderUnusedBadge({ show, noop }) {
   const [artStage, setArtStage] = useState(0);
   if (!show || artStage === 2) return null;
-  const src = artStage === 0 ? LEADER_UNUSED_ICON_URL : LEADER_UNUSED_ICON_FALLBACK_URL;
-  return <img className="leader-unused-badge" src={src} alt="Leader ability available" decoding="async" loading="eager" onError={() => setArtStage((s) => s + 1)} />;
+  const url = noop ? LEADER_NOOP_ICON_URL : LEADER_UNUSED_ICON_URL;
+  const fallbackUrl = noop ? LEADER_NOOP_ICON_FALLBACK_URL : LEADER_UNUSED_ICON_FALLBACK_URL;
+  const src = artStage === 0 ? url : fallbackUrl;
+  return (
+    <img
+      className="leader-unused-badge"
+      src={src}
+      alt={noop ? "Leader ability available, but nothing to target right now" : "Leader ability available"}
+      title={noop ? "This leader wouldn't do anything if used right now" : undefined}
+      decoding="async"
+      loading="eager"
+      onError={() => setArtStage((s) => s + 1)}
+    />
+  );
 }
 
 // The board no longer groups siege/ranged/close into one PlayerBoard block —
@@ -2981,6 +3008,51 @@ function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
       }}
     >
       <CardTile card={card} size="fit" />
+    </div>
+  );
+}
+
+/* Round-end / game-end "sweep" ghost — cards flying off the board into a
+   pile (discard on a normal round end, deck on the game-ending round; see
+   PlayBoard's sweep state + trigger effect). Unlike MedicRevivalGhost this
+   flies AWAY from a real rendered card rather than TO one, so there's no
+   destination tile to snap onto — it just fades out once it lands instead
+   of unmounting into a real card underneath it. `fromRect`/`toRect` are
+   both already relative to .board-frame (captured by the trigger effect via
+   lastPlaySnapshotRef and the discard-/deck-pile elements respectively).
+   `flip` (deck sweep only) swaps the face for the card-back art partway
+   through the flight via a scaleX squash — a cheap 2D stand-in for a real
+   3D flip that's plenty convincing at this size and doesn't need a
+   duplicate back-face element mirrored under the front one. */
+function SweepGhost({ card, faction, fromRect, toRect, flip, faceDown, delayMs }) {
+  const [flying, setFlying] = useState(false);
+  const [showBack, setShowBack] = useState(!!faceDown);
+  useEffect(() => {
+    const t1 = setTimeout(() => setFlying(true), delayMs || 0);
+    const t2 = flip ? setTimeout(() => setShowBack(true), (delayMs || 0) + 330) : null;
+    return () => { clearTimeout(t1); if (t2) clearTimeout(t2); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!fromRect || !toRect) return null;
+  const back = backImgSrc(faction, IMAGE_BASE_URL);
+  return (
+    <div
+      className="sweep-ghost-card"
+      style={{
+        left: flying ? toRect.left : fromRect.left,
+        top: flying ? toRect.top : fromRect.top,
+        width: flying ? toRect.width : fromRect.width,
+        height: flying ? toRect.height : fromRect.height,
+        opacity: flying ? 0 : 1,
+      }}
+    >
+      <div className={"sweep-ghost-inner" + (flip ? " sweep-ghost-flip" : "")}>
+        {showBack || !card ? (
+          <img className="card-back-img" src={back} alt="" />
+        ) : (
+          <CardTile card={card} size="fit" />
+        )}
+      </div>
     </div>
   );
 }
@@ -3189,13 +3261,17 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
   // doesn't replay on unrelated rerenders). Ties don't have a clear
   // winner/loser, so no round win/loss clip plays for them. Skipped
   // entirely when no viewerName is supplied (Hotseat — shared device,
-  // no single "you" to judge the outcome against).
+  // no single "you" to judge the outcome against). Used to also skip
+  // whenever isGameEnd was true, which silently ate the round win/loss
+  // clip on the round that actually ends the match — now it always plays
+  // here too; the board-sweep animation (see PlayBoard) waits for this
+  // clip to actually finish before it starts.
   const firedRef = useRef(null);
   useEffect(() => {
-    if (!viewerName || isTie || isGameEnd || firedRef.current === round) return;
+    if (!viewerName || isTie || firedRef.current === round) return;
     firedRef.current = round;
     playSound(roundWinnerName === viewerName ? "wonRound" : "roundLoss");
-  }, [round, isTie, isGameEnd, roundWinnerName, viewerName]);
+  }, [round, isTie, roundWinnerName, viewerName]);
   return (
     <div className="overlay overlay-clear">
       <div className="round-banner">
@@ -3210,7 +3286,7 @@ function RoundBanner({ round, score, roundWinnerName, onContinue, isGameEnd, gam
         <div className="banner-sub">
           {isGameEnd ? `${gameWinnerName} wins the game!` : isTie ? "It's a tie — both players score a point!" : roundWinnerName ? `${roundWinnerName} takes the round.` : "The round is a draw."}
         </div>
-        {hideButton && <div className="hint">Next round starting…</div>}
+        {hideButton && <div className="hint">{isGameEnd ? "Revealing results…" : "Next round starting…"}</div>}
         {!hideButton && <button type="button" className="btn btn-gold" onClick={onContinue}>{isGameEnd ? "See results" : "Continue"}</button>}
       </div>
     </div>
@@ -3781,6 +3857,13 @@ function PlayBoard({
   }, [medicChainPending, me.forceRandomRevive, me.discard]);
   const myLeader = cardById(me.leaderId);
   const oppLeader = cardById(opp.leaderId);
+  // Redcrown: same "would this leader actually do anything" check the AI
+  // uses to decide when to fire (leaderConditionMet) — always-good leaders
+  // never flag as a no-op since they're useful the instant they're played.
+  const myLeaderNoop = !!(myLeader && !me.leaderUsed && !me.leaderBlocked
+    && !LEADER_ALWAYS_GOOD_EARLY.has(me.leaderId) && !leaderConditionMet(state, viewerRole, me.leaderId));
+  const oppLeaderNoop = !!(oppLeader && !opp.leaderUsed && !opp.leaderBlocked
+    && !LEADER_ALWAYS_GOOD_EARLY.has(opp.leaderId) && !leaderConditionMet(state, opponentRole, opp.leaderId));
   const spyDoubled = matchHasLeader(state, "L01");
   const myTotal = boardTotal(me.board, spyDoubled);
   const oppTotal = boardTotal(opp.board, spyDoubled);
@@ -3826,6 +3909,129 @@ function PlayBoard({
   const [ghost, setGhost] = useState({ me: null, opp: null });
   const boardFrameRef = useRef(null);
   const revivedTimers = useRef({});
+
+  /* --------------------------- v41 board sweep -----------------------------
+     Cards flying off the board at the end of a round: to the discard pile
+     on a normal round end, to the deck (with a flip) on the game-ending
+     round. State (board.close/ranged/siege/specials, board.hornCards,
+     board.mardroemeCards) is already cleared to discard by the time the
+     "roundEnd"/"gameEnd" render happens — see clearBoardToDiscard — so
+     there's no "from" position left in the DOM to animate from by then.
+     lastPlaySnapshotRef sidesteps this: it's refreshed on every render
+     while state.phase === "play" (i.e. every render up to and including the
+     very last one before the clear), so by the time phase flips it's
+     already holding exactly the pre-clear layout, frozen, ready to use. */
+  const lastPlaySnapshotRef = useRef({ me: [], opp: [], myHand: [], oppHandRect: null, oppHandCount: 0 });
+  useLayoutEffect(() => {
+    if (state.phase !== "play") return;
+    const frame = boardFrameRef.current;
+    if (!frame) return;
+    const frameRect = frame.getBoundingClientRect();
+    const relRect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left - frameRect.left, top: r.top - frameRect.top, width: r.width, height: r.height };
+    };
+    const collect = (selector) => Array.from(frame.querySelectorAll(selector))
+      .map((el) => ({ id: el.getAttribute("data-card-id"), rect: relRect(el) }))
+      .filter((c) => c.id);
+    const meSel = ".cell-my-close-row [data-card-id], .cell-my-ranged-row [data-card-id], .cell-my-siege-row [data-card-id],"
+      + " .cell-my-close-horn [data-card-id], .cell-my-ranged-horn [data-card-id], .cell-my-siege-horn [data-card-id]";
+    const oppSel = ".cell-opp-close-row [data-card-id], .cell-opp-ranged-row [data-card-id], .cell-opp-siege-row [data-card-id],"
+      + " .cell-opp-close-horn [data-card-id], .cell-opp-ranged-horn [data-card-id], .cell-opp-siege-horn [data-card-id]";
+    const myHandSel = ".hand-strip-cards:not(.opp-hand-strip) [data-card-id]";
+    const oppHandEl = frame.querySelector(".opp-hand-strip");
+    lastPlaySnapshotRef.current = {
+      me: collect(meSel),
+      opp: collect(oppSel),
+      myHand: collect(myHandSel),
+      oppHandRect: oppHandEl ? relRect(oppHandEl) : null,
+      oppHandCount: opp.hand.length,
+    };
+  });
+
+  const [sweep, setSweep] = useState(null); // { cards: [{id, rect, to, side, flip, faceDown}] }
+  const sweepFiredRef = useRef(null);
+  // Ids still physically on a board after the clear (e.g. Monsters/Skellige
+  // "keep exactly one card" retention) shouldn't also get a sweep ghost —
+  // that card is still sitting right there in its row, so flying a second
+  // copy of it into the discard would just look like a duplicate glitch.
+  const boardResidentIds = (b) => new Set([
+    ...b.close, ...b.ranged, ...b.siege,
+    ...Object.values(b.hornCards || {}).flat(),
+    ...Object.values(b.mardroemeCards || {}).flat(),
+  ]);
+  useEffect(() => {
+    const pileRect = (selector) => {
+      const frame = boardFrameRef.current;
+      const el = frame && frame.querySelector(selector);
+      if (!frame || !el) return null;
+      const frameRect = frame.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return { left: r.left - frameRect.left, top: r.top - frameRect.top, width: r.width, height: r.height };
+    };
+    if (state.phase === "roundEnd") {
+      const key = "round-" + state.round;
+      if (sweepFiredRef.current === key) return;
+      sweepFiredRef.current = key;
+      const snap = lastPlaySnapshotRef.current;
+      const meTo = pileRect(".cell-my-discard");
+      const oppTo = pileRect(".cell-opp-discard");
+      const meResident = boardResidentIds(me.board);
+      const oppResident = boardResidentIds(opp.board);
+      const cards = [
+        ...snap.me.filter((c) => !meResident.has(c.id)).map((c) => ({ ...c, to: meTo, side: "me" })),
+        ...snap.opp.filter((c) => !oppResident.has(c.id)).map((c) => ({ ...c, to: oppTo, side: "opp" })),
+      ].filter((c) => c.to);
+      if (cards.length) setSweep({ cards });
+    } else if (state.phase === "gameEnd") {
+      const key = "game-" + state.round + "-" + state.gameWinner;
+      if (sweepFiredRef.current === key) return;
+      sweepFiredRef.current = key;
+      const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+      // Waits for the round win/loss clip that now always plays on this
+      // round too (see RoundBanner) to actually finish before the sweep
+      // starts, so the two don't talk over each other.
+      const delay = isTie ? 700 : (SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS);
+      const t = setTimeout(() => {
+        const snap = lastPlaySnapshotRef.current;
+        const meTo = pileRect(".cell-my-deck");
+        const oppTo = pileRect(".cell-opp-deck");
+        const meResident = boardResidentIds(me.board);
+        const oppResident = boardResidentIds(opp.board);
+        const boardCards = [
+          ...snap.me.filter((c) => !meResident.has(c.id)).map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
+          ...snap.opp.filter((c) => !oppResident.has(c.id)).map((c) => ({ ...c, to: oppTo, side: "opp", flip: true })),
+          ...snap.myHand.map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
+        ];
+        // Opponent's hand is never rendered as individual real cards (see
+        // .opp-hand-strip / CardBackStack) — sweeping it stays true to that
+        // and fans a matching count of generic face-down ghosts out of the
+        // same stack rect instead of ids that were never in the DOM.
+        const oppHandGhosts = [];
+        if (snap.oppHandRect && snap.oppHandCount > 0) {
+          for (let i = 0; i < snap.oppHandCount; i++) {
+            oppHandGhosts.push({ id: "opp-hand-" + i, rect: snap.oppHandRect, to: oppTo, side: "opp", faceDown: true });
+          }
+        }
+        const cards = [...boardCards, ...oppHandGhosts].filter((c) => c.to);
+        if (cards.length) setSweep({ cards });
+      }, delay);
+      return () => clearTimeout(t);
+    } else {
+      sweepFiredRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase, state.round, state.gameWinner]);
+
+  // Auto-clears the whole sweep layer once every ghost's had time to land,
+  // rather than wiring up an onDone per-ghost — simpler, and just as
+  // invisible since by then every ghost has faded to opacity 0 anyway.
+  useEffect(() => {
+    if (!sweep) return;
+    const total = sweep.cards.length * 30 + 900;
+    const t = setTimeout(() => setSweep(null), total);
+    return () => clearTimeout(t);
+  }, [sweep]);
 
   /* ------------------------------- v39 FX ---------------------------------
      Ability animations, synced to the same sounds already firing above.
@@ -4342,6 +4548,22 @@ function PlayBoard({
             )}
           </div>
         )}
+        {sweep && sweep.cards.length > 0 && (
+          <div className="sweep-ghost-layer">
+            {sweep.cards.map((c, i) => (
+              <SweepGhost
+                key={c.side + "-" + c.id + "-" + i}
+                card={c.faceDown ? null : cardById(c.id)}
+                faction={c.side === "me" ? me.faction : opp.faction}
+                fromRect={c.rect}
+                toRect={c.to}
+                flip={!!c.flip}
+                faceDown={!!c.faceDown}
+                delayMs={i * 30}
+              />
+            ))}
+          </div>
+        )}
         {Object.keys(smokeFx).length > 0 && (
           <div className="smoke-fx-layer">
             {Object.entries(smokeFx).map(([id, cfg]) => (
@@ -4409,7 +4631,7 @@ function PlayBoard({
 
             {/* Row 4: leader badge (shifted to col2), opp discard (rowspan2) */}
             <tr>
-              <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} /></td>
+              <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} noop={oppLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} /></td>
             </tr>
@@ -4517,7 +4739,7 @@ function PlayBoard({
 
             {/* Row 13: my leader badge (shifted to col2), siege label/horn/row, my discard (moved up one row) */}
             <tr>
-              <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} /></td>
+              <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} noop={myLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></td>
@@ -4815,9 +5037,20 @@ function HotseatGame({ onExit }) {
   const [revealedTurn, setRevealedTurn] = useState(null);
   const [revealedMulligan, setRevealedMulligan] = useState("p1");
   const [coinGate, setCoinGate] = useState(null); // tracks which player currently has the device during coin-flip setup
+  // Gates GameOverPanel behind the round win/loss banner+sound+sweep on the
+  // game-ending round (see GAME_END_REVEAL_DELAY_MS) instead of cutting
+  // straight to the results screen the instant gameEnd phase is entered.
+  const [revealGameOver, setRevealGameOver] = useState(false);
 
   const builder1 = useDeckBuilderState();
   const builder2 = useDeckBuilderState();
+
+  useEffect(() => {
+    if (!state || state.phase !== "gameEnd") { setRevealGameOver(false); return; }
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const t = setTimeout(() => setRevealGameOver(true), isTie ? GAME_END_REVEAL_DELAY_TIE_MS : GAME_END_REVEAL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state?.phase, state?.round]);
 
   function confirmP1() {
     setP1Config({ name: "Player 1", faction: builder1.faction, leaderId: builder1.leaderId, deckIds: builder1.selected, isAI: false });
@@ -4960,7 +5193,7 @@ function HotseatGame({ onExit }) {
   if (state.phase === "roundEnd" || state.phase === "gameEnd") {
     const me = state.turn;
     const opp = otherKey(me);
-    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
         <PlayBoard
@@ -4984,7 +5217,22 @@ function HotseatGame({ onExit }) {
             onContinue={() => { setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" })); setRevealedTurn(null); }}
           />
         )}
-        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} />}
+        {/* Game-ending round: same round-complete banner first (shared
+            device, so still no viewerName — see RoundBanner — meaning no
+            round win/loss clip plays here either, same as any other
+            Hotseat round-end), giving the board-sweep animation in
+            PlayBoard room to run before GameOverPanel cuts in. */}
+        {state.phase === "gameEnd" && !revealGameOver && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            isGameEnd
+            gameWinnerName={state.gameWinner === "draw" ? null : state.players[state.gameWinner].name}
+            hideButton
+          />
+        )}
+        {state.phase === "gameEnd" && revealGameOver && <GameOverPanel state={state} onExit={onExit} />}
       </>
     );
   }
@@ -5000,6 +5248,16 @@ function AIGame({ onExit }) {
   const builder = useDeckBuilderState();
   const aiTimerRef = useRef(null);
   const gameLogRef = useRef({ startedAt: null, decisions: [] });
+  // Gates GameOverPanel behind the round win/loss banner+sound+sweep on the
+  // game-ending round — see GAME_END_REVEAL_DELAY_MS / HotseatGame's twin.
+  const [revealGameOver, setRevealGameOver] = useState(false);
+
+  useEffect(() => {
+    if (!state || state.phase !== "gameEnd") { setRevealGameOver(false); return; }
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const t = setTimeout(() => setRevealGameOver(true), isTie ? GAME_END_REVEAL_DELAY_TIE_MS : GAME_END_REVEAL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state?.phase, state?.round]);
 
   function confirmDeck() {
     const p1cfg = { name: "You", faction: builder.faction, leaderId: builder.leaderId, deckIds: builder.selected, isAI: false };
@@ -5166,7 +5424,7 @@ function AIGame({ onExit }) {
   }
 
   if (state.phase === "roundEnd" || state.phase === "gameEnd") {
-    const isTie = state.phase === "roundEnd" && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
         <PlayBoard
@@ -5191,7 +5449,18 @@ function AIGame({ onExit }) {
             onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
           />
         )}
-        {state.phase === "gameEnd" && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} viewerRole="p1" />}
+        {state.phase === "gameEnd" && !revealGameOver && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            isGameEnd
+            gameWinnerName={state.gameWinner === "draw" ? null : (state.gameWinner === "p1" ? "You" : "AI Opponent")}
+            viewerName="You"
+            hideButton
+          />
+        )}
+        {state.phase === "gameEnd" && revealGameOver && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} viewerRole="p1" />}
       </>
     );
   }
@@ -5307,6 +5576,18 @@ function OnlineGame({ onExit }) {
   const watchdogRef = useRef(null);
   const theirLastSeenRef = useRef(null);
   const forfeitFiredRef = useRef(false);
+  // Gates the GAME OVER overlay behind the round win/loss banner+sound+sweep
+  // on the game-ending round — see GAME_END_REVEAL_DELAY_MS / HotseatGame's
+  // twin. Runs independently on each connected client off the synced meta,
+  // so both sides reveal at roughly the same real time.
+  const [revealGameOver, setRevealGameOver] = useState(false);
+
+  useEffect(() => {
+    if (!meta || meta.phase !== "gameEnd") { setRevealGameOver(false); return; }
+    const isTie = meta.lastRoundScore && meta.lastRoundScore.p1 === meta.lastRoundScore.p2;
+    const t = setTimeout(() => setRevealGameOver(true), isTie ? GAME_END_REVEAL_DELAY_TIE_MS : GAME_END_REVEAL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [meta?.phase, meta?.round]);
 
   const oppRole = role === "p1" ? "p2" : "p1";
 
@@ -5676,22 +5957,51 @@ function OnlineGame({ onExit }) {
       roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton viewerName="You" />;
     }
 
+    let gameEndBannerEl = null;
     let gameOverEl = null;
     if (meta.phase === "gameEnd") {
+      const p1s = meta.lastRoundScore ? meta.lastRoundScore.p1 : 0;
+      const p2s = meta.lastRoundScore ? meta.lastRoundScore.p2 : 0;
+      const isTie = p1s === p2s;
+      let roundWinnerName = null;
+      if (!isTie) {
+        const p1Won = p1s > p2s;
+        const iAmP1 = role === "p1";
+        roundWinnerName = p1Won === iAmP1 ? "You" : "Opponent";
+      }
       const iWon = meta.gameWinner === role;
       const isDraw = meta.gameWinner === "draw";
-      gameOverEl = (
-        <>
-          <OnlineGameOverSound iWon={iWon} isDraw={isDraw} />
-          <div className="overlay overlay-clear">
-            <div className="round-banner gameover">
-              <div className="ribbon">GAME OVER</div>
-              <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
-              <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+      // Same round-complete banner (and its win/loss clip) as any other
+      // round-end first, giving the board-sweep animation in PlayBoard room
+      // to run — see revealGameOver / GAME_END_REVEAL_DELAY_MS — before the
+      // GAME OVER overlay (and its own won/lost clip) cuts in.
+      if (!revealGameOver) {
+        gameEndBannerEl = (
+          <RoundBanner
+            round={meta.round}
+            score={meta.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={roundWinnerName}
+            isGameEnd
+            gameWinnerName={isDraw ? null : (iWon ? "You" : "Opponent")}
+            hideButton
+            viewerName="You"
+          />
+        );
+      } else {
+        gameOverEl = (
+          <>
+            <OnlineGameOverSound iWon={iWon} isDraw={isDraw} />
+            <div className="overlay overlay-clear">
+              <div className="round-banner gameover">
+                <div className="ribbon">GAME OVER</div>
+                <div className="banner-sub big">{isDraw ? "It's a draw." : iWon ? "You win!" : "Your opponent wins."} {meta.roundWins.p1} – {meta.roundWins.p2}</div>
+                <button type="button" className="btn btn-gold" onClick={() => { setNetBackend("internet"); onExit(); }}>Back to menu</button>
+              </div>
             </div>
-          </div>
-        </>
-      );
+          </>
+        );
+      }
     }
 
     return (
@@ -5709,6 +6019,7 @@ function OnlineGame({ onExit }) {
           onUseLeader={() => {}}
         />
         {roundBannerEl}
+        {gameEndBannerEl}
         {gameOverEl}
       </>
     );
@@ -6555,6 +6866,30 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    visually places it at the discard pile instead — see the component. */
 .medic-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
 .medic-ghost-card { position: absolute; will-change: transform; }
+
+/* Round-end / game-end sweep — cards flying off the board into the discard
+   or deck pile (see SweepGhost). The outer element animates position/size
+   via a plain CSS transition (left/top/width/height, set from JS once
+   "flying" flips true) since — unlike the Medic ghost — there's no fixed
+   destination rect known up front to invert-transform from; the inner
+   element carries the optional flip as its own independent keyframe
+   animation so the two motions (flight path, face-down flip) don't fight
+   over the same transform property. */
+.sweep-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 61; }
+.sweep-ghost-card {
+  position: absolute;
+  transition: left 0.75s cubic-bezier(0.3, 0.6, 0.3, 1), top 0.75s cubic-bezier(0.3, 0.6, 0.3, 1),
+    width 0.75s cubic-bezier(0.3, 0.6, 0.3, 1), height 0.75s cubic-bezier(0.3, 0.6, 0.3, 1), opacity 0.45s ease-in 0.35s;
+  will-change: left, top, width, height, opacity;
+}
+.sweep-ghost-inner { width: 100%; height: 100%; }
+.sweep-ghost-flip { animation: sweep-ghost-flip 0.75s ease-in-out 1; }
+@keyframes sweep-ghost-flip {
+  0% { transform: scaleX(1); }
+  48% { transform: scaleX(0.04); }
+  52% { transform: scaleX(0.04); }
+  100% { transform: scaleX(1); }
+}
 
 /* ------------------------------ v39.2 smoke -------------------------------
    Spy fog / Decoy swap / Mardroeme's transform cloud — the actual billowing
