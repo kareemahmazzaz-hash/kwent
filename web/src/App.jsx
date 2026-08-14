@@ -2627,7 +2627,7 @@ function SwirlingFogOverlay() {
 // card art with no animated overlay (see WeatherCenterCell).
 const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: SwirlingFogOverlay, siege: RainOverlay };
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, fxClass }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
@@ -2644,7 +2644,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   // measures this exact element's rect as its landing target) but invisible
   // until the ghost clone actually arrives, so the player never sees the
   // real card and the flying ghost at the same time.
-  if (arriving) fitStyle.opacity = 0;
+  if (arriving || sweeping) fitStyle.opacity = 0;
 
   const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
   // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
@@ -2913,7 +2913,7 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
 // it's a normal row unit (not a special), it never lands in hornCards —
 // its own card art already sits in the row itself, so this cell stays
 // empty for it, exactly like the request specifies.
-function RowHornCell({ board, rowKey }) {
+function RowHornCell({ board, rowKey, hiddenIds }) {
   const hornCardIds = board.hornCards?.[rowKey] || [];
   const mardroemeCardIds = board.mardroemeCards?.[rowKey] || [];
   if (!hornCardIds.length && !mardroemeCardIds.length) return null;
@@ -2921,12 +2921,12 @@ function RowHornCell({ board, rowKey }) {
     <div className="row-markers">
       {hornCardIds.map((id, i) => (
         <div key={"h-" + id + "-" + i} className="horn-card-slot">
-          <CardTile card={cardById(id)} size="fit" />
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} />
         </div>
       ))}
       {mardroemeCardIds.map((id, i) => (
         <div key={"m-" + id + "-" + i} className="horn-card-slot mardroeme-card-slot">
-          <CardTile card={cardById(id)} size="fit" />
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} />
         </div>
       ))}
     </div>
@@ -2934,7 +2934,7 @@ function RowHornCell({ board, rowKey }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow, hiddenIds }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -2959,6 +2959,7 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
             justPlayed={id === flashId}
             justRevived={id === revivedId}
             arriving={id === arrivingId}
+            sweeping={!!hiddenIds?.has(id)}
             fxClass={cardFx ? cardFx[id] : null}
           />
         </div>
@@ -3926,8 +3927,19 @@ function PlayBoard({
      very last one before the clear), so by the time phase flips it's
      already holding exactly the pre-clear layout, frozen, ready to use. */
   const lastPlaySnapshotRef = useRef({ me: [], opp: [], myHand: [], oppHandRect: null, oppHandCount: 0 });
+  // Tracks phase independently of prevSweepPhaseRef below (that one belongs
+  // to the passive effect and updates AFTER this layout effect already ran
+  // for the same commit). Needed to skip re-capturing on the exact render
+  // where phase flips roundEnd -> play: on that commit the board has
+  // already been cleared, so capturing here would clobber the frozen
+  // pre-clear snapshot moments before the sweep-trigger effect (below)
+  // reads it — which is exactly why the round-end sweep never fired.
+  const prevSnapshotPhaseRef = useRef(state.phase);
   useLayoutEffect(() => {
+    const prevPhase = prevSnapshotPhaseRef.current;
+    prevSnapshotPhaseRef.current = state.phase;
     if (state.phase !== "play") return;
+    if (prevPhase !== "play") return;
     const frame = boardFrameRef.current;
     if (!frame) return;
     const frameRect = frame.getBoundingClientRect();
@@ -4033,19 +4045,12 @@ function PlayBoard({
         const boardCards = [
           ...snap.me.map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
           ...snap.opp.map((c) => ({ ...c, to: oppTo, side: "opp", flip: true })),
-          ...snap.myHand.map((c) => ({ ...c, to: meTo, side: "me", flip: true })),
         ];
-        // Opponent's hand is never rendered as individual real cards (see
-        // .opp-hand-strip / CardBackStack) — sweeping it stays true to that
-        // and fans a matching count of generic face-down ghosts out of the
-        // same stack rect instead of ids that were never in the DOM.
-        const oppHandGhosts = [];
-        if (snap.oppHandRect && snap.oppHandCount > 0) {
-          for (let i = 0; i < snap.oppHandCount; i++) {
-            oppHandGhosts.push({ id: "opp-hand-" + i, rect: snap.oppHandRect, to: oppTo, side: "opp", faceDown: true });
-          }
-        }
-        const cards = [...boardCards, ...oppHandGhosts].filter((c) => c.to);
+        // Hand cards (either side) stay in hand at game end — only board
+        // cards sweep to the deck. (Opponent hand ghosts used to fan a
+        // matching count of face-down ghosts out of the hand-strip stack
+        // here; removed for the same reason.)
+        const cards = boardCards.filter((c) => c.to);
         if (cards.length) setSweep({ cards });
       }, delay);
       return () => clearTimeout(t);
@@ -4054,6 +4059,18 @@ function PlayBoard({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase, state.round, state.gameWinner]);
+
+  // Game-end only: the board is never cleared in state for the final round
+  // (see the gameEnd branch above), so the real tiles stay mounted and
+  // fully visible right under the flying sweep ghosts unless hidden
+  // explicitly — otherwise it reads as the ghost being a duplicate clone
+  // while the "real" card just sits there. Round-end doesn't need this:
+  // the board is already cleared to empty by the time that sweep runs, so
+  // there's nothing real left underneath to double up with.
+  const sweepHiddenIds = useMemo(() => {
+    if (!sweep || state.phase !== "gameEnd") return null;
+    return new Set(sweep.cards.map((c) => c.id));
+  }, [sweep, state.phase]);
 
   // Auto-clears the whole sweep layer once every ghost's had time to land,
   // rather than wiring up an onDone per-ghost — simpler, and just as
@@ -4656,8 +4673,8 @@ function PlayBoard({
               <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
-              <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} /></td>
+              <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} hiddenIds={sweepHiddenIds} /></td>
               <td></td>
             </tr>
 
@@ -4673,8 +4690,8 @@ function PlayBoard({
               <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} hiddenIds={sweepHiddenIds} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -4692,11 +4709,11 @@ function PlayBoard({
               <td rowSpan={2} className="cell-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-close-horn">
                 <RowBgFill src={boardImg("opp close horn")} anchor="top" />
-                <RowHornCell board={opp.board} rowKey="close" />
+                <RowHornCell board={opp.board} rowKey="close" hiddenIds={sweepHiddenIds} />
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} />
+                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} hiddenIds={sweepHiddenIds} />
               </td>
             </tr>
 
@@ -4712,7 +4729,7 @@ function PlayBoard({
               <td rowSpan={2} className="cell-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-close-horn">
                 <RowBgFill src={boardImg("my close horn")} anchor="bottom" />
-                <RowHornCell board={me.board} rowKey="close" />
+                <RowHornCell board={me.board} rowKey="close" hiddenIds={sweepHiddenIds} />
               </td>
               <td rowSpan={2} className="cell-my-close-row">
                 <RowBgFill src={boardImg("my close")} anchor="bottom" />
@@ -4726,6 +4743,7 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.close}
+                  hiddenIds={sweepHiddenIds}
                 />
               </td>
               <td></td>
@@ -4744,7 +4762,7 @@ function PlayBoard({
             {/* Row 11: my ranged label/horn/row, blank filler */}
             <tr>
               <td rowSpan={2} className="cell-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-my-ranged-row">
                 <RowCardsCell
                   board={me.board}
@@ -4756,6 +4774,7 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.ranged}
+                  hiddenIds={sweepHiddenIds}
                 />
               </td>
               <td></td>
@@ -4774,7 +4793,7 @@ function PlayBoard({
               <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} noop={myLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-my-siege-row">
                 <RowCardsCell
                   board={me.board}
@@ -4786,6 +4805,7 @@ function PlayBoard({
                   arrivingId={ghost.me?.cardId}
                   cardFx={cardFx}
                   hornGlow={!!rowFx.me.siege}
+                  hiddenIds={sweepHiddenIds}
                 />
               </td>
               <td rowSpan={2} className="cell-my-discard"><DiscardTopCard discard={me.discard} onClick={() => setShowDiscard(true)} /></td>
