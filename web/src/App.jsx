@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { dbGet, dbSet, dbUpdate, dbListen, setNetBackend } from "./net.js";
 import { setLanServerUrl, getLastHello } from "./lan.js";
 
@@ -2736,7 +2737,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
           <div className="anim-ability-icon-pop"><BondIconSVG /></div>
         )}
       </button>
-      {zoomed && (
+      {zoomed && createPortal(
         <div className="card-zoom-overlay" onClick={(e) => { e.stopPropagation(); setZoomed(false); }}>
           <div className="card-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="card-zoom-art-wrap">
@@ -2764,7 +2765,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
               <p className="card-zoom-desc">{abilityDescriptionFor(card)}</p>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
