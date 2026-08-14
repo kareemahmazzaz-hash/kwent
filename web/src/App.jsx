@@ -58,7 +58,7 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
 // caching ambiguity, permanently. Trade-off: the site now only picks up
 // whatever was in the repo AT this commit — bump KWENT_PINNED_COMMIT to the
 // latest commit SHA whenever new assets need to actually go live.
-const KWENT_PINNED_COMMIT = "933fe2edf3d11f66b2b10f8699cbd02562fd52db";
+const KWENT_PINNED_COMMIT = "e02f1e92d041ed32b01de0180e501a18c8160264";
 const IMAGE_BASE_URL = `https://cdn.jsdelivr.net/gh/kareemahmazzaz-hash/kwent@${KWENT_PINNED_COMMIT}/`;
 const IMAGE_FALLBACK_BASE_URL = `https://raw.githubusercontent.com/kareemahmazzaz-hash/kwent/${KWENT_PINNED_COMMIT}/`;
 // Safari detection for the handful of fixes that can't be done in pure CSS
@@ -2627,8 +2627,12 @@ function SwirlingFogOverlay() {
 // card art with no animated overlay (see WeatherCenterCell).
 const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: SwirlingFogOverlay, siege: RainOverlay };
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass }) {
-  const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass, thumbOverride }) {
+  const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up — art shown on the face-up tile itself
+  // thumbOverride lets a caller (e.g. the horn/mardroeme row-marker slot) show a generic
+  // stand-in image on the tile face while the zoom-in modal still shows the real card's
+  // own art. When absent, zoom art is identical to tile art, same as before this existed.
+  const [zoomArtStage, setZoomArtStage] = useState(0);
   const [zoomed, setZoomed] = useState(false);
   const isHovered = useRef(false);
   const touchTimer = useRef(null);
@@ -2637,7 +2641,11 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   const rmeta = ROW_META[card.row];
   const isLeader = card.cardType === "Leader";
   const isSpecial = card.cardType === "Special";
-  const src = artStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null;
+  const thumbCard = thumbOverride || card;
+  const src = artStage === 0 ? imgSrc(thumbCard, IMAGE_BASE_URL) : artStage === 1 ? imgSrc(thumbCard, IMAGE_FALLBACK_BASE_URL) : null;
+  const zoomSrc = !thumbOverride
+    ? src
+    : (zoomArtStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : zoomArtStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null);
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
   const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
   // Kept in the DOM (and in its normal layout slot — MedicRevivalGhost
@@ -2732,8 +2740,15 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         <div className="card-zoom-overlay" onClick={(e) => { e.stopPropagation(); setZoomed(false); }}>
           <div className="card-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="card-zoom-art-wrap">
-              {src ? (
-                <img className="card-zoom-art" src={src} alt={card.name} decoding="async" loading="eager" />
+              {zoomSrc ? (
+                <img
+                  className="card-zoom-art"
+                  src={zoomSrc}
+                  alt={card.name}
+                  decoding="async"
+                  loading="eager"
+                  onError={thumbOverride ? () => setZoomArtStage((s) => s + 1) : undefined}
+                />
               ) : (
                 <div className="card-zoom-fallback">{card.name}</div>
               )}
@@ -2913,6 +2928,12 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
 // it's a normal row unit (not a special), it never lands in hornCards —
 // its own card art already sits in the row itself, so this cell stays
 // empty for it, exactly like the request specifies.
+// Generic stand-in art shown on the row-marker slot itself — the real numbered
+// copy (Commander's Horn 1/2/3, Mardroeme 1/2/3) still shows up when the
+// marker is clicked/long-pressed to zoom, via CardTile's thumbOverride.
+const HORN_PLACED_THUMB = { faction: "neutral", img: "horn_placed.jpg" };
+const MARDROEME_PLACED_THUMB = { faction: "skellige", img: "mardroeme_placed.jpg" };
+
 function RowHornCell({ board, rowKey, hiddenIds }) {
   const hornCardIds = board.hornCards?.[rowKey] || [];
   const mardroemeCardIds = board.mardroemeCards?.[rowKey] || [];
@@ -2921,12 +2942,12 @@ function RowHornCell({ board, rowKey, hiddenIds }) {
     <div className="row-markers">
       {hornCardIds.map((id, i) => (
         <div key={"h-" + id + "-" + i} className="horn-card-slot">
-          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} />
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={HORN_PLACED_THUMB} />
         </div>
       ))}
       {mardroemeCardIds.map((id, i) => (
         <div key={"m-" + id + "-" + i} className="horn-card-slot mardroeme-card-slot">
-          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} />
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={MARDROEME_PLACED_THUMB} />
         </div>
       ))}
     </div>
