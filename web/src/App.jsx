@@ -3967,6 +3967,17 @@ function PlayBoard({
 
   const [sweep, setSweep] = useState(null); // { cards: [{id, rect, to, side, flip, faceDown}] }
   const sweepFiredRef = useRef(null);
+  // gameEnd only: which real board-tile ids to keep hidden underneath the
+  // sweep ghosts. This used to be derived straight from `sweep`, but `sweep`
+  // self-clears on a short ghost-animation timer (see below) while the real
+  // board state is NEVER cleared for a game-ending round (GameOverPanel just
+  // covers it later, after a much longer GAME_END_REVEAL_DELAY_MS). That
+  // mismatch meant the real cards popped back into view the moment the
+  // ghost layer cleared, well before GameOverPanel arrived to cover them —
+  // reading as the swept cards "teleporting back" onto the rows. Giving this
+  // its own state, lifetime-matched to the gameEnd phase itself rather than
+  // to the ghost animation, keeps the real tiles hidden for the whole gap.
+  const [gameEndHiddenIds, setGameEndHiddenIds] = useState(null);
   // Ids still physically on a board after the clear (e.g. Monsters/Skellige
   // "keep exactly one card" retention) shouldn't also get a sweep ghost —
   // that card is still sitting right there in its row, so flying a second
@@ -4051,11 +4062,15 @@ function PlayBoard({
         // matching count of face-down ghosts out of the hand-strip stack
         // here; removed for the same reason.)
         const cards = boardCards.filter((c) => c.to);
-        if (cards.length) setSweep({ cards });
+        if (cards.length) {
+          setSweep({ cards });
+          setGameEndHiddenIds(new Set(cards.map((c) => c.id)));
+        }
       }, delay);
       return () => clearTimeout(t);
     } else {
       sweepFiredRef.current = null;
+      setGameEndHiddenIds(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase, state.round, state.gameWinner]);
@@ -4067,10 +4082,13 @@ function PlayBoard({
   // while the "real" card just sits there. Round-end doesn't need this:
   // the board is already cleared to empty by the time that sweep runs, so
   // there's nothing real left underneath to double up with.
-  const sweepHiddenIds = useMemo(() => {
-    if (!sweep || state.phase !== "gameEnd") return null;
-    return new Set(sweep.cards.map((c) => c.id));
-  }, [sweep, state.phase]);
+  // Sourced from gameEndHiddenIds (its own state, not `sweep` itself) since
+  // `sweep` self-clears on the short ghost-animation timer below, well
+  // before GameOverPanel's much longer reveal delay actually covers the
+  // board — using `sweep` here used to make the real cards pop back into
+  // view in that gap, reading as the swept cards teleporting back onto
+  // the rows.
+  const sweepHiddenIds = state.phase === "gameEnd" ? gameEndHiddenIds : null;
 
   // Auto-clears the whole sweep layer once every ghost's had time to land,
   // rather than wiring up an onDone per-ghost — simpler, and just as
