@@ -3640,15 +3640,20 @@ function CoinFlipPanel({ coinFlip, myKey, oppName, myName, isMyCallTurn, onCall,
   // flip…") gets the same synced spin+sound the instant it resolves on
   // their screen too, not just the one who pressed the button.
   const [showResult, setShowResult] = useState(false);
-  const prevResolvedRef = useRef(resolved);
+  // Fires whenever `resolved` is true and hasn't been "played" yet, rather
+  // than only catching a false->true transition. If this panel unmounts and
+  // remounts already-resolved (e.g. a PassDeviceGate gets interposed between
+  // the flip and the reveal when the device needs to change hands), a
+  // transition-only check would never fire and the coin would spin forever.
+  const playedRef = useRef(false);
   useEffect(() => {
-    if (!prevResolvedRef.current && resolved) {
+    if (resolved && !playedRef.current) {
+      playedRef.current = true;
       playSound("coin");
       const t = setTimeout(() => setShowResult(true), SOUND_DURATIONS_MS.coin);
-      prevResolvedRef.current = resolved;
       return () => clearTimeout(t);
     }
-    prevResolvedRef.current = resolved;
+    if (!resolved) playedRef.current = false;
   }, [resolved]);
 
   if (!caller) {
