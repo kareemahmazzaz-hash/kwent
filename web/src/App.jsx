@@ -2627,7 +2627,7 @@ function SwirlingFogOverlay() {
 // card art with no animated overlay (see WeatherCenterCell).
 const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: SwirlingFogOverlay, siege: RainOverlay };
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass, thumbOverride }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass, thumbOverride, style }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up — art shown on the face-up tile itself
   // thumbOverride lets a caller (e.g. the horn/mardroeme row-marker slot) show a generic
   // stand-in image on the tile face while the zoom-in modal still shows the real card's
@@ -2647,7 +2647,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
     ? src
     : (zoomArtStage === 0 ? imgSrc(card, IMAGE_BASE_URL) : zoomArtStage === 1 ? imgSrc(card, IMAGE_FALLBACK_BASE_URL) : null);
   const abilityLabel = card.ability && ABILITY_LABEL[card.ability];
-  const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color };
+  const fitStyle = { "--accent": fmeta.color, "--row-accent": rmeta ? rmeta.color : fmeta.color, ...style };
   // Kept in the DOM (and in its normal layout slot — MedicRevivalGhost
   // measures this exact element's rect as its landing target) but invisible
   // until the ghost clone actually arrives, so the player never sees the
@@ -2934,20 +2934,32 @@ function RowLabelCell({ board, rowKey, spyDoubled }) {
 const HORN_PLACED_THUMB = { faction: "neutral", img: "horn_placed.jpg" };
 const MARDROEME_PLACED_THUMB = { faction: "skellige", img: "mardroeme_placed.jpg" };
 
-function RowHornCell({ board, rowKey, hiddenIds }) {
+// Per-side, per-row vertical nudge for the horn/mardroeme marker's own
+// card art (overrides the slot's general .horn-card-slot-my/-opp margin via
+// inline style, since "my" siege/ranged and "opp" siege/ranged each need a
+// slightly different nudge — tuned live in DevTools, see chat history).
+const HORN_CARD_MARGIN_TOP = {
+  my: { siege: "10%", ranged: "10%" },
+  opp: { siege: "9%", ranged: "5%" },
+};
+
+function RowHornCell({ board, rowKey, side, hiddenIds }) {
   const hornCardIds = board.hornCards?.[rowKey] || [];
   const mardroemeCardIds = board.mardroemeCards?.[rowKey] || [];
   if (!hornCardIds.length && !mardroemeCardIds.length) return null;
+  const slotClass = "horn-card-slot" + (side ? " horn-card-slot-" + side : "");
+  const marginTop = side ? HORN_CARD_MARGIN_TOP[side]?.[rowKey] : undefined;
+  const cardStyle = marginTop ? { marginTop } : undefined;
   return (
     <div className="row-markers">
       {hornCardIds.map((id, i) => (
-        <div key={"h-" + id + "-" + i} className="horn-card-slot">
-          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={HORN_PLACED_THUMB} />
+        <div key={"h-" + id + "-" + i} className={slotClass}>
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={HORN_PLACED_THUMB} style={cardStyle} />
         </div>
       ))}
       {mardroemeCardIds.map((id, i) => (
-        <div key={"m-" + id + "-" + i} className="horn-card-slot mardroeme-card-slot">
-          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={MARDROEME_PLACED_THUMB} />
+        <div key={"m-" + id + "-" + i} className={slotClass + " mardroeme-card-slot"}>
+          <CardTile card={cardById(id)} size="fit" sweeping={!!hiddenIds?.has(id)} thumbOverride={MARDROEME_PLACED_THUMB} style={cardStyle} />
         </div>
       ))}
     </div>
@@ -4717,7 +4729,7 @@ function PlayBoard({
               <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
-              <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" hiddenIds={sweepHiddenIds} /></td>
+              <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" side="opp" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} hiddenIds={sweepHiddenIds} /></td>
               <td></td>
             </tr>
@@ -4734,7 +4746,7 @@ function PlayBoard({
               <td></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" side="opp" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} hiddenIds={sweepHiddenIds} /></td>
             </tr>
 
@@ -4753,7 +4765,7 @@ function PlayBoard({
               <td rowSpan={2} className="cell-opp-close-label"><RowLabelCell board={opp.board} rowKey="close" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-close-horn">
                 <RowBgFill src={boardImg("opp close horn")} anchor="top" />
-                <RowHornCell board={opp.board} rowKey="close" hiddenIds={sweepHiddenIds} />
+                <RowHornCell board={opp.board} rowKey="close" side="opp" hiddenIds={sweepHiddenIds} />
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
@@ -4773,7 +4785,7 @@ function PlayBoard({
               <td rowSpan={2} className="cell-my-close-label"><RowLabelCell board={me.board} rowKey="close" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-close-horn">
                 <RowBgFill src={boardImg("my close horn")} anchor="bottom" />
-                <RowHornCell board={me.board} rowKey="close" hiddenIds={sweepHiddenIds} />
+                <RowHornCell board={me.board} rowKey="close" side="my" hiddenIds={sweepHiddenIds} />
               </td>
               <td rowSpan={2} className="cell-my-close-row">
                 <RowBgFill src={boardImg("my close")} anchor="bottom" />
@@ -4806,7 +4818,7 @@ function PlayBoard({
             {/* Row 11: my ranged label/horn/row, blank filler */}
             <tr>
               <td rowSpan={2} className="cell-my-ranged-label"><RowLabelCell board={me.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-ranged-horn"><RowHornCell board={me.board} rowKey="ranged" side="my" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-my-ranged-row">
                 <RowCardsCell
                   board={me.board}
@@ -4837,7 +4849,7 @@ function PlayBoard({
               <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} noop={myLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
-              <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" side="my" hiddenIds={sweepHiddenIds} /></td>
               <td rowSpan={2} className="cell-my-siege-row">
                 <RowCardsCell
                   board={me.board}
@@ -6377,7 +6389,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .marker-horn { color: var(--gold); }
 .marker-mardroeme { color: #d98cff; }
 .horn-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: auto; max-width: 100%; }
-.horn-card-slot .card-tile { height: 150%; width: 120%; margin: 15% 0 0 -5%; }
+.horn-card-slot-my .card-tile { height: 90%; width: 147%; margin: 15% 0 0 -20%; aspect-ratio: 0.55 / 1; }
+.horn-card-slot-opp .card-tile { height: 90%; width: 147%; margin: -2% 0 0 -20%; aspect-ratio: 0.55 / 1; }
 .weather-card-slot { position: relative; flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; height: 100%; }
 .row-cards { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: flex-start; width: 100%; height: 100%; overflow: hidden; }
 .row-cards.row-close { display: flex; align-items: flex-end; }
