@@ -186,9 +186,13 @@ function soundGateRemainingMs() {
 }
 // Pause before GameOverPanel appears on the game-ending round — long enough
 // for the round win/loss clip (see RoundBanner, now played on that round
-// too instead of being skipped) to finish, plus the board-sweep animation
-// that follows it (see PlayBoard's gameEnd effect). Ties skip the round
-// clip entirely (no winner/loser to announce), so they get a shorter pause.
+// too instead of being skipped) to finish, and for the board-sweep
+// animation (see PlayBoard's gameEnd effect) to have long since landed —
+// the sweep now starts almost immediately alongside the round clip rather
+// than waiting for it, so this value's job is purely to keep GameOverPanel's
+// own separate win/loss clip from crowding either of them. Ties skip the
+// round clip entirely (no winner/loser to announce), so they get a shorter
+// pause.
 const GAME_END_REVEAL_DELAY_MS = SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS + 1300;
 const GAME_END_REVEAL_DELAY_TIE_MS = 900 + 1300;
 function playSound(key) {
@@ -4007,10 +4011,16 @@ function PlayBoard({
       if (sweepFiredRef.current === key) return;
       sweepFiredRef.current = key;
       const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
-      // Waits for the round win/loss clip that now always plays on this
-      // round too (see RoundBanner) to actually finish before the sweep
-      // starts, so the two don't talk over each other.
-      const delay = isTie ? 700 : (SOUND_DURATIONS_MS.roundLoss + SOUND_GATE_PADDING_MS);
+      // Starts right alongside the round win/loss clip (see RoundBanner)
+      // instead of waiting for it to finish — with the old wait, the
+      // round-sound had already gone quiet well before the sweep even
+      // started, and the sweep's tail ended up landing right next to
+      // GameOverPanel's separate win/loss clip (see GAME_END_REVEAL_DELAY_MS
+      // below) instead, so the sweep visually read as paired with that
+      // "final" sound rather than the round one. A short delay here just
+      // gives the roundEnd/gameEnd banner a moment to actually paint before
+      // measuring pile positions.
+      const delay = isTie ? 200 : 150;
       const t = setTimeout(() => {
         const snap = lastPlaySnapshotRef.current;
         const meTo = pileRect(".cell-my-deck .deck-pile-stack");
@@ -5996,17 +6006,25 @@ function OnlineGame({ onExit }) {
 
     return (
       <>
+        {oppDisconnected && (
+          <div className="disconnect-banner">
+            {(oppRole === "p1" ? "Host" : "Guest")} has disconnected — forfeiting the game if they don't reconnect…
+          </div>
+        )}
         <PlayBoard
           state={composeState(meta, mine, theirs, role, oppRole)}
           viewerRole={role}
           opponentRole={oppRole}
           viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
           opponentName={role === "p1" ? "Guest" : "Host"}
-          isMyTurn={false}
-          canAct={false}
-          onPlayCard={() => {}}
-          onPass={() => {}}
-          onUseLeader={() => {}}
+          isMyTurn={isPlay && meta.turn === role}
+          canAct={isPlay && meta.turn === role}
+          onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
+          onPass={() => applyAction({ type: "PASS", player: role })}
+          onForfeit={() => applyAction({ type: "FORFEIT", player: role })}
+          onUseLeader={(options) => applyAction({ type: "USE_LEADER", player: role, options })}
+          onResolveMedicRevive={(reviveId) => applyAction({ type: "RESOLVE_MEDIC_REVIVE", player: role, reviveId })}
+          onResolveScorchBurn={() => applyAction({ type: "RESOLVE_SCORCH_BURN" })}
         />
         {roundBannerEl}
         {gameEndBannerEl}
@@ -6982,3 +7000,4 @@ export default function App() {
     </div>
   );
 }
+
