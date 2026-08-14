@@ -5216,7 +5216,7 @@ function HotseatGame({ onExit }) {
     const isPlay = state.phase === "play";
     const me = state.turn;
     const opp = otherKey(me);
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
         <PlayBoard
@@ -5437,7 +5437,7 @@ function AIGame({ onExit }) {
     // silently broke the round-end discard sweep. Keeping the same fragment
     // shape (and PlayBoard always first in it) across all three phases
     // keeps it mounted for the whole game.
-    const isTie = state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
         <PlayBoard
@@ -7000,4 +7000,3 @@ export default function App() {
     </div>
   );
 }
-
