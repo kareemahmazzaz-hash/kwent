@@ -6893,26 +6893,28 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 @keyframes zoom-fade-in { 0% { opacity: 0; } 100% { opacity: 1; } }
 .card-zoom-content {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
-  height: 90vh; width: auto; max-width: 92vw;
+  max-height: 90vh; width: auto; max-width: 92vw;
   overflow-y: auto;
 }
 .card-zoom-art-wrap {
-  height: 72vh; width: auto; aspect-ratio: 0.537; border-radius: 10px; overflow: hidden;
+  height: auto; width: auto; aspect-ratio: 0.537; border-radius: 10px; overflow: hidden;
   box-shadow: 0 10px 40px rgba(0,0,0,0.7), 0 0 0 2px var(--gold-dim);
   background: linear-gradient(160deg, var(--parchment), #d8cba3);
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 72vh;
   max-width: 92vw;
 }
 .card-zoom-art { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-zoom-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--ink); font-family: var(--font-display); text-align: center; padding: 12px; }
-.card-zoom-caption { text-align: center; color: var(--parchment); }
+.card-zoom-caption { text-align: center; color: var(--parchment); flex-shrink: 0; }
 .card-zoom-title { font-family: var(--font-display); font-size: 1.15rem; color: var(--gold); display: flex; align-items: center; justify-content: center; gap: 8px; }
 .card-zoom-power { font-family: var(--font-mono); background: var(--gold); color: #241d0e; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; }
 .card-zoom-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin-top: 4px; letter-spacing: 0.03em; }
 .card-zoom-desc { font-size: 0.9rem; line-height: 1.4; color: var(--parchment); margin-top: 10px; max-width: 480px; }
 @media (max-width: 520px) {
-  .card-zoom-content { max-width: 96vw; height: 88vh; }
-  .card-zoom-art-wrap { height: 58vh; max-width: 96vw; }
+  .card-zoom-content { max-width: 96vw; max-height: 88vh; }
+  .card-zoom-art-wrap { height: auto; max-height: 58vh; max-width: 96vw; }
 }
 
 @keyframes card-appear { 0% { opacity: 0; transform: scale(0.75) translateY(8px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
