@@ -3774,56 +3774,59 @@ function PassDeviceGate({ name, onContinue }) {
    swaps for, which discard-pile card a Medic revives) before dispatching
    the actual PLAY_CARD action with those options attached. */
 const FORFEIT_HOLD_MS = 3000;
-// Grace window: a pointerup doesn't immediately zero the hold — it's banked
-// and only hard-reset after this many ms with no resuming pointerdown. This
-// absorbs mouse switch chatter (a phantom sub-frame release-then-press while
-// the button is still physically held down) which otherwise looked like the
-// bar randomly refusing to fill.
+// Grace window: releasing doesn't immediately zero the hold — the elapsed
+// time is banked and only hard-reset after this many ms with no resuming
+// pointerdown. This absorbs mouse switch chatter (rapid phantom
+// release/re-press while the button is still physically held down).
 const FORFEIT_GRACE_MS = 120;
 
 /* Press-and-hold forfeit button: has to be held for FORFEIT_HOLD_MS straight,
    with a visible fill so it's obvious the hold is registering (and can't be
-   triggered by a stray click). Releasing early cancels and resets. */
+   triggered by a stray click). Releasing early cancels and resets.
+
+   The rAF tick loop, once started on the first pointerdown, runs
+   continuously every frame until a real reset or completion — it is never
+   cancelled/rescheduled by individual pointerup/pointerdown events. Those
+   events just flip a ref the loop reads. A chattering switch that fires many
+   up/down pairs within a single physical press previously cancelled and
+   restarted the loop on every blip, which (if the chatter was faster than
+   one frame) meant tick() never got to actually run — the bar only ever
+   flashed once, at the very end, when the chatter stopped and one final
+   frame finally got through. Decoupling the loop from the raw events fixes
+   that: it just keeps ticking regardless of how noisy the up/down signal is. */
 function HoldToForfeitButton({ onForfeit, disabled }) {
   const [holding, setHolding] = useState(false);
   const [progress, setProgress] = useState(0); // 0-100
   const rafRef = useRef(null);
-  const startRef = useRef(null); // timestamp the current active segment resumed at
-  const pausedElapsedRef = useRef(0); // ms banked from previous segments
-  const graceTimeoutRef = useRef(null);
+  const isDownRef = useRef(false); // physically pressed right now
+  const segmentStartRef = useRef(null); // Date.now() when the current down segment began
+  const pausedElapsedRef = useRef(0); // ms banked from completed down segments
+  const graceDeadlineRef = useRef(null); // Date.now() timestamp after which an up becomes a real stop
   const doneRef = useRef(false);
 
   const hardStop = () => {
     setHolding(false);
     setProgress(0);
     doneRef.current = false;
-    startRef.current = null;
+    isDownRef.current = false;
+    segmentStartRef.current = null;
     pausedElapsedRef.current = 0;
+    graceDeadlineRef.current = null;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
-    graceTimeoutRef.current = null;
-  };
-
-  // Called on pointerup/pointercancel: pause (bank elapsed time, stop
-  // ticking) but don't visually reset yet — give a short window for a
-  // chattering switch's phantom re-press to resume the same hold.
-  const beginGraceStop = () => {
-    if (startRef.current != null) {
-      pausedElapsedRef.current += Date.now() - startRef.current;
-      startRef.current = null;
-    }
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
-    graceTimeoutRef.current = setTimeout(() => {
-      graceTimeoutRef.current = null;
-      hardStop();
-    }, FORFEIT_GRACE_MS);
   };
 
   const tick = () => {
-    const elapsed = pausedElapsedRef.current + (startRef.current != null ? Date.now() - startRef.current : 0);
+    let elapsed;
+    if (isDownRef.current) {
+      elapsed = pausedElapsedRef.current + (Date.now() - segmentStartRef.current);
+    } else {
+      elapsed = pausedElapsedRef.current; // frozen while up, waiting out the grace window
+      if (graceDeadlineRef.current != null && Date.now() >= graceDeadlineRef.current) {
+        hardStop();
+        return;
+      }
+    }
     const pct = Math.min(100, (elapsed / FORFEIT_HOLD_MS) * 100);
     setProgress(pct);
     if (pct >= 100) {
@@ -3841,19 +3844,24 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
     if (disabled) return;
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-    if (graceTimeoutRef.current) {
-      clearTimeout(graceTimeoutRef.current);
-      graceTimeoutRef.current = null;
-    }
+    isDownRef.current = true;
+    graceDeadlineRef.current = null;
+    segmentStartRef.current = Date.now();
     setHolding(true);
-    startRef.current = Date.now();
     if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
   };
 
-  useEffect(() => () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
-  }, []);
+  const release = () => {
+    if (!isDownRef.current) return; // duplicate/stray up, ignore
+    isDownRef.current = false;
+    pausedElapsedRef.current += Date.now() - segmentStartRef.current;
+    segmentStartRef.current = null;
+    graceDeadlineRef.current = Date.now() + FORFEIT_GRACE_MS;
+    // Loop keeps running — it'll hard-stop itself once the grace window
+    // passes with no resuming pointerdown.
+  };
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
   if (!onForfeit) return null;
 
@@ -3864,8 +3872,8 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
       disabled={disabled}
       style={{ "--forfeit-progress": progress + "%" }}
       onPointerDown={start}
-      onPointerUp={beginGraceStop}
-      onPointerCancel={beginGraceStop}
+      onPointerUp={release}
+      onPointerCancel={release}
       title="Hold for 3 seconds to forfeit the game"
     >
       <span className="forfeit-fill" />
