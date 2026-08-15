@@ -2635,7 +2635,6 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   // own art. When absent, zoom art is identical to tile art, same as before this existed.
   const [zoomArtStage, setZoomArtStage] = useState(0);
   const [zoomed, setZoomed] = useState(false);
-  const isHovered = useRef(false);
   const touchTimer = useRef(null);
   if (!card) return null;
   const fmeta = FACTION_META[card.faction] || FACTION_META.neutral;
@@ -2656,25 +2655,19 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
   if (arriving || sweeping) fitStyle.opacity = 0;
 
   const clearTouchTimer = () => { if (touchTimer.current) { clearTimeout(touchTimer.current); touchTimer.current = null; } };
-  // Desktop: hover over the card, then press "i" to zoom (no more waiting on a hover timer).
-  const handleMouseEnter = () => { isHovered.current = true; };
-  const handleMouseLeave = () => { isHovered.current = false; };
-  // Touch devices have no keyboard, so keep a long-press as the equivalent trigger.
+  // Desktop: press and hold the card for 2s to zoom.
+  const handleMouseDown = () => {
+    clearTouchTimer();
+    touchTimer.current = setTimeout(() => setZoomed(true), 2000);
+  };
+  const handleMouseUp = () => { clearTouchTimer(); };
+  const handleMouseLeave = () => { clearTouchTimer(); };
+  // Touch devices: keep the long-press as the equivalent trigger.
   const handleTouchStart = () => {
     clearTouchTimer();
     touchTimer.current = setTimeout(() => setZoomed(true), 500);
   };
   const handleTouchEnd = () => { clearTouchTimer(); };
-
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if ((e.key === "i" || e.key === "I") && isHovered.current && !zoomed) {
-        setZoomed(true);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [zoomed]);
 
   return (
     <>
@@ -2696,7 +2689,8 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         data-card-id={card.id}
         onClick={disabled ? undefined : onClick}
         aria-disabled={disabled || undefined}
-        onMouseEnter={handleMouseEnter}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
