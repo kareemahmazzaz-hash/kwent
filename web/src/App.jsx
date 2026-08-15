@@ -4257,6 +4257,19 @@ function PlayBoard({
   };
   const [sunlight, setSunlight] = useState(false);
   const sunlightTimer = useRef(null);
+  // Fires the board-wide sunbeam sweep unconditionally — used for both the
+  // Clear Weather card and the L12 leader ability, regardless of whether
+  // weather was actually present on the board to clear. Previously this was
+  // gated on an actual weathered->clear board-state transition, which meant
+  // playing Clear Weather into an already-clear board (fully legal, just a
+  // no-op play) showed nothing at all. Now it's tied to the card/ability
+  // actually being used, matching the sound (which already fires
+  // unconditionally via playCardSounds' abilityKey path for the card case).
+  const triggerSunlight = () => {
+    setSunlight(true);
+    clearTimeout(sunlightTimer.current);
+    sunlightTimer.current = setTimeout(() => setSunlight(false), SOUND_DURATIONS_MS.clearWeather);
+  };
   const [leaderGlow, setLeaderGlow] = useState({ me: false, opp: false });
   const leaderGlowTimers = useRef({});
   const setLeaderGlowFor = (side, ms) => {
@@ -4530,6 +4543,7 @@ function PlayBoard({
           playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds);
           arrivalTransformSound(id, me.board, prev.meMardroeme);
           triggerAbilityFx("me", id, cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds);
+          if (cardById(id)?.ability === "clearWeather") triggerSunlight();
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
       });
@@ -4539,6 +4553,7 @@ function PlayBoard({
           playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds);
           arrivalTransformSound(id, opp.board, prev.oppMardroeme);
           triggerAbilityFx("opp", id, cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds);
+          if (cardById(id)?.ability === "clearWeather") triggerSunlight();
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
       });
@@ -4588,24 +4603,24 @@ function PlayBoard({
           if (key && newMineIds.includes(after) === false && newOppOnlyIds.includes(after) === false) playSound(key);
         }
       });
-      const wasClear = prev.meWeather && (prev.meWeather.close || prev.meWeather.ranged || prev.meWeather.siege);
-      const isClear = !(snapshot.meWeather.close || snapshot.meWeather.ranged || snapshot.meWeather.siege);
-      if (wasClear && isClear) {
-        playSound("clearWeather");
-        setSunlight(true);
-        clearTimeout(sunlightTimer.current);
-        sunlightTimer.current = setTimeout(() => setSunlight(false), SOUND_DURATIONS_MS.clearWeather);
-      }
-      // Leader activation — leaderUsed flipping false -> true.
+      // Leader activation — leaderUsed flipping false -> true. L12 (Clear
+      // Weather) additionally fires the sunbeam sweep, unconditionally, same
+      // as the card case above — replaces the old board-diff-gated check
+      // that used to live here (wasClear/isClear off prev/snapshot.meWeather),
+      // which both missed the no-weather-present case AND double-fired the
+      // clearWeather sound on top of the one playCardSounds already plays
+      // for the card path.
       if (!prev.meLeaderUsed && snapshot.meLeaderUsed) {
         const key = snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader";
         playSound(key);
         setLeaderGlowFor("me", SOUND_DURATIONS_MS[key]);
+        if (snapshot.meLeaderId === "L12") triggerSunlight();
       }
       if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) {
         const key = snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader";
         playSound(key);
         setLeaderGlowFor("opp", SOUND_DURATIONS_MS[key]);
+        if (snapshot.oppLeaderId === "L12") triggerSunlight();
       }
       } catch (e) {
         console.error("[kwent sound] sound-diff effect threw — snapshot still committed below", e);
