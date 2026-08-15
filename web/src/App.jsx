@@ -1085,11 +1085,15 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       const rowBoardH = state.players[actingKey].board;
       if (rowBoardH.mardroeme[row] || (!card.row && rowBoardH.horns[row] > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
-        const priorHorns = p.board.horns[row] || 0;
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
-        const newHorns = priorHorns > 0 ? priorHorns : priorHorns + 1; // cap at 1 — no compounding when Dandelion joins an already-horned row
-        return { ...p, board: { ...board, horns: { ...board.horns, [row]: newHorns }, hornCards } };
+        // Increment normally, uncapped — unitEffectivePower's selfHornContribution already
+        // subtracts Dandelion's own +1 from HIS power calc so he doesn't double himself, while
+        // still counting a prior external Horn (Commander's Horn) toward his own doubling. Capping
+        // this count (as a previous version of this fix did) broke that: it kept horns[row] frozen
+        // at 1 even after Dandelion joined an already-horned row, so his self-subtraction zeroed out
+        // the external Horn's effect on him too, leaving his power un-doubled.
+        return { ...p, board: { ...board, horns: { ...board.horns, [row]: (board.horns[row] || 0) + 1 }, hornCards } };
       });
       log.push(`${actor.name} plays ${card.name}, doubling their ${ROW_META[row].label} row.`);
       break;
