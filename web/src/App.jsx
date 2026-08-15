@@ -3870,7 +3870,7 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
       type="button"
       className={"btn btn-forfeit" + (holding ? " holding" : "")}
       disabled={disabled}
-      style={{ "--forfeit-progress": progress + "%" }}
+      style={{ "--forfeit-progress": progress / 100 }}
       onPointerDown={start}
       onPointerUp={release}
       onPointerCancel={release}
@@ -6231,10 +6231,13 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .btn-forfeit .forfeit-fill {
   position: absolute;
   inset: 0;
-  width: var(--forfeit-progress, 0%);
+  width: 100%;
+  transform: scaleX(var(--forfeit-progress, 0));
+  transform-origin: left center;
   background: linear-gradient(90deg, #7a2323, #c23c3c);
-  transition: width 0.05s linear;
+  transition: transform 0.05s linear;
   z-index: 0;
+  will-change: transform;
 }
 .btn-forfeit .forfeit-label { position: relative; z-index: 1; }
 .btn-forfeit.holding {
