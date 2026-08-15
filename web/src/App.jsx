@@ -3774,6 +3774,12 @@ function PassDeviceGate({ name, onContinue }) {
    swaps for, which discard-pile card a Medic revives) before dispatching
    the actual PLAY_CARD action with those options attached. */
 const FORFEIT_HOLD_MS = 3000;
+// Grace window: a pointerup doesn't immediately zero the hold — it's banked
+// and only hard-reset after this many ms with no resuming pointerdown. This
+// absorbs mouse switch chatter (a phantom sub-frame release-then-press while
+// the button is still physically held down) which otherwise looked like the
+// bar randomly refusing to fill.
+const FORFEIT_GRACE_MS = 120;
 
 /* Press-and-hold forfeit button: has to be held for FORFEIT_HOLD_MS straight,
    with a visible fill so it's obvious the hold is registering (and can't be
@@ -3782,19 +3788,42 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
   const [holding, setHolding] = useState(false);
   const [progress, setProgress] = useState(0); // 0-100
   const rafRef = useRef(null);
-  const startRef = useRef(null);
+  const startRef = useRef(null); // timestamp the current active segment resumed at
+  const pausedElapsedRef = useRef(0); // ms banked from previous segments
+  const graceTimeoutRef = useRef(null);
   const doneRef = useRef(false);
 
-  const stop = () => {
+  const hardStop = () => {
     setHolding(false);
     setProgress(0);
     doneRef.current = false;
+    startRef.current = null;
+    pausedElapsedRef.current = 0;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
+    graceTimeoutRef.current = null;
+  };
+
+  // Called on pointerup/pointercancel: pause (bank elapsed time, stop
+  // ticking) but don't visually reset yet — give a short window for a
+  // chattering switch's phantom re-press to resume the same hold.
+  const beginGraceStop = () => {
+    if (startRef.current != null) {
+      pausedElapsedRef.current += Date.now() - startRef.current;
+      startRef.current = null;
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
+    graceTimeoutRef.current = setTimeout(() => {
+      graceTimeoutRef.current = null;
+      hardStop();
+    }, FORFEIT_GRACE_MS);
   };
 
   const tick = () => {
-    const elapsed = Date.now() - startRef.current;
+    const elapsed = pausedElapsedRef.current + (startRef.current != null ? Date.now() - startRef.current : 0);
     const pct = Math.min(100, (elapsed / FORFEIT_HOLD_MS) * 100);
     setProgress(pct);
     if (pct >= 100) {
@@ -3802,7 +3831,7 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
         doneRef.current = true;
         onForfeit && onForfeit();
       }
-      stop();
+      hardStop();
       return;
     }
     rafRef.current = requestAnimationFrame(tick);
@@ -3812,12 +3841,19 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
     if (disabled) return;
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    if (graceTimeoutRef.current) {
+      clearTimeout(graceTimeoutRef.current);
+      graceTimeoutRef.current = null;
+    }
     setHolding(true);
     startRef.current = Date.now();
-    rafRef.current = requestAnimationFrame(tick);
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
   };
 
-  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
+  }, []);
 
   if (!onForfeit) return null;
 
@@ -3828,8 +3864,8 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
       disabled={disabled}
       style={{ "--forfeit-progress": progress + "%" }}
       onPointerDown={start}
-      onPointerUp={stop}
-      onPointerCancel={stop}
+      onPointerUp={beginGraceStop}
+      onPointerCancel={beginGraceStop}
       title="Hold for 3 seconds to forfeit the game"
     >
       <span className="forfeit-fill" />
