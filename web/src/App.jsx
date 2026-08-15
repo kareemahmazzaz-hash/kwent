@@ -1077,7 +1077,10 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
       // mutually exclusive per row, same as real Gwent. The UI already blocks this pick, but guard
       // here too in case of stale state.
-      if (state.players[actingKey].board.mardroeme[row]) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // A row already carrying a Horn (from an earlier play) can't take a second one either —
+      // only the Horn/Mardroeme cross-exclusion was guarded before; same-ability stacking
+      // wasn't, which let two Horns land on one row and quadruple it via Math.pow(2, hornStacks).
+      if (state.players[actingKey].board.mardroeme[row] || state.players[actingKey].board.horns[row] > 0) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
@@ -1088,8 +1091,9 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     }
     case "mardroeme": {
       const row = card.row || options.chosenRow; // Ermion has a fixed row; Mardroeme (special) needs a choice
-      // Same mutual exclusion as above, the other direction.
-      if (state.players[actingKey].board.horns[row] > 0) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // Same mutual exclusion as above, the other direction — plus a row that's already
+      // Mardroeme'd can't take a second Mardroeme either (same stacking gap as Horn above).
+      if (state.players[actingKey].board.horns[row] > 0 || state.players[actingKey].board.mardroeme[row]) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         let board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const transformedRow = board[row].map((id) => {
@@ -1824,19 +1828,35 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     else chosenRow = rowTotal(board, "close") <= rowTotal(board, "ranged") ? "close" : "ranged";
     return { chosenRow };
   }
-  if (card.ability === "horn" && !card.row) {
+  if (card.ability === "horn") {
+    // Horn and Mardroeme are mutually exclusive per row, AND a row already carrying a Horn
+    // can't take a second one — same rule the reducer's "horn" case enforces. Previously this
+    // only ran for choice-row Horns (Commander's Horn); a fixed-row Horn (Dandelion) fell
+    // through to the default `return {}`, treating it as always legal even into an
+    // already-horned row. Both shapes now go through the same legal-rows filter, and a card
+    // with nowhere legal to land returns null so the AI's candidate filter drops it upstream
+    // instead of the reducer silently bouncing it back to hand after the fact.
+    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && !board.mardroeme[r]);
+    if (card.row) return legalRows.includes(card.row) ? {} : null;
+    if (!legalRows.length) return null;
     // Heroes don't benefit from Horn at all — picking the row with the
     // highest RAW total (including Hero power) picked a row that was
     // entirely a Hero more than once in self-play (Philippa Eilhart,
     // Tibor Eggebracht), doubling nothing for zero net gain. Rank by the
     // non-Hero power actually being doubled instead.
-    let best = "close", bestVal = -1;
-    ROWS.forEach((r) => { const v = rowNonHeroPower(board, r); if (v > bestVal) { bestVal = v; best = r; } });
+    let best = legalRows[0], bestVal = -1;
+    legalRows.forEach((r) => { const v = rowNonHeroPower(board, r); if (v > bestVal) { bestVal = v; best = r; } });
     return { chosenRow: best };
   }
   if (card.ability === "mardroeme") {
-    let best = "close", bestCount = -1;
-    ROWS.forEach((r) => {
+    // Same legal-rows logic as Horn above, mirrored: a row already carrying a Horn or an
+    // existing Mardroeme can't take this one. Covers both Ermion's fixed row and the
+    // choice-row Mardroeme special.
+    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && !board.mardroeme[r]);
+    if (card.row) return legalRows.includes(card.row) ? {} : null;
+    if (!legalRows.length) return null;
+    let best = legalRows[0], bestCount = -1;
+    legalRows.forEach((r) => {
       const count = board[r].filter((id) => cardById(id)?.ability === "berserker").length;
       if (count > bestCount) { bestCount = count; best = r; }
     });
