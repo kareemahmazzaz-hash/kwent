@@ -5031,8 +5031,8 @@ function PlayBoard({
             <div className="coin-call-row">
               {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => {
                 const blocked =
-                  (pending.kind === "horn" && (me.board.mardroeme[r] || (me.board.hornCards[r] || []).length > 0)) ||
-                  (pending.kind === "mardroeme" && (me.board.horns[r] > 0 || (me.board.mardroemeCards[r] || []).length > 0));
+                  (pending.kind === "horn" && ((me.board.mardroemeCards[r] || []).length > 0 || (me.board.hornCards[r] || []).length > 0)) ||
+                  (pending.kind === "mardroeme" && ((me.board.hornCards[r] || []).length > 0 || (me.board.mardroemeCards[r] || []).length > 0));
                 return (
                   <button
                     key={r}
