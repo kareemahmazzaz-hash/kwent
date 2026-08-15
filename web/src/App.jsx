@@ -3811,6 +3811,7 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
   const start = (e) => {
     if (disabled) return;
     e.preventDefault();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
     setHolding(true);
     startRef.current = Date.now();
     rafRef.current = requestAnimationFrame(tick);
@@ -3828,7 +3829,6 @@ function HoldToForfeitButton({ onForfeit, disabled }) {
       style={{ "--forfeit-progress": progress + "%" }}
       onPointerDown={start}
       onPointerUp={stop}
-      onPointerLeave={stop}
       onPointerCancel={stop}
       title="Hold for 3 seconds to forfeit the game"
     >
