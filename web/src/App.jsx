@@ -1078,23 +1078,22 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     case "horn": {
       const row = card.row || options.chosenRow; // Dandelion has a fixed row; Commander's Horn needs a choice
       // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
-      // mutually exclusive per row, same as real Gwent; that cross-ability block always applies.
+      // mutually exclusive per row, same as real Gwent. But that cross-ability block only applies
+      // to CHOICE-row specials (Commander's Horn) — a fixed-row unit (Dandelion/Draig Bon-Dhu) has
+      // nowhere else to go, so it's exempt from both the cross-ability block AND the same-ability
+      // stacking block; it just must not compound the horn count (capped below), or it'd quadruple
+      // the row via Math.pow(2, hornStacks) — the original two-horns-one-row bug.
       // Same-ability stacking (a second Horn on an already-horned row) is only blocked for the
       // choice-row special (Commander's Horn) — it's a 0-power card with no value beyond the
-      // effect, so replaying it into an already-horned row is pure waste. Dandelion (fixed row,
-      // card.row set) is a real unit and still belongs on the board even if Close is already
-      // horned; it just must not compound the horn count (capped below), or it'd quadruple the
-      // row via Math.pow(2, hornStacks) — the original two-horns-one-row bug.
-      // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
-      // mutually exclusive per row, same as real Gwent; that cross-ability block always applies.
-      // Same-ability stacking is only blocked for a SECOND choice-row special (a second
-      // Commander's Horn provides zero additional value once one is already active — the row's
-      // doubling is capped, not compounding). A fixed-row unit's own contribution to horns[row]
-      // doesn't count toward this — hornCards[row] tracks specials specifically, so Draig
-      // Bon-Dhu/Dandelion sitting on the row never blocks a following Commander's Horn; it still
-      // has genuine value there (doubling the unit's own power for the first time).
+      // effect, so replaying it into an already-horned row is pure waste. A fixed-row unit's own
+      // contribution to horns[row] doesn't count toward this — hornCards[row] tracks specials
+      // specifically, so Draig Bon-Dhu/Dandelion sitting on the row never blocks a following
+      // Commander's Horn; it still has genuine value there (doubling the unit's own power for the
+      // first time).
       const rowBoardH = state.players[actingKey].board;
-      if (rowBoardH.mardroeme[row] || (!card.row && (rowBoardH.hornCards[row] || []).length > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // Fixed-row units (Dandelion/Draig Bon-Dhu) are exempt from BOTH exclusions — they have
+      // nowhere else to go, so Mardroeme already sitting on their row can't lock them out.
+      if (!card.row && (rowBoardH.mardroeme[row] || (rowBoardH.hornCards[row] || []).length > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
@@ -1116,7 +1115,8 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
       // specifically, so Ermion sitting on the row (which flips the boolean mardroeme[row] flag
       // too) never blocks a following Mardroeme special.
       const rowBoardM = state.players[actingKey].board;
-      if (rowBoardM.horns[row] > 0 || (!card.row && (rowBoardM.mardroemeCards[row] || []).length > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // Fixed-row units (Ermion) are exempt from BOTH exclusions — same reasoning as Horn above.
+      if (!card.row && (rowBoardM.horns[row] > 0 || (rowBoardM.mardroemeCards[row] || []).length > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         let board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const transformedRow = board[row].map((id) => {
@@ -1858,7 +1858,7 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     // tracks specials specifically, so a fixed-row unit's own contribution (Dandelion/Draig
     // Bon-Dhu) never counts against a following special; it still has genuine value there
     // (doubling the unit's own power for the first time).
-    const legalRows = ROWS.filter((r) => !board.mardroeme[r] && (card.row || !((board.hornCards[r] || []).length > 0)));
+    const legalRows = ROWS.filter((r) => (card.row || !board.mardroeme[r]) && (card.row || !((board.hornCards[r] || []).length > 0)));
     if (card.row) return legalRows.includes(card.row) ? {} : null;
     if (!legalRows.length) return null;
     // Heroes don't benefit from Horn at all — picking the row with the
@@ -1874,7 +1874,7 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     // Same split as Horn above: cross-ability exclusion always applies; same-ability stacking
     // only rules out a row for a second choice-row Mardroeme special, checked via
     // mardroemeCards[r] so Ermion's own contribution doesn't count against it.
-    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && (card.row || !((board.mardroemeCards[r] || []).length > 0)));
+    const legalRows = ROWS.filter((r) => (card.row || !(board.horns[r] > 0)) && (card.row || !((board.mardroemeCards[r] || []).length > 0)));
     if (card.row) return legalRows.includes(card.row) ? {} : null;
     if (!legalRows.length) return null;
     let best = legalRows[0], bestCount = -1;
@@ -4653,12 +4653,11 @@ function PlayBoard({
     }
     if (card.ability === "horn" && !card.row) return setPending({ kind: "horn", cardId: id });
     if (card.ability === "mardroeme" && !card.row) return setPending({ kind: "mardroeme", cardId: id });
-    // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't
-    // carry both (cross-ability exclusion). Unlike the choice-row specials, these are real units
-    // with board presence, so an already-horned/mardroeme'd row of the SAME ability doesn't
-    // block them — they still enter play (reducer caps the horn count so it can't compound).
-    if (card.ability === "horn" && card.row && me.board.mardroeme[card.row]) return;
-    if (card.ability === "mardroeme" && card.row && me.board.horns[card.row] > 0) return;
+    // Dandelion/Draig Bon-Dhu/Ermion have a fixed row and act as Horn/Mardroeme respectively.
+    // Unlike the choice-row specials, these are real units with board presence, so neither an
+    // already-horned/mardroeme'd row of the SAME ability, NOR the opposite ability already
+    // active on their row (cross-ability exclusion), blocks them — they have nowhere else to
+    // go, so they always enter play (reducer caps the horn count so it can't compound).
     // Medic no longer needs a pre-play picker here — the card just gets
     // played normally, and the revive (if any) opens as its own step driven
     // by state.awaitingMedicRevive (see the medicChainPending render block
