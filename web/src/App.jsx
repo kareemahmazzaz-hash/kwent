@@ -587,7 +587,7 @@ const CARDS = [
 {id:"c202",name:"Clan Brokvar Archer (1)",faction:"skellige",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Brokvar Archer1.png"},
 {id:"c203",name:"Clan Brokvar Archer (2)",faction:"skellige",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Brokvar Archer2.png"},
 {id:"c204",name:"Clan Brokvar Archer (3)",faction:"skellige",power:6.0,row:"ranged",cardType:"Basic",ability:null,abilityMeta:{},img:"Clan Brokvar Archer3.png"},
-{id:"c205",name:"Clan Dimun Pirate",faction:"skellige",power:6.0,row:"close",cardType:"Basic",ability:"scorchGlobal",abilityMeta:{},img:"Clan Dimun Pirate.png"},
+{id:"c205",name:"Clan Dimun Pirate",faction:"skellige",power:6.0,row:"ranged",cardType:"Basic",ability:"scorchRow",abilityMeta:{},img:"Clan Dimun Pirate.png"},
 {id:"c206",name:"Clan Drummond Shield Maiden (1)",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan Drummond Shield Maiden1.png"},
 {id:"c207",name:"Clan Drummond Shield Maiden (2)",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan Drummond Shield Maiden2.png"},
 {id:"c208",name:"Clan Drummond Shield Maiden (3)",faction:"skellige",power:4.0,row:"close",cardType:"Basic",ability:"tightBond",abilityMeta:{},img:"Clan Drummond Shield Maiden3.png"},
@@ -6890,7 +6890,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 
-.row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: -1%; }
+.row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: 0%; }
 .row-card-slot:first-of-type { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
