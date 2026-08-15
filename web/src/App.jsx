@@ -2766,7 +2766,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
             </div>
           </div>
         </div>,
-        document.body
+        document.querySelector(".gwent-root") || document.body
       )}
     </>
   );
