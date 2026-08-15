@@ -1075,25 +1075,34 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
     case "horn": {
       const row = card.row || options.chosenRow; // Dandelion has a fixed row; Commander's Horn needs a choice
       // A row can only carry one row-boosting special effect at a time — Horn and Mardroeme are
-      // mutually exclusive per row, same as real Gwent. The UI already blocks this pick, but guard
-      // here too in case of stale state.
-      // A row already carrying a Horn (from an earlier play) can't take a second one either —
-      // only the Horn/Mardroeme cross-exclusion was guarded before; same-ability stacking
-      // wasn't, which let two Horns land on one row and quadruple it via Math.pow(2, hornStacks).
-      if (state.players[actingKey].board.mardroeme[row] || state.players[actingKey].board.horns[row] > 0) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // mutually exclusive per row, same as real Gwent; that cross-ability block always applies.
+      // Same-ability stacking (a second Horn on an already-horned row) is only blocked for the
+      // choice-row special (Commander's Horn) — it's a 0-power card with no value beyond the
+      // effect, so replaying it into an already-horned row is pure waste. Dandelion (fixed row,
+      // card.row set) is a real unit and still belongs on the board even if Close is already
+      // horned; it just must not compound the horn count (capped below), or it'd quadruple the
+      // row via Math.pow(2, hornStacks) — the original two-horns-one-row bug.
+      const rowBoardH = state.players[actingKey].board;
+      if (rowBoardH.mardroeme[row] || (!card.row && rowBoardH.horns[row] > 0)) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
+        const priorHorns = p.board.horns[row] || 0;
         const board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const hornCards = card.row ? board.hornCards : { ...board.hornCards, [row]: [...board.hornCards[row], cardId] };
-        return { ...p, board: { ...board, horns: { ...board.horns, [row]: (board.horns[row] || 0) + 1 }, hornCards } };
+        const newHorns = priorHorns > 0 ? priorHorns : priorHorns + 1; // cap at 1 — no compounding when Dandelion joins an already-horned row
+        return { ...p, board: { ...board, horns: { ...board.horns, [row]: newHorns }, hornCards } };
       });
       log.push(`${actor.name} plays ${card.name}, doubling their ${ROW_META[row].label} row.`);
       break;
     }
     case "mardroeme": {
       const row = card.row || options.chosenRow; // Ermion has a fixed row; Mardroeme (special) needs a choice
-      // Same mutual exclusion as above, the other direction — plus a row that's already
-      // Mardroeme'd can't take a second Mardroeme either (same stacking gap as Horn above).
-      if (state.players[actingKey].board.horns[row] > 0 || state.players[actingKey].board.mardroeme[row]) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
+      // Same mutual exclusion as above, the other direction. Same-ability stacking (a second
+      // Mardroeme on an already-Mardroeme'd row) is only blocked for the choice-row special —
+      // Ermion (fixed row) is a real unit and stays playable even into an already-Mardroeme'd
+      // row. No compounding risk here either way since mardroeme[row] is a boolean flag, not a
+      // counter like horns.
+      const rowBoardM = state.players[actingKey].board;
+      if (rowBoardM.horns[row] > 0 || (!card.row && rowBoardM.mardroeme[row])) { ns = withPlayer(ns, actingKey, (p) => ({ ...p, hand: [...p.hand, cardId] })); break; }
       ns = withPlayer(ns, actingKey, (p) => {
         let board = card.row ? addToRow(p.board, row, cardId) : { ...p.board, specials: [...p.board.specials, { cardId, label: card.name }] };
         const transformedRow = board[row].map((id) => {
@@ -1829,14 +1838,11 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     return { chosenRow };
   }
   if (card.ability === "horn") {
-    // Horn and Mardroeme are mutually exclusive per row, AND a row already carrying a Horn
-    // can't take a second one — same rule the reducer's "horn" case enforces. Previously this
-    // only ran for choice-row Horns (Commander's Horn); a fixed-row Horn (Dandelion) fell
-    // through to the default `return {}`, treating it as always legal even into an
-    // already-horned row. Both shapes now go through the same legal-rows filter, and a card
-    // with nowhere legal to land returns null so the AI's candidate filter drops it upstream
-    // instead of the reducer silently bouncing it back to hand after the fact.
-    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && !board.mardroeme[r]);
+    // Cross-ability exclusion (Horn vs. Mardroeme) always applies. Same-ability stacking only
+    // rules out a row for the choice-row special (Commander's Horn) — Dandelion (fixed row) is
+    // a real unit and stays a legal play into an already-horned row; the reducer caps the horn
+    // count instead of compounding it, so no quadrupling risk from letting the AI pick it.
+    const legalRows = ROWS.filter((r) => !board.mardroeme[r] && (card.row || !(board.horns[r] > 0)));
     if (card.row) return legalRows.includes(card.row) ? {} : null;
     if (!legalRows.length) return null;
     // Heroes don't benefit from Horn at all — picking the row with the
@@ -1849,10 +1855,9 @@ function autoOptionsForCard(card, board, discard = [], deck = []) {
     return { chosenRow: best };
   }
   if (card.ability === "mardroeme") {
-    // Same legal-rows logic as Horn above, mirrored: a row already carrying a Horn or an
-    // existing Mardroeme can't take this one. Covers both Ermion's fixed row and the
-    // choice-row Mardroeme special.
-    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && !board.mardroeme[r]);
+    // Same split as Horn above: cross-ability exclusion always applies; same-ability stacking
+    // only rules out a row for the choice-row Mardroeme special, not Ermion (fixed row).
+    const legalRows = ROWS.filter((r) => !(board.horns[r] > 0) && (card.row || !board.mardroeme[r]));
     if (card.row) return legalRows.includes(card.row) ? {} : null;
     if (!legalRows.length) return null;
     let best = legalRows[0], bestCount = -1;
@@ -4631,7 +4636,10 @@ function PlayBoard({
     }
     if (card.ability === "horn" && !card.row) return setPending({ kind: "horn", cardId: id });
     if (card.ability === "mardroeme" && !card.row) return setPending({ kind: "mardroeme", cardId: id });
-    // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't carry both.
+    // Dandelion/Ermion have a fixed row and act as Horn/Mardroeme respectively — a row can't
+    // carry both (cross-ability exclusion). Unlike the choice-row specials, these are real units
+    // with board presence, so an already-horned/mardroeme'd row of the SAME ability doesn't
+    // block them — they still enter play (reducer caps the horn count so it can't compound).
     if (card.ability === "horn" && card.row && me.board.mardroeme[card.row]) return;
     if (card.ability === "mardroeme" && card.row && me.board.horns[card.row] > 0) return;
     // Medic no longer needs a pre-play picker here — the card just gets
@@ -5004,15 +5012,15 @@ function PlayBoard({
             <div className="coin-call-row">
               {(pending.kind === "agile" ? ["close", "ranged"] : ROWS).map((r) => {
                 const blocked =
-                  (pending.kind === "horn" && me.board.mardroeme[r]) ||
-                  (pending.kind === "mardroeme" && me.board.horns[r] > 0);
+                  (pending.kind === "horn" && (me.board.mardroeme[r] || me.board.horns[r] > 0)) ||
+                  (pending.kind === "mardroeme" && (me.board.horns[r] > 0 || me.board.mardroeme[r]));
                 return (
                   <button
                     key={r}
                     type="button"
                     className="btn btn-gold"
                     disabled={blocked}
-                    title={blocked ? "A row can only carry one of Horn / Mardroeme at a time" : undefined}
+                    title={blocked ? "This row already has a Horn or Mardroeme active — a row can only carry one" : undefined}
                     onClick={() => !blocked && confirmRow(r)}
                   >
                     {ROW_META[r].label}
