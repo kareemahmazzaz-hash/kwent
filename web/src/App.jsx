@@ -6816,6 +6816,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   box-shadow: inset 0 0 16px rgba(0, 229, 255, 0.35);
   background: rgba(140, 210, 255, 0.10);
 }
+.cell-my-close-row .weather-frost-container {
+  transform: translateY(10%);
+}
 @keyframes continuousSnowflakeSway {
   0% { transform: translateY(-20%) translateX(0) rotate(0deg); opacity: 0; }
   20% { opacity: 0.95; }
