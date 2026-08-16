@@ -2673,7 +2673,7 @@ function SwirlingFogOverlay() {
 // card art with no animated overlay (see WeatherCenterCell).
 const WEATHER_OVERLAY_BY_ROW = { close: FrostOverlay, ranged: SwirlingFogOverlay, siege: RainOverlay };
 
-function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass, thumbOverride, style }) {
+function CardTile({ card, size = "md", onClick, disabled, selected, faded, justPlayed, justRevived, arriving, sweeping, fxClass, thumbOverride, style, side }) {
   const [artStage, setArtStage] = useState(0); // 0 = primary CDN, 1 = raw GitHub fallback, 2 = give up — art shown on the face-up tile itself
   // thumbOverride lets a caller (e.g. the horn/mardroeme row-marker slot) show a generic
   // stand-in image on the tile face while the zoom-in modal still shows the real card's
@@ -2732,6 +2732,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         }
         style={fitStyle}
         data-card-id={card.id}
+        data-card-side={side}
         onClick={disabled ? undefined : onClick}
         aria-disabled={disabled || undefined}
         onMouseDown={handleMouseDown}
@@ -3008,7 +3009,7 @@ function RowHornCell({ board, rowKey, side, hiddenIds }) {
 }
 
 // The row's actual cards (renamed from the old BoardRow's inline JSX).
-function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, hornGlow, hiddenIds }) {
+function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revivedId, arrivingId, cardFx, side, hornGlow, hiddenIds }) {
   const meta = ROW_META[rowKey];
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
@@ -3023,21 +3024,25 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
     >
       {WeatherOverlay && <WeatherOverlay />}
       {cardIds.length === 0 && <span className="row-empty">no units</span>}
-      {cardIds.length > 0 && cardIds.map((id) => (
+      {cardIds.length > 0 && cardIds.map((id) => {
+        const fxKey = side + ":" + id;
+        return (
         <div key={id} className="row-card-slot">
           <CardTile
             card={cardById(id)}
             size="fit"
+            side={side}
             onClick={onClickCard ? () => onClickCard(id, rowKey) : undefined}
-            disabled={cardFx?.[id] === "card-burning" ? true : (selectableIds ? !selectableIds.includes(id) : !onClickCard)}
+            disabled={cardFx?.[fxKey] === "card-burning" ? true : (selectableIds ? !selectableIds.includes(id) : !onClickCard)}
             justPlayed={id === flashId}
             justRevived={id === revivedId}
             arriving={id === arrivingId}
             sweeping={!!hiddenIds?.has(id)}
-            fxClass={cardFx ? cardFx[id] : null}
+            fxClass={cardFx ? cardFx[fxKey] : null}
           />
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -3188,10 +3193,13 @@ const SMOKE_LOBE_CONFIG = {
    Duration is passed through as a CSS custom property rather than
    hardcoded per-type keyframe timings, so it always stays exactly in
    lockstep with the sound regardless of which of the three types it is. */
-function AbilitySmokeGhost({ cardId, type, ms, frameRef, onDone }) {
+function AbilitySmokeGhost({ cardId, side, type, ms, frameRef, onDone }) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
-    const el = document.querySelector(`[data-card-id="${cardId}"]`);
+    // Scoped by side as well as id — the same card id can exist on both
+    // boards (or twice on one, via Bond) at once, and an id-only selector
+    // would grab whichever matching tile happens to come first in the DOM.
+    const el = document.querySelector(`[data-card-id="${cardId}"][data-card-side="${side}"]`);
     const frame = frameRef.current;
     if (!el || !frame) { onDone && onDone(); return; }
     const elRect = el.getBoundingClientRect();
@@ -4225,24 +4233,29 @@ function PlayBoard({
 
   /* ------------------------------- v39 FX ---------------------------------
      Ability animations, synced to the same sounds already firing above.
-     `cardFx` is a flat id -> class-name map (ids are globally unique across
-     both boards, so one map covers both sides) for every per-card effect:
+     `cardFx` is a "side:id" -> class-name map for every per-card effect:
      burn, hero shine, bond glow, morale +1, mardroeme's red cloud, spy fog,
-     decoy shimmer, muster pop. `rowFx` covers the two effects that apply to
-     a whole row instead of one card: horn's glow (own side only) and each
-     weather type's entrance sweep (both sides, since weather always mirrors
-     onto both boards identically). `sunlight` is board-wide, for Clear
-     Weather. `leaderGlow` is per-side, for leader activation. Every one of
-     these auto-clears itself via its own timer, keyed to the exact clip
-     duration it's syncing to (see SOUND_DURATIONS_MS). */
+     decoy shimmer, muster pop. It's keyed by side as well as id (not id
+     alone) because card database ids are NOT globally unique across boards
+     — the same card can legally sit on both sides at once (mirrored/neutral
+     cards) or appear twice on one side (Bond copies), and a flat id-only key
+     made every tile sharing that id flash together whenever any one of them
+     landed. `rowFx` covers the two effects that apply to a whole row instead
+     of one card: horn's glow (own side only) and each weather type's
+     entrance sweep (both sides, since weather always mirrors onto both
+     boards identically). `sunlight` is board-wide, for Clear Weather.
+     `leaderGlow` is per-side, for leader activation. Every one of these
+     auto-clears itself via its own timer, keyed to the exact clip duration
+     it's syncing to (see SOUND_DURATIONS_MS). */
   const [cardFx, setCardFx] = useState({});
   const cardFxTimers = useRef({});
-  const setCardFxFor = (id, cls, ms) => {
+  const setCardFxFor = (side, id, cls, ms) => {
     if (!id) return;
-    setCardFx((f) => ({ ...f, [id]: cls }));
-    clearTimeout(cardFxTimers.current[id]);
-    cardFxTimers.current[id] = setTimeout(() => {
-      setCardFx((f) => { if (f[id] !== cls) return f; const nf = { ...f }; delete nf[id]; return nf; });
+    const key = side + ":" + id;
+    setCardFx((f) => ({ ...f, [key]: cls }));
+    clearTimeout(cardFxTimers.current[key]);
+    cardFxTimers.current[key] = setTimeout(() => {
+      setCardFx((f) => { if (f[key] !== cls) return f; const nf = { ...f }; delete nf[key]; return nf; });
     }, ms);
   };
   const [rowFx, setRowFx] = useState({ me: { close: null, ranged: null, siege: null }, opp: { close: null, ranged: null, siege: null } });
@@ -4316,13 +4329,15 @@ function PlayBoard({
   };
   const [smokeFx, setSmokeFx] = useState({});
   const smokeFxKeyRef = useRef(0);
-  const setSmokeFxFor = (id, type, ms) => {
+  const setSmokeFxFor = (side, id, type, ms) => {
     if (!id) return;
     smokeFxKeyRef.current += 1;
-    setSmokeFx((f) => ({ ...f, [id]: { type, ms, key: smokeFxKeyRef.current } }));
+    const key = side + ":" + id;
+    setSmokeFx((f) => ({ ...f, [key]: { cardId: id, side, type, ms, key: smokeFxKeyRef.current } }));
   };
-  const clearSmokeFxFor = (id) => {
-    setSmokeFx((f) => { if (!f[id]) return f; const nf = { ...f }; delete nf[id]; return nf; });
+  const clearSmokeFxFor = (side, id) => {
+    const key = side + ":" + id;
+    setSmokeFx((f) => { if (!f[key]) return f; const nf = { ...f }; delete nf[key]; return nf; });
   };
 
   // One card landing can trigger several of the above at once (e.g. a Hero
@@ -4332,18 +4347,18 @@ function PlayBoard({
   // game state, so it's safe to call unconditionally for every new id.
   function triggerAbilityFx(side, id, card, board, row, batchIds) {
     if (!card) return;
-    if (card.cardType === "Hero") setCardFxFor(id, "card-hero-shine", SOUND_DURATIONS_MS.playingHero);
+    if (card.cardType === "Hero") setCardFxFor(side, id, "card-hero-shine", SOUND_DURATIONS_MS.playingHero);
     if (card.abilityMeta?.undraftable) {
-      setCardFxFor(id, "card-transform-cloud", SOUND_DURATIONS_MS.mardroeme);
-      setSmokeFxFor(id, "transform", SOUND_DURATIONS_MS.mardroeme);
+      setCardFxFor(side, id, "card-transform-cloud", SOUND_DURATIONS_MS.mardroeme);
+      setSmokeFxFor(side, id, "transform", SOUND_DURATIONS_MS.mardroeme);
     }
     if (card.ability === "decoy") {
-      setCardFxFor(id, "card-decoy-swap", SOUND_DURATIONS_MS.decoy);
-      setSmokeFxFor(id, "decoy", SOUND_DURATIONS_MS.decoy);
+      setCardFxFor(side, id, "card-decoy-swap", SOUND_DURATIONS_MS.decoy);
+      setSmokeFxFor(side, id, "decoy", SOUND_DURATIONS_MS.decoy);
     }
     if (card.ability === "spy") {
-      setCardFxFor(id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
-      setSmokeFxFor(id, "spy", SOUND_DURATIONS_MS.spy);
+      setCardFxFor(side, id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
+      setSmokeFxFor(side, id, "spy", SOUND_DURATIONS_MS.spy);
     }
     if (card.ability === "muster" && abilityActuallyActivates(card, board, row, batchIds)) {
       // Only the card the player actually played gets the icon pop —
@@ -4353,7 +4368,7 @@ function PlayBoard({
       // card-muster-glow case below and its shared CSS with
       // card-muster-pop), just without the icon on top.
       const isThePlayedCard = state.lastMusterPlayed?.cardId === id;
-      setCardFxFor(id, isThePlayedCard ? "card-muster-pop" : "card-muster-glow", SOUND_DURATIONS_MS.muster);
+      setCardFxFor(side, id, isThePlayedCard ? "card-muster-pop" : "card-muster-glow", SOUND_DURATIONS_MS.muster);
     }
     if (card.ability === "horn" && board) {
       // Commander's Horn (Special, chosen row) never lands in a row array
@@ -4368,12 +4383,12 @@ function PlayBoard({
     if (card.ability === "tightBond" && abilityActuallyActivates(card, board, row, batchIds)) {
       const base = bondBaseName(card.name);
       board[row].filter((bid) => { const c = cardById(bid); return c && c.ability === "tightBond" && bondBaseName(c.name) === base; })
-        .forEach((bid) => setCardFxFor(bid, "card-bond-glow", SOUND_DURATIONS_MS.bond));
+        .forEach((bid) => setCardFxFor(side, bid, "card-bond-glow", SOUND_DURATIONS_MS.bond));
     }
     if (card.ability === "moraleBoost" && abilityActuallyActivates(card, board, row, batchIds)) {
-      setCardFxFor(id, "card-morale-boost", SOUND_DURATIONS_MS.morale);
+      setCardFxFor(side, id, "card-morale-boost", SOUND_DURATIONS_MS.morale);
       board[row].filter((mid) => mid !== id && cardById(mid)?.cardType !== "Hero")
-        .forEach((mid) => setCardFxFor(mid, "card-morale-plus-one", SOUND_DURATIONS_MS.morale));
+        .forEach((mid) => setCardFxFor(side, mid, "card-morale-plus-one", SOUND_DURATIONS_MS.morale));
     }
   }
 
@@ -4394,10 +4409,19 @@ function PlayBoard({
   useEffect(() => {
     const pb = state.pendingBurn;
     if (pb && pb !== pendingBurnRef.current) {
-      const ids = Object.values(pb.victims || {}).flat();
+      const victimEntries = Object.entries(pb.victims || {});
+      const ids = victimEntries.flatMap(([, v]) => v);
       if (ids.length) {
         playSound("scorch");
-        ids.forEach((id) => setCardFxFor(id, "card-burning", SOUND_DURATIONS_MS.scorch + 400));
+        // victims is keyed by player key (actingPlayer/opponent), not
+        // viewer-relative side — map each to "me"/"opp" the same way the
+        // Medic revive ghost above does, so the burn fx lands on the
+        // correct board's tile when a scorched id happens to also exist
+        // on the other board (mirrored/neutral card, or a Bond copy).
+        victimEntries.forEach(([playerKey, vids]) => {
+          const side = viewerRole === playerKey ? "me" : "opp";
+          vids.forEach((id) => setCardFxFor(side, id, "card-burning", SOUND_DURATIONS_MS.scorch + 400));
+        });
         clearTimeout(burnTimerRef.current);
         burnTimerRef.current = setTimeout(() => {
           onResolveScorchBurnRaw && onResolveScorchBurnRaw();
@@ -4790,14 +4814,15 @@ function PlayBoard({
         )}
         {Object.keys(smokeFx).length > 0 && (
           <div className="smoke-fx-layer">
-            {Object.entries(smokeFx).map(([id, cfg]) => (
+            {Object.entries(smokeFx).map(([key, cfg]) => (
               <AbilitySmokeGhost
-                key={id + "-" + cfg.key}
-                cardId={id}
+                key={key + "-" + cfg.key}
+                cardId={cfg.cardId}
+                side={cfg.side}
                 type={cfg.type}
                 ms={cfg.ms}
                 frameRef={boardFrameRef}
-                onDone={() => clearSmokeFxFor(id)}
+                onDone={() => clearSmokeFxFor(cfg.side, cfg.cardId)}
               />
             ))}
           </div>
@@ -4849,7 +4874,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-siege-label"><RowLabelCell board={opp.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td colSpan={2} rowSpan={2} className="cell-opp-siege-horn"><RowHornCell board={opp.board} rowKey="siege" side="opp" hiddenIds={sweepHiddenIds} /></td>
-              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} className="cell-opp-siege-row"><RowCardsCell side="opp" board={opp.board} rowKey="siege" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.siege} hiddenIds={sweepHiddenIds} /></td>
               <td></td>
             </tr>
 
@@ -4866,7 +4891,7 @@ function PlayBoard({
               <td></td>
               <td rowSpan={2} className="cell-opp-ranged-label"><RowLabelCell board={opp.board} rowKey="ranged" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-opp-ranged-horn"><RowHornCell board={opp.board} rowKey="ranged" side="opp" hiddenIds={sweepHiddenIds} /></td>
-              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} hiddenIds={sweepHiddenIds} /></td>
+              <td rowSpan={2} className="cell-opp-ranged-row"><RowCardsCell side="opp" board={opp.board} rowKey="ranged" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.ranged} hiddenIds={sweepHiddenIds} /></td>
             </tr>
 
             {/* Row 6: name, score, deck */}
@@ -4888,7 +4913,7 @@ function PlayBoard({
               </td>
               <td rowSpan={2} className="cell-opp-close-row">
                 <RowBgFill src={boardImg("opp close")} anchor="top" />
-                <RowCardsCell board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} hiddenIds={sweepHiddenIds} />
+                <RowCardsCell side="opp" board={opp.board} rowKey="close" flashId={flash.opp} revivedId={revived.opp} arrivingId={ghost.opp?.cardId} cardFx={cardFx} hornGlow={!!rowFx.opp.close} hiddenIds={sweepHiddenIds} />
               </td>
             </tr>
 
@@ -4910,6 +4935,7 @@ function PlayBoard({
                 <RowBgFill src={boardImg("my close")} anchor="bottom" />
                 <RowCardsCell
                   board={me.board}
+                  side="me"
                   rowKey="close"
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
@@ -4941,6 +4967,7 @@ function PlayBoard({
               <td rowSpan={2} className="cell-my-ranged-row">
                 <RowCardsCell
                   board={me.board}
+                  side="me"
                   rowKey="ranged"
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
@@ -4972,6 +4999,7 @@ function PlayBoard({
               <td rowSpan={2} className="cell-my-siege-row">
                 <RowCardsCell
                   board={me.board}
+                  side="me"
                   rowKey="siege"
                   onClickCard={pending?.kind === "decoy" ? (id) => decoyTargets.includes(id) && confirmDecoy(id) : undefined}
                   selectableIds={pending?.kind === "decoy" ? decoyTargets : undefined}
