@@ -6815,7 +6815,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   border: 1.5px solid rgba(0, 229, 255, 0.5);
   box-shadow: inset 0 0 16px rgba(0, 229, 255, 0.35);
   background: rgba(140, 210, 255, 0.10);
-  height: 90%;
 }
 @keyframes continuousSnowflakeSway {
   0% { transform: translateY(-20%) translateX(0) rotate(0deg); opacity: 0; }
@@ -7028,7 +7027,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 @keyframes card-appear { 0% { opacity: 0; transform: scale(0.75) translateY(8px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
-.row-cards .card-tile { animation: card-appear 0.32s ease-out; }
+.row-cards .card-tile { animation: card-appear 0.32s ease-out; height:145%;}
 
 @keyframes card-flash {
   0%, 100% { box-shadow: 0 0 0 2px var(--gold), 0 2px 4px rgba(0,0,0,0.4); }
