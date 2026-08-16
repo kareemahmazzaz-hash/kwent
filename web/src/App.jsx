@@ -4297,6 +4297,23 @@ function PlayBoard({
      opaque too (art AND text hidden, swapped for a flat color — grey/red)
      via a simple in-place class on the tile, since that never exceeds the
      card's own box and doesn't need to escape anything. */
+  // Guards triggerAbilityFx against firing twice for the same physical card
+  // if the board diff ever sees its id go "new" twice within a short window
+  // — e.g. a transient/incomplete synced board snapshot (a row briefly
+  // missing before the real update lands) makes an already-placed card look
+  // like it just disappeared and reappeared. A permanent per-id block would
+  // be wrong here: Decoy can legitimately return a card to hand and it gets
+  // replayed later, and that SHOULD get its landing fx again. A short window
+  // only catches the same-instant glitch, not a genuine replay turns later.
+  const recentAbilityFxRef = useRef({});
+  const ABILITY_FX_DEDUP_MS = 2000;
+  const triggerAbilityFxDeduped = (...args) => {
+    const id = args[1];
+    const now = Date.now();
+    if (id && now - (recentAbilityFxRef.current[id] || 0) < ABILITY_FX_DEDUP_MS) return;
+    if (id) recentAbilityFxRef.current[id] = now;
+    triggerAbilityFx(...args);
+  };
   const [smokeFx, setSmokeFx] = useState({});
   const smokeFxKeyRef = useRef(0);
   const setSmokeFxFor = (id, type, ms) => {
@@ -4328,7 +4345,7 @@ function PlayBoard({
       setCardFxFor(id, "card-spy-fog", SOUND_DURATIONS_MS.spy);
       setSmokeFxFor(id, "spy", SOUND_DURATIONS_MS.spy);
     }
-    if (card.ability === "muster") {
+    if (card.ability === "muster" && abilityActuallyActivates(card, board, row, batchIds)) {
       // Only the card the player actually played gets the icon pop —
       // Muster siblings fetched alongside it also have ability === "muster"
       // and would otherwise trip this same branch and each get their own
@@ -4542,7 +4559,7 @@ function PlayBoard({
           if (id === revivedMineFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds, removedMineIds, removedOppIds);
           arrivalTransformSound(id, me.board, prev.meMardroeme);
-          triggerAbilityFx("me", id, cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds);
+          triggerAbilityFxDeduped("me", id, cardById(id), me.board, rowOfCardInBoard(me.board, id), newMineIds);
           if (cardById(id)?.ability === "clearWeather") triggerSunlight();
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for me id", id, e); }
@@ -4552,7 +4569,7 @@ function PlayBoard({
           if (id === revivedOppFresh) return; // already got its own revival cue above
           playCardSounds(cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds, removedOppIds, removedMineIds);
           arrivalTransformSound(id, opp.board, prev.oppMardroeme);
-          triggerAbilityFx("opp", id, cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds);
+          triggerAbilityFxDeduped("opp", id, cardById(id), opp.board, rowOfCardInBoard(opp.board, id), newOppOnlyIds);
           if (cardById(id)?.ability === "clearWeather") triggerSunlight();
         }
         catch (e) { console.error("[kwent sound] playCardSounds failed for opp id", id, e); }
