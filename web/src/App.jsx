@@ -1612,7 +1612,8 @@ function finishRound(state) {
   };
 
   // Northern Realms faction ability: the round winner draws a random card from their deck.
-  if (winnerKey && ns.players[winnerKey].faction === "northern_realms" && ns.players[winnerKey].deck.length > 0) {
+  // Skipped when this round win ends the game — no next round to use the card in.
+  if (!gameOver && winnerKey && ns.players[winnerKey].faction === "northern_realms" && ns.players[winnerKey].deck.length > 0) {
     ns = withPlayer(ns, winnerKey, (p) => {
       const [drawn, ...rest] = shuffle(p.deck);
       return { ...p, hand: [...p.hand, drawn], deck: rest };
