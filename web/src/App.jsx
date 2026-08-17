@@ -255,6 +255,10 @@ const ABILITY_SOUND_KEY = {
   // and "medic" is being reworked into its own two-step flow (v38) — both
   // are resolved with dedicated logic at the call site instead of this table.
 };
+// L03/L14/L20 apply Horn to a fixed row instantly, no card involved — used
+// by the leader-activation branch below to give them the same "horn" sound
+// + row glow a card-played Horn gets via ABILITY_SOUND_KEY/triggerAbilityFx.
+const LEADER_HORN_ROW = { L03: "close", L14: "siege", L20: "ranged" };
 function weatherSoundKeyForRow(row) {
   if (row === "close") return "frost";
   if (row === "ranged") return "fog";
@@ -1376,6 +1380,11 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
           ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== reviveId), board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
           log.push(`Revives ${reviveCard.name} from the discard pile.`);
         }
+        // Same one-shot marker the card-Medic path sets (see
+        // resolveMedicRevive/lastMedicRevive) — drives the revival sound and
+        // fly-in ghost off the same shared PlayBoard effect, instead of only
+        // getting the generic leader-activation sound.
+        ns = { ...ns, lastMedicRevive: { player: actingKey, cardId: reviveId, isSpy: reviveCard.ability === "spy" } };
       }
       break;
     }
@@ -1429,7 +1438,10 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       const total = rowTotal(state.players[oppKey].board, "ranged", matchHasLeader(state, "L01"));
       if (total >= 10) {
         const hits = strongestInRow(state.players[oppKey].board, "ranged", matchHasLeader(state, "L01"));
-        ns = destroyCards(ns, oppKey, hits, log);
+        // Deferred, same as card Scorch (see scorchRow/scorchRowThreshold) —
+        // victims stay on the board flagged for the burn sound/animation and
+        // only actually get destroyed once RESOLVE_SCORCH_BURN fires.
+        if (hits.length) ns = { ...ns, pendingBurn: { actingPlayer: actingKey, victims: { [oppKey]: hits, [actingKey]: [] } } };
       }
       break;
     }
@@ -1441,7 +1453,8 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       const total = rowTotal(state.players[oppKey].board, "siege", matchHasLeader(state, "L01"));
       if (total >= 10) {
         const hits = strongestInRow(state.players[oppKey].board, "siege", matchHasLeader(state, "L01"));
-        ns = destroyCards(ns, oppKey, hits, log);
+        // Deferred, same as card Scorch — see L13 above.
+        if (hits.length) ns = { ...ns, pendingBurn: { actingPlayer: actingKey, victims: { [oppKey]: hits, [actingKey]: [] } } };
       }
       break;
     }
@@ -1473,7 +1486,8 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       const total = rowTotal(state.players[oppKey].board, "close", matchHasLeader(state, "L01"));
       if (total >= 10) {
         const hits = strongestInRow(state.players[oppKey].board, "close", matchHasLeader(state, "L01"));
-        ns = destroyCards(ns, oppKey, hits, log);
+        // Deferred, same as card Scorch — see L13 above.
+        if (hits.length) ns = { ...ns, pendingBurn: { actingPlayer: actingKey, victims: { [oppKey]: hits, [actingKey]: [] } } };
       }
       break;
     }
@@ -1757,10 +1771,12 @@ function gameReducer(state, action) {
         return withPlayer(state, action.player, (p) => ({ ...p, leaderReveal: null }));
       }
       let ns = resolveLeaderAbility(state, action.player, action.options || {});
-      // Using a leader ability consumes a turn, same as playing a card or a weather effect.
-      const nextKey = otherKey(action.player);
-      ns = { ...ns, turn: ns.players[nextKey].passed ? action.player : nextKey };
-      return ns;
+      // Using a leader ability consumes a turn, same as playing a card or a
+      // weather effect — but a scorch leader (L13/L15/L19) can leave
+      // pendingBurn set, same as card Scorch, so route through the shared
+      // helper to hold the turn until the burn actually resolves instead of
+      // handing control to the opponent mid-animation.
+      return finishTurnAfterMove(ns, action.player);
     }
     case "PASS": {
       let ns = withPlayer(state, action.player, (p) => ({ ...p, passed: true }));
@@ -4665,12 +4681,16 @@ function PlayBoard({
         playSound(key);
         setLeaderGlowFor("me", SOUND_DURATIONS_MS[key]);
         if (snapshot.meLeaderId === "L12") triggerSunlight();
+        const hornRow = LEADER_HORN_ROW[snapshot.meLeaderId];
+        if (hornRow) { playSound("horn"); setRowFxFor("me", hornRow, "row-horn-glow", SOUND_DURATIONS_MS.horn); }
       }
       if (!prev.oppLeaderUsed && snapshot.oppLeaderUsed) {
         const key = snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader";
         playSound(key);
         setLeaderGlowFor("opp", SOUND_DURATIONS_MS[key]);
         if (snapshot.oppLeaderId === "L12") triggerSunlight();
+        const hornRow = LEADER_HORN_ROW[snapshot.oppLeaderId];
+        if (hornRow) { playSound("horn"); setRowFxFor("opp", hornRow, "row-horn-glow", SOUND_DURATIONS_MS.horn); }
       }
       } catch (e) {
         console.error("[kwent sound] sound-diff effect threw — snapshot still committed below", e);
