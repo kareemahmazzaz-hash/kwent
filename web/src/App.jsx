@@ -2742,14 +2742,16 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
         onTouchEnd={handleTouchEnd}
       >
         {src ? (
-          <img
-            className="card-art"
-            src={src}
-            alt={card.name}
-            decoding="async"
-            loading="eager"
-            onError={() => setArtStage((s) => s + 1)}
-          />
+          <div className="card-art-clip">
+            <img
+              className="card-art"
+              src={src}
+              alt={card.name}
+              decoding="async"
+              loading="eager"
+              onError={() => setArtStage((s) => s + 1)}
+            />
+          </div>
         ) : null}
         {artStage === 2 && (
           <div className="card-tile-inner">
@@ -6551,9 +6553,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    Ability visuals, synced from PlayBoard to the exact sound clip each one
    is layered under (see SOUND_DURATIONS_MS / triggerAbilityFx). These all
    need to paint outside the card's own box (glows, floating text) so
-   overflow is opened back up just for the duration each class is applied —
-   .card-tile's overflow:hidden is otherwise load-bearing for clipping the
-   art to its rounded corners. */
+   overflow is opened back up just for the duration each class is applied.
+   Art clipping no longer depends on this staying "hidden" — .card-art-clip
+   (see above) clips the art independently and permanently, so oversized art
+   (e.g. the leader portrait) can never spill out during these animations
+   in any slot, no per-context exceptions needed. */
 .card-tile.card-burning, .card-tile.card-hero-shine, .card-tile.card-transform-cloud,
 .card-tile.card-spy-fog, .card-tile.card-bond-glow, .card-tile.card-morale-boost,
 .card-tile.card-morale-plus-one, .card-tile.card-muster-pop, .card-tile.card-muster-glow, .card-tile.card-decoy-swap,
@@ -7027,8 +7031,13 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ---- v2 additions ---- */
 .card-tile { position: relative; }
+/* Always-clipped independent of .card-tile's own overflow — see the v39
+   ANIMATIONS comment below. This is what keeps oversized art (e.g. the
+   137.5%-height leader portrait) from spilling past the tile whenever an
+   fx class opens .card-tile's overflow back up for a glow/effect. */
+.card-art-clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
 .card-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; z-index: 0; }
-.card-tile.no-art .card-art { display: none; }
+.card-tile.no-art .card-art-clip { display: none; }
 .card-tile-inner { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
 .card-tile.is-hero { border-left-color: var(--gold) !important; box-shadow: 0 0 0 1px var(--gold), 0 2px 4px rgba(0,0,0,0.4); }
 
