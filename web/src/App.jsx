@@ -24,8 +24,8 @@ import { setLanServerUrl, getLastHello } from "./lan.js";
    - Automatic per-faction abilities: Northern Realms draws on a round
      win; Monsters keep one random unit on the board into the next round;
      Nilfgaard wins tied rounds outright (unless both sides are Nilfgaard);
-     Skellige raises 2 random non-hero units from discard at the start of
-     Round 3; Scoia'tael skips the coin toss and simply choose who opens
+     Skellige raises up to 2 random non-hero units from discard onto the
+     board at the start of Round 3; Scoia'tael skips the coin toss and simply choose who opens
      (unless both sides are Scoia'tael, in which case the coin toss runs
      as normal).
    - Coin flip: the winner of the toss automatically opens Round 1 (no
@@ -780,6 +780,7 @@ function makePlayer({ name, faction, leaderId, deckIds, isAI }) {
   return {
     name, faction, leaderId, isAI: !!isAI,
     deck: deckIds, hand: [], board: emptyBoard(), discard: [],
+    discardRow: {}, // id -> row, remembered ONLY for Agile cards so Skellige's round-3 raise can put them back where they were
     mulliganSwaps: 0, mulliganDone: false, passed: false,
     leaderUsed: false, leaderBlocked: false, leaderReveal: null,
     forceRandomRevive: false, // set true for Emhyr: Invader of the North
@@ -980,7 +981,8 @@ function destroyCards(state, victimKey, ids, log) {
     const card = cardById(id);
     let victim = ns.players[victimKey];
     const { row, board } = removeFromRow(victim.board, id);
-    victim = { ...victim, board, discard: [...victim.discard, id] };
+    const discardRow = (row && card.row === "agile") ? { ...victim.discardRow, [id]: row } : victim.discardRow;
+    victim = { ...victim, board, discard: [...victim.discard, id], discardRow };
     ns = withPlayer(ns, victimKey, () => victim);
     log.push(`${card.name} is destroyed.`);
     if (row && card.ability === "summonAvenger" && card.abilityMeta.summonsId) {
@@ -1554,20 +1556,36 @@ function processSummonAvengerOnExit(ids) {
   return { discard, summoned };
 }
 
+/* Records the board row of every currently-placed Agile card into
+   discardRow before the board is cleared, so that IF it later gets
+   discarded we still know where it was standing (an Agile card's row
+   isn't recoverable from the card definition itself). Skellige's round-3
+   discard raise uses this to put a raised Agile unit back where it was,
+   unprompted. */
+function rememberAgileRows(player) {
+  const mem = {};
+  ROWS.forEach((row) => {
+    player.board[row].forEach((id) => {
+      const card = cardById(id);
+      if (card && card.row === "agile") mem[id] = row;
+    });
+  });
+  return { ...player.discardRow, ...mem };
+}
+
 function clearBoardToDiscard(player) {
   const allIds = [...player.board.close, ...player.board.ranged, ...player.board.siege, ...player.board.specials.map((s) => s.cardId)];
   const { discard: discardedIds, summoned } = processSummonAvengerOnExit(allIds);
+  const discardRow = rememberAgileRows(player);
   let board = emptyBoard();
   summoned.forEach(({ row, id }) => { board = addToRow(board, row, id); });
-  return { ...player, board, discard: [...player.discard, ...discardedIds] };
+  return { ...player, board, discard: [...player.discard, ...discardedIds], discardRow };
 }
 
-/* Shared "keep exactly one random unit on the battlefield" mechanic:
-   - Monsters use this at the end of EVERY round.
-   - Skellige uses this specifically heading into Round 3 (their faction
-     ability leaves one random card undiscarded for the final round,
-     rather than the whole board surviving).
-   Weather/horns/Mardroeme still reset as normal for everyone. */
+/* Monsters' "keep exactly one random unit on the battlefield" mechanic,
+   used at the end of EVERY round. Weather/horns/Mardroeme still reset as
+   normal. (Skellige's round-3 ability is a separate mechanic — see
+   raiseSkelligeUnitsFromDiscard below — and no longer uses this.) */
 function clearBoardWithOneRandomRetained(player) {
   const candidates = ROWS.flatMap((r) => player.board[r].map((id) => ({ id, row: r })));
   if (candidates.length === 0) return clearBoardToDiscard(player);
@@ -1576,9 +1594,36 @@ function clearBoardWithOneRandomRetained(player) {
     ...player.board.close, ...player.board.ranged, ...player.board.siege, ...player.board.specials.map((s) => s.cardId),
   ].filter((id) => id !== keep.id);
   const { discard: discardedIds, summoned } = processSummonAvengerOnExit(toDiscardIds);
+  const discardRow = rememberAgileRows(player);
   let board = { ...emptyBoard(), [keep.row]: [keep.id] };
   summoned.forEach(({ row, id }) => { board = addToRow(board, row, id); });
-  return { ...player, board, discard: [...player.discard, ...discardedIds] };
+  return { ...player, board, discard: [...player.discard, ...discardedIds], discardRow };
+}
+
+/* Skellige faction ability: at the start of Round 3, raise up to 2 random
+   non-Hero units from the discard pile onto the board. If fewer than 2
+   are eligible, raises as many as are available (possibly 0). An Agile
+   card goes back into whichever row it was standing in when discarded (no
+   prompt); if that's unknown, it falls back to the normal auto-placement
+   logic used elsewhere for un-prompted Agile placement. */
+function raiseSkelligeUnitsFromDiscard(player) {
+  const eligible = player.discard.filter((id) => {
+    const c = cardById(id);
+    return c && c.cardType === "Basic" && c.row;
+  });
+  if (eligible.length === 0) return { player, raisedNames: [] };
+  const picks = shuffle(eligible).slice(0, 2);
+  let board = player.board;
+  let discard = player.discard;
+  const raisedNames = [];
+  picks.forEach((id) => {
+    const card = cardById(id);
+    const row = card.row === "agile" ? (player.discardRow[id] || autoPlacementRow(card, board)) : card.row;
+    board = addToRow(board, row, id);
+    discard = discard.filter((d) => d !== id);
+    raisedNames.push(card.name);
+  });
+  return { player: { ...player, board, discard }, raisedNames };
 }
 
 function finishRound(state) {
@@ -1639,12 +1684,6 @@ function startNextRound(state) {
 
   function clearFor(player) {
     if (player.faction === "monsters") return clearBoardWithOneRandomRetained(player);
-    if (player.faction === "skellige" && nextRound === 3) {
-      const hadUnits = ROWS.some((r) => player.board[r].length > 0);
-      const cleared = clearBoardWithOneRandomRetained(player);
-      if (hadUnits) logExtra.push(`${player.name}'s Skellige clansmen refuse to fall — one card stays on the battlefield for the final round!`);
-      return cleared;
-    }
     return clearBoardToDiscard(player);
   }
 
@@ -1658,6 +1697,20 @@ function startNextRound(state) {
       p2: { ...clearFor(state.players.p2), passed: false },
     },
   };
+
+  // Skellige faction ability: raise up to 2 random non-Hero units from the
+  // discard pile onto the board at the start of Round 3.
+  if (nextRound === 3) {
+    ["p1", "p2"].forEach((key) => {
+      const player = ns.players[key];
+      if (player.faction !== "skellige") return;
+      const { player: raisedPlayer, raisedNames } = raiseSkelligeUnitsFromDiscard(player);
+      ns = withPlayer(ns, key, () => raisedPlayer);
+      if (raisedNames.length) {
+        logExtra.push(`${player.name}'s Skellige clansmen rise from the dead: ${raisedNames.join(", ")}!`);
+      }
+    });
+  }
 
   if (logExtra.length) ns = { ...ns, log: [...ns.log, ...logExtra] };
 
@@ -6084,6 +6137,7 @@ function normalizePlayer(p) {
     hand: p.hand || [],
     deck: p.deck || [],
     discard: p.discard || [],
+    discardRow: p.discardRow || {},
     board: {
       ...emptyBoard(),
       ...b,
