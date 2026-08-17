@@ -2235,7 +2235,7 @@ function chooseAiDeck(aiFaction) {
 // side has committed to it is a coin flip that can just as easily deny the
 // AI's OWN plan as the opponent's — moved to leaderConditionMet so it fires
 // once there's an actual, favorable target instead of blindly turn 1.
-const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L06", "L10", "L11", "L14", "L16", "L18", "L20", "L22"]);
+const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L06", "L10", "L11", "L14", "L16", "L18", "L20"]);
 
 function leaderConditionMet(state, aiKey, leaderId) {
   const me = state.players[aiKey];
@@ -2248,6 +2248,13 @@ function leaderConditionMet(state, aiKey, leaderId) {
       return opp.discard.some((id) => cardById(id)?.cardType !== "Hero");
     case "L12": // Clear Weather — needs weather actually present on either side
       return ROWS.some((r) => me.board.weather[r] || opp.board.weather[r]);
+    case "L22": // King Bran — only matters if a unit on our OWN board is actually
+      // being weathered (flattened to 1); Heroes are weather-immune and a
+      // printed-0-power card has nothing to lose, so neither counts.
+      return ROWS.some((r) => me.board.weather[r] && me.board[r].some((id) => {
+        const c = cardById(id);
+        return c && c.cardType !== "Hero" && c.power > 0;
+      }));
     case "L07": { // Fetch + play Torrential Rain (Siege) — wait for the opponent
       // to actually have Siege power worth freezing, and don't do it if we're
       // the one ahead in that row (we'd just be freezing our own lead).
