@@ -4889,7 +4889,7 @@ function PlayBoard({
 
             {/* Row 4: leader badge (shifted to col2), opp discard (rowspan2) */}
             <tr>
-              <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed} noop={oppLeaderNoop} /></td>
+              <td className="cell-opp-leader-badge"><LeaderUnusedBadge show={!!oppLeader && !opp.leaderUsed && !opp.leaderBlocked} noop={oppLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-opp-discard"><DiscardTopBack discard={opp.discard} faction={opp.faction} /></td>
             </tr>
@@ -5001,7 +5001,7 @@ function PlayBoard({
 
             {/* Row 13: my leader badge (shifted to col2), siege label/horn/row, my discard (moved up one row) */}
             <tr>
-              <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed} noop={myLeaderNoop} /></td>
+              <td className="cell-my-leader-badge"><LeaderUnusedBadge show={!!myLeader && !me.leaderUsed && !me.leaderBlocked} noop={myLeaderNoop} /></td>
               <td></td>
               <td rowSpan={2} className="cell-my-siege-label"><RowLabelCell board={me.board} rowKey="siege" spyDoubled={spyDoubled} /></td>
               <td rowSpan={2} colSpan={2} className="cell-my-siege-horn"><RowHornCell board={me.board} rowKey="siege" side="my" hiddenIds={sweepHiddenIds} /></td>
