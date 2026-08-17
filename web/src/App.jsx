@@ -823,20 +823,25 @@ function unitEffectivePower(cardId, board, row, spyDoubled) {
   if (!card) return 0;
   if (card.cardType === "Hero") return card.power;
 
-  // Weather is a flat override: an affected row's units are reduced to
-  // exactly 1 power, full stop — Tight Bond, Morale Boost, and Horn no
-  // longer apply on top of that (that's the entire point of weather).
-  // A card whose printed power is already 0 stays at 0 — weather can't
-  // raise a unit's power, only cap it, so there's nothing to "reduce to 1".
+  // Weather sets a BASE value, not a final override — Bond, Spy, and Horn
+  // still apply on top of it in the usual order, and Morale is added last
+  // of all (see below). A card whose printed power is already 0 stays at
+  // 0 through every multiplicative step (0 x anything = 0); only Morale's
+  // flat +1 at the very end can bring a 0-power card up off the floor.
+  let value;
   if (board.weather[row]) {
-    if (card.power === 0) return 0;
-    // King Bran's passive: this board's units only lose half their Strength
-    // (rounded so the loss favors the unit) instead of being flattened to 1.
-    if (board.halveWeather) return Math.max(1, Math.ceil(card.power / 2));
-    return 1;
+    if (card.power === 0) {
+      value = 0;
+    } else if (board.halveWeather) {
+      // King Bran's passive: this board's units only lose half their Strength
+      // (rounded so the loss favors the unit) instead of being flattened to 1.
+      value = Math.max(1, Math.ceil(card.power / 2));
+    } else {
+      value = 1;
+    }
+  } else {
+    value = card.power;
   }
-
-  let value = card.power;
 
   if (card.ability === "tightBond") {
     const base = bondBaseName(card.name);
@@ -846,11 +851,6 @@ function unitEffectivePower(cardId, board, row, spyDoubled) {
     }).length;
     value = value * Math.max(count, 1);
   }
-
-  const moraleSources = board[row].filter(
-    (id) => id !== cardId && cardById(id)?.ability === "moraleBoost"
-  ).length;
-  value += moraleSources;
 
   if (card.ability === "spy" && spyDoubled) value = value * 2;
 
@@ -864,6 +864,14 @@ function unitEffectivePower(cardId, board, row, spyDoubled) {
   const selfHornContribution = card.ability === "horn" && card.row ? 1 : 0;
   const externalHornsForThisCard = Math.max((board.horns[row] || 0) - selfHornContribution, 0);
   if (externalHornsForThisCard > 0) value = value * 2;
+
+  // Morale is added last of all, on top of weather/Bond/Spy/Horn — including
+  // bumping a weather-zeroed 0-power card up to 1.
+  const moraleSources = board[row].filter(
+    (id) => id !== cardId && cardById(id)?.ability === "moraleBoost"
+  ).length;
+  value += moraleSources;
+
   return value;
 }
 
