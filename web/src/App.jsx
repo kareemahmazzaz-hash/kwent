@@ -792,6 +792,19 @@ function dealHand(player) {
   return { ...player, hand: shuffled.slice(0, HAND_SIZE), deck: shuffled.slice(HAND_SIZE) };
 }
 
+/* Test Mode's rigged version of dealHand: hand and the front of the deck
+   are exactly what was hand-picked (and in the picked order for the deck,
+   so draw effects that read straight off the top — spy scans, Northern
+   Realms' round-win draw, etc. — come out predictably). Anything from the
+   pool that wasn't picked for either just gets shuffled in behind the
+   picked draw order, so the player only has to specify what they actually
+   care about testing. */
+function dealHandFixed(player, fixedHand, fixedOrder) {
+  const picked = new Set([...fixedHand, ...fixedOrder]);
+  const rest = shuffle(player.deck.filter((id) => !picked.has(id)));
+  return { ...player, hand: fixedHand, deck: [...fixedOrder, ...rest] };
+}
+
 /* Effective power of a single card sitting on `board` in row `row`.
    Heroes are fully immune to every modifier, good or bad.
    `spyDoubled` reflects whether either player in the match is leading
@@ -1845,6 +1858,37 @@ function initGame(p1cfg, p2cfg) {
     log: scoiaChooser
       ? [`${(scoiaChooser === "p1" ? p1 : p2).name}'s Scoia'tael scouts choose who opens Round 1 — no coin toss needed.`]
       : ["A new game begins. Call the coin toss to decide who opens Round 1."],
+    players: { p1, p2 },
+  };
+}
+
+/* Test Mode's version of initGame: both hands/decks are rigged via
+   dealHandFixed instead of the random dealHand, and the pre-game starter
+   choice always goes to the human (p1) — no coin toss, no faction gate —
+   mirroring the Scoia'tael "choose who opens" flow regardless of faction. */
+function initTestGame(p1cfg, p2cfg, p1Hand, p1Order, p2Hand, p2Order) {
+  resetStartingBasicGuard();
+  let p1 = dealHandFixed(makePlayer(p1cfg), p1Hand, p1Order);
+  let p2 = dealHandFixed(makePlayer(p2cfg), p2Hand, p2Order);
+  if (p1cfg.leaderId === "L08" || p2cfg.leaderId === "L08") {
+    p1 = { ...p1, forceRandomRevive: true };
+    p2 = { ...p2, forceRandomRevive: true };
+  }
+  return {
+    phase: "scoiaChoice",
+    scoiaChooser: "p1",
+    round: 1,
+    turn: null,
+    roundWins: { p1: 0, p2: 0 },
+    lastRoundScore: null,
+    gameWinner: null,
+    coinFlip: { caller: null, call: null, result: null, callerWon: null, starter: null, resolved: false },
+    awaitingMedicRevive: null,
+    lastMedicRevive: null,
+    lastMusterPlayed: null,
+    pendingBurn: null,
+    lastScorchCast: null,
+    log: ["Test Mode: choose who opens Round 1."],
     players: { p1, p2 },
   };
 }
@@ -3730,6 +3774,64 @@ function MulliganPanel({ playerLabel, hand, swapsUsed, onSwap, onDone, waitingLa
   );
 }
 
+/* Test Mode: pick cards from a pool, in click order. Used both for rigging
+   a starting hand (exactly HAND_SIZE) and for rigging the draw order (any
+   count, 0..pool.length). Clicking a picked card in the strip un-picks it;
+   everything else in `pool` stays choosable. */
+function CardPickerPanel({ playerLabel, instruction, pool, picked, onPick, onUnpick, minCount, maxCount, onDone, onBack }) {
+  const [query, setQuery] = useState("");
+  const available = useMemo(
+    () => pool.filter((id) => !picked.includes(id) && (cardById(id)?.name || "").toLowerCase().includes(query.toLowerCase())),
+    [pool, picked, query]
+  );
+  const atMax = maxCount != null && picked.length >= maxCount;
+  const canDone = picked.length >= (minCount ?? 0) && (maxCount == null || picked.length <= maxCount);
+  return (
+    <div className="screen deckbuilder">
+      {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
+      <h2 className="screen-title">{playerLabel}</h2>
+      <p className="mulligan-hint">{instruction}</p>
+      <div className="deck-count">
+        Picked: <strong>{picked.length}</strong>{maxCount != null ? ` / ${maxCount}` : ""}
+      </div>
+      {picked.length > 0 && (
+        <div className="hand-grid">
+          {picked.map((id, i) => (
+            <div key={id} style={{ position: "relative" }}>
+              <span
+                style={{
+                  position: "absolute", top: 2, left: 2, zIndex: 2,
+                  background: "var(--accent, #c9a227)", color: "#000",
+                  borderRadius: "50%", width: 20, height: 20, fontSize: 12,
+                  display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700,
+                }}
+              >
+                {i + 1}
+              </span>
+              <CardTile card={cardById(id)} size="sm" selected onClick={() => onUnpick(id)} />
+            </div>
+          ))}
+        </div>
+      )}
+      <input
+        className="search-input"
+        placeholder="Search cards…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <div className="pool-grid">
+        {available.map((id) => (
+          <CardTile key={id} card={cardById(id)} size="sm" disabled={atMax} onClick={() => !atMax && onPick(id)} />
+        ))}
+      </div>
+      <div className="deckbuilder-footer">
+        <button type="button" className="btn btn-gold btn-lg" disabled={!canDone} onClick={onDone}>Confirm</button>
+        {!canDone && minCount > 0 && <span className="hint">Pick at least {minCount} card{minCount === 1 ? "" : "s"}.</span>}
+      </div>
+    </div>
+  );
+}
+
 /* Pre-game coin toss. One player calls heads/tails, then anyone flips the
    coin; whoever called it right chooses who opens Round 1. */
 function CoinFlipPanel({ coinFlip, myKey, oppName, myName, isMyCallTurn, onCall, onFlip, onAck, singleDeviceLabel }) {
@@ -5245,6 +5347,10 @@ function Home({ onSelect, onlineAvailable }) {
             {onlineAvailable ? "Host or join a room and play from two devices." : "Requires artifact storage — unavailable here."}
           </span>
         </button>
+        <button type="button" className="mode-card" onClick={() => onSelect("test")}>
+          <span className="mode-title">Test Mode</span>
+          <span className="mode-desc">Rig both hands and draw order, then play out a match vs. AI.</span>
+        </button>
       </div>
       <p className="home-note">v3: real power values, sections and abilities for all 236 units + 22 leaders, per-faction automatic abilities, and a pre-game coin toss (or Scoia'tael's own call).</p>
     </div>
@@ -5689,6 +5795,205 @@ function AIGame({ onExit }) {
     // silently broke the round-end discard sweep. Keeping the same fragment
     // shape (and PlayBoard always first in it) across all three phases
     // keeps it mounted for the whole game.
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    return (
+      <>
+        <PlayBoard
+          state={state}
+          viewerRole="p1"
+          opponentRole="p2"
+          viewerName="You"
+          opponentName="AI Opponent"
+          isMyTurn={state.phase === "play" && state.turn === "p1"}
+          canAct={state.phase === "play" && state.turn === "p1"}
+          onPlayCard={(cardId, options) => setState((s) => gameReducer(s, { type: "PLAY_CARD", player: "p1", cardId, options }))}
+          onPass={() => setState((s) => gameReducer(s, { type: "PASS", player: "p1" }))}
+          onForfeit={() => setState((s) => gameReducer(s, { type: "FORFEIT", player: "p1" }))}
+          onUseLeader={(options) => setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p1", options }))}
+          onResolveMedicRevive={(reviveId) => setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p1", reviveId }))}
+          onResolveScorchBurn={() => setState((s) => gameReducer(s, { type: "RESOLVE_SCORCH_BURN" }))}
+          opponentThinking={state.phase === "play" && state.turn === "p2" && !state.players.p2.passed}
+        />
+        {state.phase === "roundEnd" && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            roundWinnerName={isTie ? null : (state.lastRoundScore.p1 > state.lastRoundScore.p2 ? "You" : "AI Opponent")}
+            viewerName="You"
+            onContinue={() => setState((s) => gameReducer(s, { type: "CONTINUE_ROUND" }))}
+          />
+        )}
+        {state.phase === "gameEnd" && !revealGameOver && (
+          <RoundBanner
+            round={state.round}
+            score={state.lastRoundScore}
+            isTie={isTie}
+            isGameEnd
+            gameWinnerName={state.gameWinner === "draw" ? null : (state.gameWinner === "p1" ? "You" : "AI Opponent")}
+            viewerName="You"
+            hideButton
+          />
+        )}
+        {state.phase === "gameEnd" && revealGameOver && <GameOverPanel state={state} onExit={onExit} onPlayAgain={playAgain} gameLog={gameLogRef.current} viewerRole="p1" />}
+      </>
+    );
+  }
+
+  return null;
+}
+
+/* ============================= TEST MODE ================================
+   Rig both starting hands, both decks' draw order, and who opens — then
+   play out a normal Vs. AI match (AI drives its own side exactly as in
+   AIGame). Coin toss and mulligan are skipped entirely: a simple "who
+   starts" choice (like Scoia'tael's) always runs instead, and both hands
+   are marked mulligan-done the instant play would otherwise begin. */
+function TestGame({ onExit }) {
+  const [step, setStep] = useState("deck1"); // deck1, deck2, hand1, hand2, order1, order2, play
+  const [state, setState] = useState(null);
+  const p1builder = useDeckBuilderState();
+  const p2builder = useDeckBuilderState();
+  const [p1Hand, setP1Hand] = useState([]);
+  const [p2Hand, setP2Hand] = useState([]);
+  const [p1Order, setP1Order] = useState([]);
+  const [p2Order, setP2Order] = useState([]);
+  const aiTimerRef = useRef(null);
+  const gameLogRef = useRef({ startedAt: null, decisions: [] });
+  const [revealGameOver, setRevealGameOver] = useState(false);
+
+  useEffect(() => {
+    if (!state || state.phase !== "gameEnd") { setRevealGameOver(false); return; }
+    const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
+    const t = setTimeout(() => setRevealGameOver(true), isTie ? GAME_END_REVEAL_DELAY_TIE_MS : GAME_END_REVEAL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state?.phase, state?.round]);
+
+  function startGame(p2HandFinal, p2OrderFinal) {
+    const p1cfg = { name: "You", faction: p1builder.faction, leaderId: p1builder.leaderId, deckIds: p1builder.selected, isAI: false };
+    const p2cfg = { name: "AI Opponent", faction: p2builder.faction, leaderId: p2builder.leaderId, deckIds: p2builder.selected, isAI: true };
+    const initial = initTestGame(p1cfg, p2cfg, p1Hand, p1Order, p2HandFinal, p2OrderFinal);
+    gameLogRef.current = {
+      startedAt: new Date().toISOString(),
+      you: { faction: p1cfg.faction, leaderId: p1cfg.leaderId },
+      aiOpponent: { faction: p2cfg.faction, leaderId: p2cfg.leaderId },
+      decisions: [],
+    };
+    setState(initial);
+    setStep("play");
+  }
+
+  function playAgain() {
+    clearTimeout(aiTimerRef.current);
+    setState(null);
+    gameLogRef.current = { startedAt: null, decisions: [] };
+    setP1Hand([]); setP2Hand([]); setP1Order([]); setP2Order([]);
+    setStep("deck1");
+  }
+
+  // Skip mulligan entirely — both hands were already hand-picked, so mark
+  // them done the instant the reducer would otherwise show the mulligan
+  // screen. Coin toss is likewise never entered (initTestGame starts on
+  // "scoiaChoice" unconditionally).
+  useEffect(() => {
+    if (!state || state.phase !== "mulligan") return;
+    let s = state;
+    if (!s.players.p1.mulliganDone) s = gameReducer(s, { type: "MULLIGAN_DONE", player: "p1" });
+    if (!s.players.p2.mulliganDone) s = gameReducer(s, { type: "MULLIGAN_DONE", player: "p2" });
+    setState(s);
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
+    if (state.phase === "play" && state.awaitingMedicRevive?.player === "p2") {
+      const delay = Math.max(900, soundGateRemainingMs());
+      aiTimerRef.current = setTimeout(() => {
+        const pick = bestMedicRevive(state.players.p2.discard);
+        setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p2", reviveId: pick }));
+      }, delay);
+      return () => clearTimeout(aiTimerRef.current);
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
+    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive && !state.pendingBurn) {
+      const delay = Math.max(1300, soundGateRemainingMs());
+      aiTimerRef.current = setTimeout(() => {
+        const action = computeAIAction(state, "p2");
+        const me = state.players.p2;
+        const opp = state.players.p1;
+        gameLogRef.current.decisions.push({
+          round: state.round,
+          myBoardTotal: boardTotal(me.board, matchHasLeader(state, "L01")),
+          oppBoardTotal: boardTotal(opp.board, matchHasLeader(state, "L01")),
+          myHandSize: me.hand.length,
+          oppHandSize: opp.hand.length,
+          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
+        });
+        setState((s) => gameReducer(s, action));
+      }, delay);
+      return () => clearTimeout(aiTimerRef.current);
+    }
+  }, [state]);
+
+  if (step === "deck1") {
+    return <DeckBuilder playerLabel="You: build your deck" faction={p1builder.faction} onFactionChange={p1builder.setFaction}
+      lockFaction={false} selectedIds={p1builder.selected} onToggleCard={p1builder.toggle}
+      leaderId={p1builder.leaderId} onSelectLeader={p1builder.setLeaderId} onConfirm={() => setStep("deck2")} onRandomize={p1builder.randomize}
+      savedDecks={p1builder.savedDecks} onSaveDeck={p1builder.saveDeck} onLoadDeck={p1builder.loadDeck} onDeleteDeck={p1builder.deleteDeck}
+      onBack={onExit} />;
+  }
+  if (step === "deck2") {
+    return <DeckBuilder playerLabel="AI Opponent: build its deck" faction={p2builder.faction} onFactionChange={p2builder.setFaction}
+      lockFaction={false} selectedIds={p2builder.selected} onToggleCard={p2builder.toggle}
+      leaderId={p2builder.leaderId} onSelectLeader={p2builder.setLeaderId} onConfirm={() => setStep("hand1")} onRandomize={p2builder.randomize}
+      savedDecks={p2builder.savedDecks} onSaveDeck={p2builder.saveDeck} onLoadDeck={p2builder.loadDeck} onDeleteDeck={p2builder.deleteDeck}
+      onBack={() => setStep("deck1")} />;
+  }
+  if (step === "hand1") {
+    return <CardPickerPanel playerLabel="You: pick your starting hand" instruction={`Pick exactly ${HAND_SIZE} cards, in whatever order — this becomes your opening hand.`}
+      pool={p1builder.selected} picked={p1Hand}
+      onPick={(id) => setP1Hand((h) => [...h, id])} onUnpick={(id) => setP1Hand((h) => h.filter((x) => x !== id))}
+      minCount={HAND_SIZE} maxCount={HAND_SIZE} onDone={() => setStep("hand2")} onBack={() => setStep("deck2")} />;
+  }
+  if (step === "hand2") {
+    return <CardPickerPanel playerLabel="AI Opponent: pick its starting hand" instruction={`Pick exactly ${HAND_SIZE} cards, in whatever order — this becomes the AI's opening hand.`}
+      pool={p2builder.selected} picked={p2Hand}
+      onPick={(id) => setP2Hand((h) => [...h, id])} onUnpick={(id) => setP2Hand((h) => h.filter((x) => x !== id))}
+      minCount={HAND_SIZE} maxCount={HAND_SIZE} onDone={() => setStep("order1")} onBack={() => setStep("hand1")} />;
+  }
+  if (step === "order1") {
+    const remaining = p1builder.selected.filter((id) => !p1Hand.includes(id));
+    return <CardPickerPanel playerLabel="You: pick your draw order" instruction="Click cards in the order you want them drawn from your deck (round draws, card effects that pull from the deck, etc). Anything left unpicked gets shuffled in behind these."
+      pool={remaining} picked={p1Order}
+      onPick={(id) => setP1Order((o) => [...o, id])} onUnpick={(id) => setP1Order((o) => o.filter((x) => x !== id))}
+      minCount={0} maxCount={remaining.length} onDone={() => setStep("order2")} onBack={() => setStep("hand2")} />;
+  }
+  if (step === "order2") {
+    const remaining = p2builder.selected.filter((id) => !p2Hand.includes(id));
+    return <CardPickerPanel playerLabel="AI Opponent: pick its draw order" instruction="Click cards in the order you want them drawn from the AI's deck. Anything left unpicked gets shuffled in behind these."
+      pool={remaining} picked={p2Order}
+      onPick={(id) => setP2Order((o) => [...o, id])} onUnpick={(id) => setP2Order((o) => o.filter((x) => x !== id))}
+      minCount={0} maxCount={remaining.length} onDone={() => startGame(p2Hand, p2Order)} onBack={() => setStep("order1")} />;
+  }
+
+  if (!state) return null;
+
+  if (state.phase === "scoiaChoice") {
+    return (
+      <ScoiaChoicePanel
+        chooserName="You"
+        oppName="AI Opponent"
+        onChoose={(which) => {
+          const starter = which === "self" ? "p1" : "p2";
+          setState((s) => gameReducer(s, { type: "SCOIA_CHOOSE_STARTER", starter }));
+        }}
+      />
+    );
+  }
+
+  if (state.phase === "play" || state.phase === "roundEnd" || state.phase === "gameEnd") {
     const isTie = state.lastRoundScore && state.lastRoundScore.p1 === state.lastRoundScore.p2;
     return (
       <>
@@ -7260,6 +7565,7 @@ export default function App() {
   else if (mode === "hotseat") content = <HotseatGame key={"hs" + resetKey} onExit={exitToMenu} />;
   else if (mode === "ai") content = <AIGame key={"ai" + resetKey} onExit={exitToMenu} />;
   else if (mode === "online") content = <OnlineGame key={"on" + resetKey} onExit={exitToMenu} />;
+  else if (mode === "test") content = <TestGame key={"test" + resetKey} onExit={exitToMenu} />;
 
   return (
     <div className="gwent-root">
