@@ -3177,7 +3177,13 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
   // positive (spacing apart) instead of only negative (compressing).
   const rowSlotWidthPct = 7; // must match .row-card-slot width
   const rowN = cardIds.length;
-  const rowOverlapPct = rowN > 1 ? (100 - rowSlotWidthPct * rowN) / (rowN - 1) : 0;
+  let rowOverlapPct = 0; // clustered left, no gap, by default
+  if (rowN > 1) {
+    const rowNaturalTotal = rowSlotWidthPct * rowN;
+    if (rowNaturalTotal > 100) {
+      rowOverlapPct = (100 - rowSlotWidthPct * rowN) / (rowN - 1);
+    }
+  }
   return (
     <div
       className={
