@@ -4423,8 +4423,14 @@ function PlayBoard({
       const delay = isTie ? 200 : 150;
       const t = setTimeout(() => {
         const snap = lastPlaySnapshotRef.current;
-        const meTo = pileRect(".cell-my-deck .deck-pile-stack");
-        const oppTo = pileRect(".cell-opp-deck .deck-pile-stack");
+        // DeckPile renders nothing once a side's deck count hits 0 (see
+        // DeckPile), so .deck-pile-stack won't exist in the DOM for a side
+        // that drew its deck out by game end — falling back to the deck
+        // cell <td> itself (which always renders) keeps a valid fly-to
+        // target instead of silently dropping that side's cards from the
+        // sweep, which left them stuck fully visible in their rows forever.
+        const meTo = pileRect(".cell-my-deck .deck-pile-stack") || pileRect(".cell-my-deck");
+        const oppTo = pileRect(".cell-opp-deck .deck-pile-stack") || pileRect(".cell-opp-deck");
         // Unlike roundEnd, the board is NEVER cleared in state for a
         // game-ending round (GameOverPanel just replaces PlayBoard
         // wholesale afterward) — so every snapshotted board card is still
