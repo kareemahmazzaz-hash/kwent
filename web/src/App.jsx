@@ -781,7 +781,7 @@ function makePlayer({ name, faction, leaderId, deckIds, isAI }) {
     name, faction, leaderId, isAI: !!isAI,
     deck: deckIds, hand: [], board: emptyBoard(), discard: [],
     discardRow: {}, // id -> row, remembered ONLY for Agile cards so Skellige's round-3 raise can put them back where they were
-    mulliganSwaps: 0, mulliganDone: false, passed: false,
+    mulliganSwaps: 0, mulliganSwappedOut: [], mulliganDone: false, passed: false,
     leaderUsed: false, leaderBlocked: false, leaderReveal: null,
     forceRandomRevive: false, // set true for Emhyr: Invader of the North
     pendingChoice: null,
@@ -1808,12 +1808,20 @@ function gameReducer(state, action) {
       const { player, cardId } = action;
       return withPlayer(state, player, (p) => {
         if (p.mulliganSwaps >= MAX_MULLIGAN || !p.hand.includes(cardId) || p.deck.length === 0) return p;
-        const [replacement, ...restDeck] = shuffle(p.deck);
+        // Cards already swapped away earlier in this same mulligan can't be
+        // drawn back as a replacement — only draw from the cards that haven't
+        // been swapped out yet this mulligan.
+        const swappedOut = p.mulliganSwappedOut || [];
+        const eligible = p.deck.filter((id) => !swappedOut.includes(id));
+        if (eligible.length === 0) return p; // everything left in the deck was already swapped out this mulligan
+        const [replacement, ...restEligible] = shuffle(eligible);
+        const restDeck = p.deck.filter((id) => id !== replacement);
         return {
           ...p,
           hand: p.hand.map((id) => (id === cardId ? replacement : id)),
           deck: shuffle([...restDeck, cardId]),
           mulliganSwaps: p.mulliganSwaps + 1,
+          mulliganSwappedOut: [...swappedOut, cardId],
         };
       });
     }
@@ -6185,6 +6193,7 @@ function normalizePlayer(p) {
     deck: p.deck || [],
     discard: p.discard || [],
     discardRow: p.discardRow || {},
+    mulliganSwappedOut: p.mulliganSwappedOut || [],
     board: {
       ...emptyBoard(),
       ...b,
