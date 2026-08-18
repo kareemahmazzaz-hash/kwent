@@ -2980,7 +2980,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
 function CardBackStack({ count, faction }) {
   const [artStage, setArtStage] = useState(0);
   const src = artStage === 0 ? backImgSrc(faction, IMAGE_BASE_URL) : artStage === 1 ? backImgSrc(faction, IMAGE_FALLBACK_BASE_URL) : null;
-  if (count <= 0) return <span className="hint">No cards left.</span>;
+  if (count <= 0) return null;
   // Pure CSS, height-driven — no JS measurement. The row's ancestor chain
   // resolves to a definite height via the table row, so each card-back-wrap
   // just sets height:100% and lets aspect-ratio derive width.
@@ -5296,9 +5296,7 @@ function PlayBoard({
         {/* My hand is rendered outside the table (sibling of .board-table)
             instead of inside a table cell. */}
         <div className="hand-strip-cards">
-          {me.hand.length === 0 ? (
-            <span className="hint">No cards left.</span>
-          ) : (
+          {me.hand.length === 0 ? null : (
             <div
               className="hand-fit"
               style={(() => {
