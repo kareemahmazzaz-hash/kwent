@@ -4304,8 +4304,19 @@ function PlayBoard({
   useLayoutEffect(() => {
     const prevPhase = prevSnapshotPhaseRef.current;
     prevSnapshotPhaseRef.current = state.phase;
-    if (state.phase !== "play") return;
-    if (prevPhase !== "play") return;
+    // A PLAY_CARD dispatch that empties the acting player's hand can
+    // auto-pass them and, if the opponent had already passed, call
+    // finishRound() in that same dispatch — flipping phase straight from
+    // "play" to "roundEnd"/"gameEnd" in one render, with the just-played
+    // card already sitting on the board. Board state isn't cleared on that
+    // transition render (only later, in startNextRound / never for
+    // gameEnd), so the DOM here is still the accurate pre-clear layout —
+    // capture it too, or that last card gets no sweep ghost and (on the
+    // game-ending round, where the board is never cleared) is left
+    // permanently stuck visible in its row.
+    const isContinuingPlay = state.phase === "play" && prevPhase === "play";
+    const isLeavingPlay = (state.phase === "roundEnd" || state.phase === "gameEnd") && prevPhase === "play";
+    if (!isContinuingPlay && !isLeavingPlay) return;
     const frame = boardFrameRef.current;
     if (!frame) return;
     const frameRect = frame.getBoundingClientRect();
