@@ -882,8 +882,14 @@ function rowTotal(board, row, spyDoubled) {
 function boardTotal(board, spyDoubled) {
   return ROWS.reduce((sum, r) => sum + rowTotal(board, r, spyDoubled), 0);
 }
+// Only ever called with "L01" (spy-doubling) — requires the ability to have
+// actually been activated (leaderUsed), not just picked as leader. Doubling
+// used to be always-on from turn 1 the moment L01 was selected; it now only
+// kicks in once its "Use Leader Ability" button is clicked, same as every
+// other leader.
 function matchHasLeader(state, leaderId) {
-  return state.players.p1.leaderId === leaderId || state.players.p2.leaderId === leaderId;
+  return (state.players.p1.leaderId === leaderId && state.players.p1.leaderUsed)
+    || (state.players.p2.leaderId === leaderId && state.players.p2.leaderUsed);
 }
 
 // Heroes are immune to everything, including the GOOD stuff — Horn and
@@ -1757,6 +1763,10 @@ function finishTurnAfterMove(ns, actingPlayer) {
   // pendingBurn) — hold the turn here too, same as a Medic chain, so the
   // opponent can't act while the fire's still playing out.
   if (ns.pendingBurn) return ns;
+  // L06 (Emperor of Nilfgaard) reveal window — same idea: the opponent
+  // shouldn't get to act while the acting player still has the "cards
+  // revealed" overlay up. Held until USE_LEADER's ackReveal clears it.
+  if (ns.players[actingPlayer].leaderReveal) return ns;
   if (ns.players.p1.passed && ns.players.p2.passed) return finishRound(ns);
   const nextKey = otherKey(actingPlayer);
   return { ...ns, turn: ns.players[nextKey].passed ? actingPlayer : nextKey };
@@ -1843,7 +1853,11 @@ function gameReducer(state, action) {
     }
     case "USE_LEADER": {
       if (action.options && action.options.ackReveal) {
-        return withPlayer(state, action.player, (p) => ({ ...p, leaderReveal: null }));
+        // Closing the L06 reveal window is what actually hands the turn
+        // over now (see finishTurnAfterMove's leaderReveal check) — the
+        // activation itself no longer does it while the overlay is up.
+        const ns = withPlayer(state, action.player, (p) => ({ ...p, leaderReveal: null }));
+        return finishTurnAfterMove(ns, action.player);
       }
       let ns = resolveLeaderAbility(state, action.player, action.options || {});
       // Using a leader ability consumes a turn, same as playing a card or a
@@ -2364,6 +2378,13 @@ function leaderConditionMet(state, aiKey, leaderId) {
   const oppKey = otherKey(aiKey);
   const opp = state.players[oppKey];
   switch (leaderId) {
+    case "L01": { // Eredin: The Treacherous — only worth firing once a non-Hero
+      // Spy card is actually sitting on a board. Heroes (e.g. Mysterious Elf)
+      // are Spies but immune to every modifier, so doubling does nothing for
+      // them and they don't count.
+      const isNonHeroSpy = (id) => { const c = cardById(id); return c && c.ability === "spy" && c.cardType !== "Hero"; };
+      return ROWS.some((r) => me.board[r].some(isNonHeroSpy) || opp.board[r].some(isNonHeroSpy));
+    }
     case "L02": // Medic revive — needs an eligible (non-Hero, non-Special) card in own discard
       return me.discard.some((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
     case "L09": // Take a non-Hero card from opponent's discard
@@ -2377,25 +2398,22 @@ function leaderConditionMet(state, aiKey, leaderId) {
         const c = cardById(id);
         return c && c.cardType !== "Hero" && c.power > 0;
       }));
-    case "L07": { // Fetch + play Torrential Rain (Siege) — wait for the opponent
-      // to actually have Siege power worth freezing, and don't do it if we're
-      // the one ahead in that row (we'd just be freezing our own lead).
-      const spy = matchHasLeader(state, "L01");
-      const oppSiege = rowTotal(opp.board, "siege", spy);
-      const meSiege = rowTotal(me.board, "siege", spy);
-      return oppSiege > 0 && oppSiege >= meSiege;
-    }
-    case "L05": { // Pick any weather — same idea, generalized: only worth
-      // casting once the opponent has actually put real power somewhere.
-      const spy = matchHasLeader(state, "L01");
-      return boardTotal(opp.board, spy) >= 6;
-    }
-    case "L13": // Foltest — Scorch Ranged if total >= 10
-      return rowTotal(opp.board, "ranged", matchHasLeader(state, "L01")) >= 10;
-    case "L15": // Scorch Siege if total >= 10
-      return rowTotal(opp.board, "siege", matchHasLeader(state, "L01")) >= 10;
-    case "L19": // Francesca — Scorch Close Combat if total >= 10
-      return rowTotal(opp.board, "close", matchHasLeader(state, "L01")) >= 10;
+    case "L07": // Fetch + play Torrential Rain (Siege) — only depends on whether
+      // a Torrential Rain is still actually available to fetch from the deck.
+      return me.deck.some((id) => cardById(id)?.name?.startsWith("Torrential Rain"));
+    case "L05": // Pick any weather — same idea: only depends on deck availability.
+      return me.deck.some((id) => cardById(id)?.ability === "weather");
+    case "L13": // Foltest — Scorch Ranged if total >= 10 AND there's a non-Hero
+      // unit in the row to actually hit (strongestInRow excludes Heroes, so an
+      // all-Hero row hitting the threshold would otherwise be a dead activation).
+      return rowTotal(opp.board, "ranged", matchHasLeader(state, "L01")) >= 10
+        && opp.board.ranged.some((id) => cardById(id)?.cardType !== "Hero");
+    case "L15": // Scorch Siege if total >= 10 (same non-Hero-target requirement)
+      return rowTotal(opp.board, "siege", matchHasLeader(state, "L01")) >= 10
+        && opp.board.siege.some((id) => cardById(id)?.cardType !== "Hero");
+    case "L19": // Francesca — Scorch Close Combat if total >= 10 (same requirement)
+      return rowTotal(opp.board, "close", matchHasLeader(state, "L01")) >= 10
+        && opp.board.close.some((id) => cardById(id)?.cardType !== "Hero");
     case "L17": // Francesca — reposition Agile units, needs one on the board
       return [...me.board.close, ...me.board.ranged].some((id) => cardById(id)?.row === "agile");
     case "L21": // Crach an Craite — shuffle graveyards, needs at least one non-empty
@@ -4176,7 +4194,14 @@ function PlayBoard({
       const eligible = medicEligible(me.discard);
       if (!eligible.length) return;
       const pick = eligible[Math.floor(Math.random() * eligible.length)];
-      onResolveMedicRevive(pick);
+      // Dispatched straight to the raw handler, bypassing the sound-gate
+      // wrapper: this timer already paced itself off soundGateRemainingMs()
+      // when it was scheduled above, but if another sound extended the gate
+      // in the meantime, re-checking it here would silently drop the
+      // dispatch with no retry — leaving the revive stuck (L08's "Medic does
+      // nothing" bug). Nothing else could race this call since it's the only
+      // action available while medicChainPending is true.
+      onResolveMedicReviveRaw && onResolveMedicReviveRaw(pick);
     }, delay);
     return () => clearTimeout(medicAutoTimerRef.current);
   }, [medicChainPending, me.forceRandomRevive, me.discard]);
@@ -4844,7 +4869,7 @@ function PlayBoard({
         const key = snapshot.meLeaderId === "L21" ? "crachAnCraite" : "leader";
         playSound(key);
         setLeaderGlowFor("me", SOUND_DURATIONS_MS[key]);
-        if (snapshot.meLeaderId === "L12") triggerSunlight();
+        if (snapshot.meLeaderId === "L12") { triggerSunlight(); playSound("clearWeather"); }
         const hornRow = LEADER_HORN_ROW[snapshot.meLeaderId];
         if (hornRow) { playSound("horn"); setRowFxFor("me", hornRow, "row-horn-glow", SOUND_DURATIONS_MS.horn); }
       }
@@ -4852,7 +4877,7 @@ function PlayBoard({
         const key = snapshot.oppLeaderId === "L21" ? "crachAnCraite" : "leader";
         playSound(key);
         setLeaderGlowFor("opp", SOUND_DURATIONS_MS[key]);
-        if (snapshot.oppLeaderId === "L12") triggerSunlight();
+        if (snapshot.oppLeaderId === "L12") { triggerSunlight(); playSound("clearWeather"); }
         const hornRow = LEADER_HORN_ROW[snapshot.oppLeaderId];
         if (hornRow) { playSound("horn"); setRowFxFor("opp", hornRow, "row-horn-glow", SOUND_DURATIONS_MS.horn); }
       }
@@ -4924,6 +4949,14 @@ function PlayBoard({
   const startLeader = () => {
     if (me.leaderId === "L04") return setPending({ kind: "leaderDiscard2", selected: [] });
     if (me.leaderId === "L09" && opp.discard.some((id) => cardById(id)?.cardType !== "Hero")) return setPending({ kind: "leaderPickDiscard" });
+    // L02 (Eredin: Bringer of Death) — same picker as a card-played Medic:
+    // let the player choose which eligible card comes back instead of
+    // always taking eligible[0]. Skipped when L08 (Invader of the North)
+    // forces a random revive instead, same as the card path.
+    if (me.leaderId === "L02" && !me.forceRandomRevive) {
+      const eligible = medicEligible(me.discard);
+      if (eligible.length) return setPending({ kind: "leaderPickMedic", options: eligible });
+    }
     if (me.leaderId === "L05") {
       const seen = new Set();
       const options = [];
@@ -4948,6 +4981,7 @@ function PlayBoard({
   const confirmLeaderDiscard = () => { onUseLeader({ discardIds: pending.selected }); setPending(null); };
   const confirmLeaderPick = (pickId) => { onUseLeader({ pickId }); setPending(null); };
   const confirmLeaderPickWeather = (weatherId) => { onUseLeader({ weatherId }); setPending(null); };
+  const confirmLeaderPickMedic = (reviveId) => { onUseLeader({ reviveId }); setPending(null); };
 
   const myLeaderDisabled = !canAct || me.leaderUsed || me.leaderBlocked || myLeaderNoop;
 
@@ -5355,6 +5389,19 @@ function PlayBoard({
             <div className="pool-grid">
               {pending.options.map((id) => (
                 <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPickWeather(id)} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pending?.kind === "leaderPickMedic" && (
+        <div className="overlay" onClick={() => setPending(null)}>
+          <div className="round-banner" onClick={(e) => e.stopPropagation()}>
+            <div className="ribbon">CHOOSE A CARD TO REVIVE</div>
+            <div className="pool-grid">
+              {pending.options.map((id) => (
+                <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPickMedic(id)} />
               ))}
             </div>
           </div>
