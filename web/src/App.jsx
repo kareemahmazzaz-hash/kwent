@@ -3171,13 +3171,20 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
   const cardIds = board[rowKey];
   const weathered = !!board.weather[rowKey];
   const WeatherOverlay = weathered ? WEATHER_OVERLAY_BY_ROW[rowKey] : null;
+  // Fan cards out to fill the full row width, then overlap once they no
+  // longer fit. Mirrors the hand's --hand-overlap calc, but left-anchored
+  // (row-cards keeps justify-content: flex-start) and allowed to go
+  // positive (spacing apart) instead of only negative (compressing).
+  const rowSlotWidthPct = 7; // must match .row-card-slot width
+  const rowN = cardIds.length;
+  const rowOverlapPct = rowN > 1 ? (100 - rowSlotWidthPct * rowN) / (rowN - 1) : 0;
   return (
     <div
       className={
         "row-cards row-" + rowKey +
         (hornGlow ? " row-horn-glow" : "")
       }
-      style={{ "--row-accent": meta.color }}
+      style={{ "--row-accent": meta.color, "--row-overlap": `${rowOverlapPct}%` }}
     >
       {WeatherOverlay && <WeatherOverlay />}
       {cardIds.length === 0 && <span className="row-empty">no units</span>}
@@ -7393,7 +7400,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 
 
-.row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: 0%; }
+.row-card-slot { position: relative; z-index: 2; height: 90%; width: 7%; flex: 0 0 auto; margin-left: var(--row-overlap, 0%); }
 .row-card-slot:first-of-type { margin-left: 0; }
 .row-empty { color: var(--muted); font-size: 0.75rem; opacity: 0.6; align-self: center; margin: auto; }
 
