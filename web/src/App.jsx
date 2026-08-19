@@ -3641,6 +3641,136 @@ function cardMatchesAbilityFilter(card, filterKey) {
   return group.match ? group.match.includes(card.ability) : card.ability === filterKey;
 }
 
+// Collapsed: shows the currently-chosen leader as a small icon with its
+// ability written below it. Tapping the icon "zooms" it into a horizontal
+// strip of every leader available to the faction, the focused one enlarged
+// and centered with its ability below. Clicking a neighboring tile (or, on
+// desktop, hovering the left/right edge zones) walks the focus over one
+// leader at a time; clicking the focused tile a second time confirms it and
+// collapses back to icon mode.
+function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
+  const selectedIndex = Math.max(0, leaders.findIndex((l) => l.id === leaderId));
+  const [expanded, setExpanded] = useState(false);
+  const [focusIndex, setFocusIndex] = useState(selectedIndex);
+  const trackRef = useRef(null);
+  const hoverTimer = useRef(null);
+  const focusIndexRef = useRef(selectedIndex);
+
+  useEffect(() => { if (!expanded) setFocusIndex(selectedIndex); }, [selectedIndex, expanded]);
+  useEffect(() => { focusIndexRef.current = focusIndex; }, [focusIndex]);
+  useEffect(() => () => clearInterval(hoverTimer.current), []);
+
+  const scrollToIndex = (idx, behavior = "smooth") => {
+    const item = trackRef.current && trackRef.current.children[idx];
+    if (item) item.scrollIntoView({ behavior, inline: "center", block: "nearest" });
+  };
+
+  const focusLeader = (idx) => {
+    const clamped = Math.min(leaders.length - 1, Math.max(0, idx));
+    focusIndexRef.current = clamped;
+    setFocusIndex(clamped);
+    scrollToIndex(clamped);
+    return clamped;
+  };
+
+  const openCarousel = () => {
+    if (leaders.length === 0) return;
+    setExpanded(true);
+    setFocusIndex(selectedIndex);
+    requestAnimationFrame(() => scrollToIndex(selectedIndex, "auto"));
+  };
+
+  const confirmIndex = (idx) => {
+    const leader = leaders[idx];
+    if (!leader) return;
+    onSelectLeader(leader.id);
+    setExpanded(false);
+  };
+
+  const handleTileClick = (idx) => {
+    if (expanded && idx === focusIndex) { confirmIndex(idx); return; }
+    focusLeader(idx);
+  };
+
+  const startHoverScroll = (dir) => {
+    clearInterval(hoverTimer.current);
+    hoverTimer.current = setInterval(() => {
+      focusLeader(focusIndexRef.current + dir);
+    }, 650);
+  };
+  const stopHoverScroll = () => clearInterval(hoverTimer.current);
+
+  if (leaders.length === 0) {
+    return (
+      <div className="leader-carousel">
+        <span className="section-label">Leader</span>
+        <p className="hint">No leader cards are available for {factionLabel} yet — this faction will play without one.</p>
+      </div>
+    );
+  }
+
+  const chosen = leaders[selectedIndex];
+  const shown = expanded ? (leaders[focusIndex] || chosen) : chosen;
+
+  return (
+    <div className="leader-carousel">
+      <span className="section-label">Leader</span>
+
+      {!expanded ? (
+        <button type="button" className="leader-icon-btn" onClick={openCarousel}>
+          <CardTile card={chosen || leaders[0]} size="pg-icon" />
+          <span className="leader-icon-hint">{chosen ? "Change leader" : "Choose leader"}</span>
+        </button>
+      ) : (
+        <div className="leader-expanded">
+          <div
+            className="leader-hoverzone leader-hoverzone-left"
+            onMouseEnter={() => startHoverScroll(-1)}
+            onMouseLeave={stopHoverScroll}
+            onClick={() => focusLeader(focusIndex - 1)}
+            aria-label="Scroll to previous leader"
+          />
+          <div className="leader-track" ref={trackRef}>
+            {leaders.map((l, idx) => (
+              <div key={l.id} className={"leader-track-item" + (idx === focusIndex ? " is-focused" : "")}>
+                <CardTile
+                  card={l}
+                  size={idx === focusIndex ? "pg-carousel-focus" : "pg-carousel"}
+                  selected={l.id === leaderId}
+                  onClick={() => handleTileClick(idx)}
+                />
+              </div>
+            ))}
+          </div>
+          <div
+            className="leader-hoverzone leader-hoverzone-right"
+            onMouseEnter={() => startHoverScroll(1)}
+            onMouseLeave={stopHoverScroll}
+            onClick={() => focusLeader(focusIndex + 1)}
+            aria-label="Scroll to next leader"
+          />
+        </div>
+      )}
+
+      {shown && (
+        <div className="leader-ability-box">
+          <strong>{shown.name}</strong>
+          <p>{abilityDescriptionFor(shown)}</p>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="leader-expanded-actions">
+          <button type="button" className="btn btn-sm btn-gold" onClick={() => confirmIndex(focusIndex)}>
+            Select {leaders[focusIndex] ? leaders[focusIndex].name : ""}
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setExpanded(false)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
   const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
@@ -3680,8 +3810,23 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
   const needsLeader = leaders.length > 0;
   const canConfirm = unitCount >= DECK_SIZE && specialCount <= MAX_SPECIAL_CARDS && (!needsLeader || !!leaderId);
 
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const unselectedFiltered = useMemo(() => filtered.filter((c) => !selectedSet.has(c.id)), [filtered, selectedSet]);
+  const chosenCards = useMemo(
+    () =>
+      selectedIds
+        .map(cardById)
+        .filter(Boolean)
+        .sort((a, b) => {
+          const pa = a.power ?? 0, pb = b.power ?? 0;
+          if (pa !== pb) return pb - pa;
+          return (a.name || "").localeCompare(b.name || "");
+        }),
+    [selectedIds]
+  );
+
   return (
-    <div className="screen deckbuilder">
+    <div className="screen deckbuilder deckbuilder-v2">
       {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
 
@@ -3701,19 +3846,6 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         </div>
       )}
       {lockFaction && <div className="faction-locked">Faction: <strong>{FACTION_META[faction].label}</strong></div>}
-
-      <div className="leader-picker">
-        <span className="section-label">Leader</span>
-        {needsLeader ? (
-          <div className="leader-row">
-            {leaders.map((l) => (
-              <CardTile key={l.id} card={l} size="md" selected={leaderId === l.id} onClick={() => onSelectLeader(l.id)} />
-            ))}
-          </div>
-        ) : (
-          <p className="hint">No leader cards are available for {FACTION_META[faction].label} yet — this faction will play without one.</p>
-        )}
-      </div>
 
       <div className="deck-count">
         Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards — <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
@@ -3803,16 +3935,35 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         )}
       </div>
 
-      <div className="pool-grid">
-        {filtered.map((c) => (
-          <CardTile
-            key={c.id}
-            card={c}
-            size="sm"
-            selected={selectedIds.includes(c.id)}
-            onClick={() => onToggleCard(c.id)}
+      <div className="db-columns">
+        <div className="db-col db-col-pool">
+          <span className="section-label">Available</span>
+          <div className="pool-grid pg-grid">
+            {unselectedFiltered.map((c) => (
+              <CardTile key={c.id} card={c} size="pg" onClick={() => onToggleCard(c.id)} />
+            ))}
+            {unselectedFiltered.length === 0 && <p className="hint">No cards match.</p>}
+          </div>
+        </div>
+
+        <div className="db-col db-col-leader">
+          <LeaderCarousel
+            leaders={leaders}
+            leaderId={leaderId}
+            onSelectLeader={onSelectLeader}
+            factionLabel={FACTION_META[faction].label}
           />
-        ))}
+        </div>
+
+        <div className="db-col db-col-chosen">
+          <span className="section-label">Chosen ({count})</span>
+          <div className="pool-grid pg-grid chosen-grid">
+            {chosenCards.map((c) => (
+              <CardTile key={c.id} card={c} size="pg" selected onClick={() => onToggleCard(c.id)} />
+            ))}
+            {chosenCards.length === 0 && <p className="hint">Tap cards on the left to add them here.</p>}
+          </div>
+        </div>
       </div>
 
       <div className="deckbuilder-footer">
@@ -6877,8 +7028,54 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .faction-pill.active { opacity: 1; background: var(--accent); color: #12140d; font-weight: 700; }
 .faction-locked { font-size: 0.9rem; color: var(--muted); margin-bottom: 10px; }
 .section-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--gold-dim); display: block; margin-bottom: 6px; }
-.leader-picker { margin-bottom: 14px; }
-.leader-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* ---- Deck builder v2: pool / leader / chosen columns ---- */
+.deckbuilder-v2.screen { max-width: 100%; padding-left: 3%; padding-right: 3%; }
+.db-columns { display: flex; gap: 2%; align-items: flex-start; margin-top: 1.2rem; }
+.db-col { display: flex; flex-direction: column; min-width: 0; }
+.db-col-pool, .db-col-chosen { flex: 1 1 34%; }
+.db-col-leader { flex: 1 1 32%; }
+.pg-grid.pool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28%, 1fr));
+  gap: 3%;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 3%;
+  background: rgba(0,0,0,0.2);
+  border-radius: 8%;
+  border: 1px solid var(--line);
+}
+.pg-grid .card-tile.card-pg { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
+.pg-grid .hint { grid-column: 1 / -1; }
+.chosen-grid { border-color: var(--gold-dim); }
+
+/* ---- Leader carousel ---- */
+.leader-carousel { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.leader-icon-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6%; width: 60%; padding: 0; }
+.leader-icon-btn .card-tile.card-pg-icon { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transition: transform 0.15s; }
+.leader-icon-btn:hover .card-tile.card-pg-icon { transform: scale(1.05); }
+.leader-icon-hint { font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold-dim); }
+.leader-expanded { display: flex; align-items: center; width: 100%; gap: 2%; }
+.leader-hoverzone { flex: 0 0 8%; align-self: stretch; min-height: 30vh; cursor: pointer; border-radius: 8%; }
+.leader-hoverzone:hover { background: rgba(201,162,75,0.08); }
+.leader-track {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4%;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+  padding: 2% 0;
+}
+.leader-track-item { flex: 0 0 30%; scroll-snap-align: center; opacity: 0.55; transition: opacity 0.2s, transform 0.2s; }
+.leader-track-item.is-focused { opacity: 1; }
+.leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
+.leader-track .card-tile.card-pg-carousel-focus { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transform: scale(1.15); }
+.leader-ability-box { margin-top: 1rem; max-width: 90%; }
+.leader-ability-box strong { display: block; color: var(--gold); font-family: var(--font-display); margin-bottom: 4px; }
+.leader-ability-box p { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
+.leader-expanded-actions { display: flex; gap: 8px; margin-top: 0.8rem; }
 .deck-count { font-family: var(--font-mono); margin-bottom: 8px; color: var(--gold); display: flex; align-items: center; gap: 10px; }
 .random-deck-btn { margin-left: 4px; }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
