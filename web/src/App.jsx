@@ -7592,7 +7592,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    row. transform-origin top-left because its left/top/width/height are set
    to the LANDED (destination) rect, and the initial translate+scale is what
    visually places it at the discard pile instead — see the component. */
-.medic-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
+.medic-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .medic-ghost-card { position: absolute; will-change: transform; }
 
 /* Round-end / game-end sweep — cards flying off the board into the discard
@@ -7603,7 +7603,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    element carries the optional flip as its own independent keyframe
    animation so the two motions (flight path, face-down flip) don't fight
    over the same transform property. */
-.sweep-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 61; }
+.sweep-ghost-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .sweep-ghost-card {
   position: absolute;
   transition: left 0.75s cubic-bezier(0.3, 0.6, 0.3, 1), top 0.75s cubic-bezier(0.3, 0.6, 0.3, 1),
@@ -7632,7 +7632,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    instead of pulsing as a uniform blob. Duration comes in via the
    --smoke-dur custom property set inline per-instance, so it's always
    exactly as long as the sound it's synced to. */
-.smoke-fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 59; }
+.smoke-fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
 .smoke-cloud-anchor { position: absolute; pointer-events: none; }
 .smoke-viewport-unclipped {
   position: absolute;
