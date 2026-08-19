@@ -382,6 +382,7 @@ const ROW_META = {
 };
 
 const DECK_SIZE = 22;
+const MAX_SPECIAL_CARDS = 10;
 const HAND_SIZE = 10;
 const MAX_MULLIGAN = 2;
 const CARD_ASPECT = 0.537; // width:height, matches real card art
@@ -3672,8 +3673,12 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
     () => selectedIds.filter((id) => { const c = cardById(id); return c && (c.cardType === "Basic" || c.cardType === "Hero"); }).length,
     [selectedIds]
   );
+  const specialCount = useMemo(
+    () => selectedIds.filter((id) => { const c = cardById(id); return c && !(c.cardType === "Basic" || c.cardType === "Hero"); }).length,
+    [selectedIds]
+  );
   const needsLeader = leaders.length > 0;
-  const canConfirm = unitCount >= DECK_SIZE && (!needsLeader || !!leaderId);
+  const canConfirm = unitCount >= DECK_SIZE && specialCount <= MAX_SPECIAL_CARDS && (!needsLeader || !!leaderId);
 
   return (
     <div className="screen deckbuilder">
@@ -3711,7 +3716,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       </div>
 
       <div className="deck-count">
-        Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards
+        Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards — <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
         {onRandomize && (
           <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
             🎲 Random deck
@@ -3814,7 +3819,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         <button type="button" className="btn btn-gold btn-lg" disabled={!canConfirm} onClick={onConfirm}>
           {busyLabel || "Confirm deck"}
         </button>
-        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count){needsLeader ? " and a leader" : ""}.</span>}
+        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count), no more than {MAX_SPECIAL_CARDS} special cards{needsLeader ? ", and a leader" : ""}.</span>}
       </div>
     </div>
   );
@@ -5524,7 +5529,19 @@ function useDeckBuilderState() {
   const [leaderId, setLeaderId] = useState(null);
   const [savedDecks, setSavedDecks] = useState(() => loadSavedDecks());
   function toggle(id) {
-    setSelected((sel) => sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
+    setSelected((sel) => {
+      if (sel.includes(id)) return sel.filter((x) => x !== id);
+      const card = cardById(id);
+      const isSpecial = card && !(card.cardType === "Basic" || card.cardType === "Hero");
+      if (isSpecial) {
+        const specialCount = sel.filter((x) => {
+          const c = cardById(x);
+          return c && !(c.cardType === "Basic" || c.cardType === "Hero");
+        }).length;
+        if (specialCount >= MAX_SPECIAL_CARDS) return sel; // cap reached, ignore
+      }
+      return [...sel, id];
+    });
   }
   function changeFaction(f) {
     setFaction(f);
