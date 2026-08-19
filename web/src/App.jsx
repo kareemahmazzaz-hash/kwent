@@ -3772,7 +3772,6 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
 }
 
 function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
-  const [query, setQuery] = useState("");
   const [abilityFilter, setAbilityFilter] = useState(null);
   const [deckName, setDeckName] = useState("");
   const [selectedSavedDeck, setSelectedSavedDeck] = useState("");
@@ -3785,7 +3784,6 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
   const filtered = useMemo(
     () =>
       pool
-        .filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
         .filter((c) => cardMatchesAbilityFilter(c, abilityFilter))
         .slice()
         .sort((a, b) => {
@@ -3793,7 +3791,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
           if (pa !== pb) return pb - pa;
           return (a.name || "").localeCompare(b.name || "");
         }),
-    [pool, query, abilityFilter]
+    [pool, abilityFilter]
   );
   useEffect(() => { setAbilityFilter(null); }, [faction]);
 
@@ -3817,12 +3815,13 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       selectedIds
         .map(cardById)
         .filter(Boolean)
+        .filter((c) => cardMatchesAbilityFilter(c, abilityFilter))
         .sort((a, b) => {
           const pa = a.power ?? 0, pb = b.power ?? 0;
           if (pa !== pb) return pb - pa;
           return (a.name || "").localeCompare(b.name || "");
         }),
-    [selectedIds]
+    [selectedIds, abilityFilter]
   );
 
   return (
@@ -3846,15 +3845,6 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         </div>
       )}
       {lockFaction && <div className="faction-locked">Faction: <strong>{FACTION_META[faction].label}</strong></div>}
-
-      <div className="deck-count">
-        Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards — <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
-        {onRandomize && (
-          <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
-            🎲 Random deck
-          </button>
-        )}
-      </div>
 
       {onSaveDeck && (
         <div className="saved-decks-row">
@@ -3907,13 +3897,6 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         </div>
       )}
 
-      <input
-        className="search-input"
-        placeholder="Search cards…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-
       <div className="ability-filter-row">
         {activeFilters.map((f) => (
           <button
@@ -3953,6 +3936,14 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
             onSelectLeader={onSelectLeader}
             factionLabel={FACTION_META[faction].label}
           />
+          <div className="deck-count">
+            Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards — <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
+            {onRandomize && (
+              <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
+                🎲 Random deck
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="db-col db-col-chosen">
@@ -7023,23 +7014,41 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 
 /* ---- Deck builder ---- */
-.faction-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.faction-pill { font-family: var(--font-display); font-size: 0.78rem; padding: 6px 12px; border-radius: 16px; border: 1px solid var(--accent); background: transparent; color: var(--parchment); cursor: pointer; opacity: 0.6; }
+.faction-picker { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 14px; width: 100%; }
+.faction-pill { flex: 1 1 0; font-family: var(--font-display); font-size: 0.78rem; padding: 6px 8px; border-radius: 16px; border: 1px solid var(--accent); background: transparent; color: var(--parchment); cursor: pointer; opacity: 0.6; text-align: center; white-space: nowrap; }
 .faction-pill.active { opacity: 1; background: var(--accent); color: #12140d; font-weight: 700; }
 .faction-locked { font-size: 0.9rem; color: var(--muted); margin-bottom: 10px; }
 .section-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--gold-dim); display: block; margin-bottom: 6px; }
 /* ---- Deck builder v2: pool / leader / chosen columns ---- */
-.deckbuilder-v2.screen { max-width: 100%; padding-left: 3%; padding-right: 3%; }
-.db-columns { display: flex; gap: 2%; align-items: flex-start; margin-top: 1.2rem; }
-.db-col { display: flex; flex-direction: column; min-width: 0; }
+/* Lock the whole builder to the viewport — internal panels scroll, the page never does. */
+.gwent-root:has(.deckbuilder-v2) { height: 100vh; overflow: hidden; }
+.deckbuilder-v2.screen {
+  max-width: 100%;
+  padding: 14px 3% 14px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.deckbuilder-v2 .screen-title,
+.deckbuilder-v2 .faction-picker,
+.deckbuilder-v2 .faction-locked,
+.deckbuilder-v2 .saved-decks-row,
+.deckbuilder-v2 .ability-filter-row,
+.deckbuilder-v2 .deckbuilder-footer,
+.deckbuilder-v2 .deckbuilder-back { flex: 0 0 auto; }
+.db-columns { display: flex; gap: 2%; align-items: stretch; margin-top: 1.2rem; flex: 1 1 auto; min-height: 0; }
+.db-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .db-col-pool, .db-col-chosen { flex: 1 1 34%; }
-.db-col-leader { flex: 1 1 32%; }
+.db-col-leader { flex: 1 1 32%; overflow-y: auto; justify-content: center; }
 .pg-grid.pool-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(28%, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 3%;
-  max-height: 60vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  align-content: start;
   padding: 3%;
   background: rgba(0,0,0,0.2);
   border-radius: 8%;
@@ -7067,7 +7076,10 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
   padding: 2% 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.leader-track::-webkit-scrollbar { display: none; }
 .leader-track-item { flex: 0 0 30%; scroll-snap-align: center; opacity: 0.55; transition: opacity 0.2s, transform 0.2s; }
 .leader-track-item.is-focused { opacity: 1; }
 .leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
@@ -7076,7 +7088,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-ability-box strong { display: block; color: var(--gold); font-family: var(--font-display); margin-bottom: 4px; }
 .leader-ability-box p { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
 .leader-expanded-actions { display: flex; gap: 8px; margin-top: 0.8rem; }
-.deck-count { font-family: var(--font-mono); margin-bottom: 8px; color: var(--gold); display: flex; align-items: center; gap: 10px; }
+.deck-count { font-family: var(--font-mono); margin-top: 14px; color: var(--gold); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; font-size: 0.82rem; text-align: center; }
 .random-deck-btn { margin-left: 4px; }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
 .ability-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
