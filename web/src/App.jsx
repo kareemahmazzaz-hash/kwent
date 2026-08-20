@@ -1317,7 +1317,7 @@ function resolveMedicRevive(state, actingKey, reviveId) {
     // Reviving a Spy through Medic plays it exactly like a normal Spy: it
     // goes on the OPPONENT's side, and the medic's controller still draws
     // the usual 2 cards for it.
-    ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), pick) }));
+    ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, actor.discardRow[pick] || autoPlacementRow(reviveCard, p.board), pick) }));
     ns = withPlayer(ns, actingKey, (p) => {
       const drawn = p.deck.slice(0, 2);
       return { ...p, discard: p.discard.filter((id) => id !== pick), deck: p.deck.slice(2), hand: [...p.hand, ...drawn] };
@@ -1327,7 +1327,7 @@ function resolveMedicRevive(state, actingKey, reviveId) {
     ns = withPlayer(ns, actingKey, (p) => ({
       ...p,
       discard: p.discard.filter((id) => id !== pick),
-      board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), pick),
+      board: addToRow(p.board, p.discardRow[pick] || autoPlacementRow(reviveCard, p.board), pick),
     }));
     log.push(`${actor.name}'s Medic revives ${reviveCard.name} from the discard pile.`);
   }
@@ -1400,14 +1400,14 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
         const reviveId = actor.forceRandomRevive ? eligible[Math.floor(Math.random() * eligible.length)] : (options.reviveId && eligible.includes(options.reviveId) ? options.reviveId : eligible[0]);
         const reviveCard = cardById(reviveId);
         if (reviveCard.ability === "spy") {
-          ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
+          ns = withPlayer(ns, oppKey, (p) => ({ ...p, board: addToRow(p.board, actor.discardRow[reviveId] || autoPlacementRow(reviveCard, p.board), reviveId) }));
           ns = withPlayer(ns, actingKey, (p) => {
             const drawn = p.deck.slice(0, 2);
             return { ...p, discard: p.discard.filter((id) => id !== reviveId), deck: p.deck.slice(2), hand: [...p.hand, ...drawn] };
           });
           log.push(`Revives ${reviveCard.name} — as a Spy it's placed on ${state.players[oppKey].name}'s side, drawing 2 cards.`);
         } else {
-          ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== reviveId), board: addToRow(p.board, autoPlacementRow(reviveCard, p.board), reviveId) }));
+          ns = withPlayer(ns, actingKey, (p) => ({ ...p, discard: p.discard.filter((id) => id !== reviveId), board: addToRow(p.board, p.discardRow[reviveId] || autoPlacementRow(reviveCard, p.board), reviveId) }));
           log.push(`Revives ${reviveCard.name} from the discard pile.`);
         }
         // Same one-shot marker the card-Medic path sets (see
