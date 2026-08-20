@@ -7094,7 +7094,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ---- Leader carousel ---- */
 .leader-carousel { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.leader-icon-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6%; width: 40%; padding: 0; }
+.leader-icon-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6%; width: 36%; padding: 0; }
 .leader-icon-btn .card-tile.card-pg-icon { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transition: transform 0.15s; }
 .leader-icon-btn:hover .card-tile.card-pg-icon { transform: scale(1.05); }
 .leader-icon-hint { font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold-dim); }
@@ -7114,11 +7114,18 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
   scroll-padding-inline: 50%;
-  padding: 6% 37%;
+  padding: 6% 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .leader-track::-webkit-scrollbar { display: none; }
+/* Edge gutters so the first/last card can still scroll-snap to center,
+   without eating into the track's content box the way padding did — that
+   padding was shrinking the box the item flex-basis percentages resolve
+   against, so the is-focused size bump was barely visible. Pseudo-elements
+   are flex items too but aren't real DOM children, so they don't shift
+   trackRef.current.children[idx] indexing. */
+.leader-track::before, .leader-track::after { content: ""; flex: 0 0 37%; }
 .leader-track-item { flex: 0 0 22%; scroll-snap-align: center; opacity: 0.5; transition: flex-basis 0.2s, opacity 0.2s, transform 0.2s; cursor: pointer; }
 .leader-track-item.is-focused { flex: 0 0 34%; opacity: 1; }
 .leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
