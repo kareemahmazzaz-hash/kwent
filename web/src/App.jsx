@@ -7054,9 +7054,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    grid — the actual point of this screen — gets the rest of the viewport. */
 .deckbuilder-v2 .screen-title { flex: 0 0 auto; font-size: 1.05rem; margin: 0 0 6px; }
 .deckbuilder-v2 .deckbuilder-header {
-  flex: 0 1 auto;
-  max-height: 18vh;
-  overflow: hidden;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
