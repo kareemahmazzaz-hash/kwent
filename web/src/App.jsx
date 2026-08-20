@@ -356,7 +356,7 @@ const FACTION_META = {
   nilfgaard:       { label: "Nilfgaardian Empire", short: "NIL", color: "#c9a23a" },
   northern_realms: { label: "Northern Realms",     short: "NR",  color: "#3d6aa0" },
   scoiatael:       { label: "Scoia'tael",          short: "ST",  color: "#4c8a4f" },
-  skellige:        { label: "Skellige",            short: "SK",  color: "#5a8894" },
+  skellige:        { label: "Skellige",            short: "SK",  color: "#5b4b8a" },
   neutral:         { label: "Neutral",             short: "NEU", color: "#938d78" },
 };
 
