@@ -3739,32 +3739,26 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
         <div className="card-zoom-overlay leader-zoom-overlay" onClick={() => setExpanded(false)}>
           <div className="leader-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="leader-expanded">
-              <div
-                className="leader-hoverzone leader-hoverzone-left"
-                onMouseEnter={() => startHoverScroll(-1)}
-                onMouseLeave={stopHoverScroll}
-                onClick={() => focusLeader(focusIndex - 1)}
-                aria-label="Scroll to previous leader"
-              />
               <div className="leader-track" ref={trackRef}>
-                {leaders.map((l, idx) => (
-                  <div key={l.id} className={"leader-track-item" + (idx === focusIndex ? " is-focused" : "")}>
-                    <CardTile
-                      card={l}
-                      size={idx === focusIndex ? "pg-carousel-focus" : "pg-carousel"}
-                      selected={l.id === leaderId}
-                      onClick={() => handleTileClick(idx)}
-                    />
-                  </div>
-                ))}
+                {leaders.map((l, idx) => {
+                  const dir = idx < focusIndex ? -1 : idx > focusIndex ? 1 : 0;
+                  return (
+                    <div
+                      key={l.id}
+                      className={"leader-track-item" + (idx === focusIndex ? " is-focused" : "")}
+                      onMouseEnter={dir !== 0 ? () => startHoverScroll(dir) : undefined}
+                      onMouseLeave={dir !== 0 ? stopHoverScroll : undefined}
+                    >
+                      <CardTile
+                        card={l}
+                        size={idx === focusIndex ? "pg-carousel-focus" : "pg-carousel"}
+                        selected={l.id === leaderId}
+                        onClick={() => handleTileClick(idx)}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-              <div
-                className="leader-hoverzone leader-hoverzone-right"
-                onMouseEnter={() => startHoverScroll(1)}
-                onMouseLeave={stopHoverScroll}
-                onClick={() => focusLeader(focusIndex + 1)}
-                aria-label="Scroll to next leader"
-              />
             </div>
             {shown && (
               <div className="leader-ability-box leader-zoom-ability-box">
@@ -7100,7 +7094,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 /* ---- Leader carousel ---- */
 .leader-carousel { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.leader-icon-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6%; width: 60%; padding: 0; }
+.leader-icon-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6%; width: 40%; padding: 0; }
 .leader-icon-btn .card-tile.card-pg-icon { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transition: transform 0.15s; }
 .leader-icon-btn:hover .card-tile.card-pg-icon { transform: scale(1.05); }
 .leader-icon-hint { font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold-dim); }
@@ -7109,9 +7103,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    its neighbors always have room and never get clipped or need a scrollbar. */
 .leader-zoom-overlay { padding: 4vh 2vw; }
 .leader-zoom-content { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 1100px; }
-.leader-expanded { display: flex; align-items: center; width: 100%; gap: 2%; }
-.leader-hoverzone { flex: 0 0 8%; align-self: stretch; min-height: 40vh; cursor: pointer; border-radius: 8%; }
-.leader-hoverzone:hover { background: rgba(201,162,75,0.08); }
+.leader-expanded { display: flex; align-items: center; width: 100%; }
 .leader-track {
   flex: 1 1 auto;
   display: flex;
@@ -7121,7 +7113,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   overflow-y: visible;
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
-  padding: 6% 0;
+  scroll-padding-inline: 50%;
+  padding: 6% 37%;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
