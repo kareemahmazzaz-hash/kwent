@@ -7080,6 +7080,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   gap: 3%;
   flex: 1 1 auto;
   min-height: 0;
+  max-height: none;
   overflow-y: auto;
   align-content: start;
   padding: 3%;
