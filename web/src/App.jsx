@@ -3764,7 +3764,6 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
               <div className="leader-ability-box leader-zoom-ability-box">
                 <strong>{shown.name}</strong>
                 <p>{abilityDescriptionFor(shown)}</p>
-                <span className="leader-zoom-hint">Tap the centered card again to select it</span>
               </div>
             )}
           </div>
@@ -7127,7 +7126,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    trackRef.current.children[idx] indexing. */
 .leader-track::before, .leader-track::after { content: ""; flex: 0 0 37%; }
 .leader-track-item { flex: 0 0 22%; scroll-snap-align: center; opacity: 0.5; transition: flex-basis 0.2s, opacity 0.2s, transform 0.2s; cursor: pointer; }
-.leader-track-item.is-focused { flex: 0 0 34%; opacity: 1; }
+.leader-track-item.is-focused { flex: 0 0 25.5%; opacity: 1; }
 .leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
 .leader-track .card-tile.card-pg-carousel-focus {
   width: 100%; aspect-ratio: 0.537 / 1; height: auto;
@@ -7135,7 +7134,6 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 }
 .leader-ability-box { margin-top: 1rem; max-width: 90%; }
 .leader-zoom-ability-box { margin-top: 0; max-width: 480px; text-align: center; }
-.leader-zoom-hint { display: block; margin-top: 8px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--gold-dim); font-style: italic; }
 .leader-ability-box strong { display: block; color: var(--gold); font-family: var(--font-display); margin-bottom: 4px; }
 .leader-ability-box p { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
 .leader-expanded-actions { display: flex; gap: 8px; margin-top: 0.8rem; }
