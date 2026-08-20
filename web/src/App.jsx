@@ -1286,7 +1286,6 @@ function resolvePlayCard(state, actingKey, cardId, options = {}) {
   }
 
   ns = { ...ns, log: [...ns.log, ...log] };
-  ns = withPlayer(ns, actingKey, (p) => ({ ...p, passed: p.hand.length === 0 ? true : p.passed }));
   return ns;
 }
 
@@ -1768,6 +1767,15 @@ function finishTurnAfterMove(ns, actingPlayer) {
   // shouldn't get to act while the acting player still has the "cards
   // revealed" overlay up. Held until USE_LEADER's ackReveal clears it.
   if (ns.players[actingPlayer].leaderReveal) return ns;
+  // Only NOW is the acting player's turn actually over (any Medic chain —
+  // including one that revives a Spy and refills the hand — has fully
+  // played out), so this is the correct point to check for an empty hand.
+  // Checking this immediately after PLAY_CARD (as before) was too early:
+  // a Medic reviving a Spy card hands the medic's controller 2 fresh cards
+  // as part of the same turn, so a hand that hit 0 right after the initial
+  // play could be non-empty again by the time the turn truly ends — but the
+  // old check locked in "passed" before that refill ever happened.
+  ns = withPlayer(ns, actingPlayer, (p) => ({ ...p, passed: p.hand.length === 0 ? true : p.passed }));
   if (ns.players.p1.passed && ns.players.p2.passed) return finishRound(ns);
   const nextKey = otherKey(actingPlayer);
   return { ...ns, turn: ns.players[nextKey].passed ? actingPlayer : nextKey };
