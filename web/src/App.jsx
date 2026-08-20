@@ -3954,7 +3954,9 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
             factionLabel={FACTION_META[faction].label}
           />
           <div className="deck-count">
-            Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards — <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
+            Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards
+            <br />
+            <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
             {onRandomize && (
               <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
                 🎲 Random deck
