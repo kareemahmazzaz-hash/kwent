@@ -2450,7 +2450,7 @@ function computeAIAction(state, aiKey) {
     }
   }
 
-  if (me.hand.length === 0 || me.passed) return { type: "PASS", player: aiKey };
+  if (me.hand.length === 0 || me.passed) return { type: "PASS", player: aiKey, reason: "forced-empty-hand" };
 
   // Filter out cards the AI can't currently resolve (e.g. Decoy with no target),
   // and rank the rest by actual battlefield impact rather than raw power.
@@ -2460,7 +2460,7 @@ function computeAIAction(state, aiKey) {
     .map((c) => ({ card: c, impact: estimateCardImpact(c, me, opp, spyDoubled) }))
     .sort((a, b) => b.impact - a.impact);
 
-  if (ranked.length === 0) return { type: "PASS", player: aiKey };
+  if (ranked.length === 0) return { type: "PASS", player: aiKey, reason: "forced-no-legal-plays" };
 
   const myTotal = boardTotal(me.board, spyDoubled);
   const oppTotal = boardTotal(opp.board, spyDoubled);
@@ -2510,19 +2510,19 @@ function computeAIAction(state, aiKey) {
       (roundOneIsFree && (cardEdge >= 1 || margin >= 20)));
 
   if (opp.passed) {
-    if (myTotal > oppTotal) return { type: "PASS", player: aiKey };
+    if (myTotal > oppTotal) return { type: "PASS", player: aiKey, reason: "strategic-already-winning" };
     // Being locked in a one-sided race doesn't mean fighting is free — a
     // hopeless, cheap-to-give-up round (round 1, tied 0-0, opponent way
     // ahead) is still worth banking cards instead of dumping the hand
     // chasing it, exactly like the normal concede logic below. Without this
     // check, this branch bypassed that logic entirely through a side door.
-    if (canAffordToConcede) return { type: "PASS", player: aiKey };
+    if (canAffordToConcede) return { type: "PASS", player: aiKey, reason: "strategic-conceding" };
     const need = oppTotal - myTotal;
     const enough = [...ranked].reverse().find((r) => r.impact >= need) || ranked[0];
     // Same guard the losing-and-still-contested branch below has: never
     // force through an actively harmful card just because the opponent
     // can't punish it back. If nothing helps, keep the card for next round.
-    if (enough.impact < 0) return { type: "PASS", player: aiKey };
+    if (enough.impact < 0) return { type: "PASS", player: aiKey, reason: "forced-no-beneficial-play" };
     return play(enough.card);
   }
 
@@ -2554,7 +2554,7 @@ function computeAIAction(state, aiKey) {
   // situations applies on any given turn anyway.
   const passChance = (canAffordToConcede ? 0.6 : canAffordToBank ? 0.55 : 0) * conviction;
   if (passChance > 0 && Math.random() < passChance) {
-    return { type: "PASS", player: aiKey };
+    return { type: "PASS", player: aiKey, reason: canAffordToConcede ? "strategic-conceding" : "strategic-banking" };
   }
 
   // Even while behind, never force through an actively harmful card (e.g. a
@@ -2564,7 +2564,7 @@ function computeAIAction(state, aiKey) {
   // the hole deeper for nothing.
   if (myTotal <= oppTotal) {
     if (ranked[0].impact >= 0) return play(ranked[0].card);
-    return { type: "PASS", player: aiKey };
+    return { type: "PASS", player: aiKey, reason: "forced-no-beneficial-play" };
   }
 
   // Protecting a lead: dump the lowest-impact card, but never one with a
@@ -2574,7 +2574,7 @@ function computeAIAction(state, aiKey) {
   // non-harmful option doesn't exist, passing is strictly better than
   // hurting ourselves for no reason.
   const safeDump = [...ranked].reverse().find((r) => r.impact >= 0);
-  if (!safeDump) return { type: "PASS", player: aiKey };
+  if (!safeDump) return { type: "PASS", player: aiKey, reason: "forced-no-beneficial-play" };
   return play(safeDump.card);
 }
 
@@ -6046,7 +6046,7 @@ function AIGame({ onExit }) {
           oppBoardTotal: boardTotal(opp.board, matchHasLeader(state, "L01")),
           myHandSize: me.hand.length,
           oppHandSize: opp.hand.length,
-          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
+          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : (action.type === "PASS" && action.reason ? `pass (${action.reason})` : action.type.toLowerCase()),
         });
         setState((s) => gameReducer(s, action));
       }, delay);
@@ -6254,7 +6254,7 @@ function TestGame({ onExit }) {
           oppBoardTotal: boardTotal(opp.board, matchHasLeader(state, "L01")),
           myHandSize: me.hand.length,
           oppHandSize: opp.hand.length,
-          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : action.type.toLowerCase(),
+          action: action.type === "PLAY_CARD" ? `played ${cardById(action.cardId)?.name}` : (action.type === "PASS" && action.reason ? `pass (${action.reason})` : action.type.toLowerCase()),
         });
         setState((s) => gameReducer(s, action));
       }, delay);
