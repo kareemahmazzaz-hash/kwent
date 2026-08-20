@@ -3954,9 +3954,8 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
             factionLabel={FACTION_META[faction].label}
           />
           <div className="deck-count">
-            Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards
-            <br />
-            <strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards
+            <span className="deck-count-line">Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards</span>
+            <span className="deck-count-line"><strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards</span>
             {onRandomize && (
               <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
                 🎲 Random deck
@@ -7139,6 +7138,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-ability-box p { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
 .leader-expanded-actions { display: flex; gap: 8px; margin-top: 0.8rem; }
 .deck-count { font-family: var(--font-mono); margin-top: 14px; color: var(--gold); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; font-size: 0.82rem; text-align: center; }
+.deck-count-line { flex-basis: 100%; text-align: center; }
 .random-deck-btn { margin-left: 4px; }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
 .ability-filter-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; justify-content: flex-end; }
