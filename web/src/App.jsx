@@ -3716,63 +3716,103 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
     <div className="leader-carousel">
       <span className="section-label">Leader</span>
 
-      {!expanded ? (
-        <button type="button" className="leader-icon-btn" onClick={openCarousel}>
-          <CardTile card={chosen || leaders[0]} size="pg-icon" />
-          <span className="leader-icon-hint">{chosen ? "Change leader" : "Choose leader"}</span>
-        </button>
-      ) : (
-        <div className="leader-expanded">
-          <div
-            className="leader-hoverzone leader-hoverzone-left"
-            onMouseEnter={() => startHoverScroll(-1)}
-            onMouseLeave={stopHoverScroll}
-            onClick={() => focusLeader(focusIndex - 1)}
-            aria-label="Scroll to previous leader"
-          />
-          <div className="leader-track" ref={trackRef}>
-            {leaders.map((l, idx) => (
-              <div key={l.id} className={"leader-track-item" + (idx === focusIndex ? " is-focused" : "")}>
-                <CardTile
-                  card={l}
-                  size={idx === focusIndex ? "pg-carousel-focus" : "pg-carousel"}
-                  selected={l.id === leaderId}
-                  onClick={() => handleTileClick(idx)}
-                />
-              </div>
-            ))}
-          </div>
-          <div
-            className="leader-hoverzone leader-hoverzone-right"
-            onMouseEnter={() => startHoverScroll(1)}
-            onMouseLeave={stopHoverScroll}
-            onClick={() => focusLeader(focusIndex + 1)}
-            aria-label="Scroll to next leader"
-          />
-        </div>
-      )}
+      <button type="button" className="leader-icon-btn" onClick={openCarousel}>
+        <CardTile card={chosen || leaders[0]} size="pg-icon" />
+        <span className="leader-icon-hint">{chosen ? "Change leader" : "Choose leader"}</span>
+      </button>
 
-      {shown && (
+      {shown && !expanded && (
         <div className="leader-ability-box">
           <strong>{shown.name}</strong>
           <p>{abilityDescriptionFor(shown)}</p>
         </div>
       )}
 
-      {expanded && (
-        <div className="leader-expanded-actions">
-          <button type="button" className="btn btn-sm btn-gold" onClick={() => confirmIndex(focusIndex)}>
-            Select {leaders[focusIndex] ? leaders[focusIndex].name : ""}
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setExpanded(false)}>Cancel</button>
-        </div>
+      {/* Zoomed carousel: same full-screen "held card" treatment as the
+          per-card zoom overlay, but as a horizontal filmstrip so neighboring
+          leaders are visible either side of the focused one. Leader cards
+          are the only controls — click a neighbor to bring it to focus,
+          click the already-focused card to confirm it, or click the
+          backdrop to back out without changing anything. Hovering the
+          left/right edge (desktop) auto-scrolls through the strip. */}
+      {expanded && createPortal(
+        <div className="card-zoom-overlay leader-zoom-overlay" onClick={() => setExpanded(false)}>
+          <div className="leader-zoom-content" onClick={(e) => e.stopPropagation()}>
+            <div className="leader-expanded">
+              <div
+                className="leader-hoverzone leader-hoverzone-left"
+                onMouseEnter={() => startHoverScroll(-1)}
+                onMouseLeave={stopHoverScroll}
+                onClick={() => focusLeader(focusIndex - 1)}
+                aria-label="Scroll to previous leader"
+              />
+              <div className="leader-track" ref={trackRef}>
+                {leaders.map((l, idx) => (
+                  <div key={l.id} className={"leader-track-item" + (idx === focusIndex ? " is-focused" : "")}>
+                    <CardTile
+                      card={l}
+                      size={idx === focusIndex ? "pg-carousel-focus" : "pg-carousel"}
+                      selected={l.id === leaderId}
+                      onClick={() => handleTileClick(idx)}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div
+                className="leader-hoverzone leader-hoverzone-right"
+                onMouseEnter={() => startHoverScroll(1)}
+                onMouseLeave={stopHoverScroll}
+                onClick={() => focusLeader(focusIndex + 1)}
+                aria-label="Scroll to next leader"
+              />
+            </div>
+            {shown && (
+              <div className="leader-ability-box leader-zoom-ability-box">
+                <strong>{shown.name}</strong>
+                <p>{abilityDescriptionFor(shown)}</p>
+                <span className="leader-zoom-hint">Tap the centered card again to select it</span>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.querySelector(".gwent-root") || document.body
+      )}
+    </div>
+  );
+}
+
+// Small reusable ability-icon filter strip — DeckBuilder renders one of
+// these above Available and a separate one above Chosen, each driven by its
+// own state so filtering one side never hides cards on the other.
+function AbilityFilterRow({ filters, active, onChange }) {
+  return (
+    <div className="ability-filter-row">
+      {filters.map((f) => (
+        <button
+          key={f.key}
+          type="button"
+          title={f.label}
+          aria-label={`Filter: ${f.label}`}
+          className={"ability-filter-btn" + (active === f.key ? " active" : "")}
+          onClick={() => onChange(active === f.key ? null : f.key)}
+        >
+          <span className="ability-filter-symbol">{f.symbol}</span>
+        </button>
+      ))}
+      {active && (
+        <button type="button" className="ability-filter-btn ability-filter-clear" onClick={() => onChange(null)}>
+          ✕
+        </button>
       )}
     </div>
   );
 }
 
 function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
-  const [abilityFilter, setAbilityFilter] = useState(null);
+  // Available and Chosen each get their own independent ability filter —
+  // picking e.g. "Spy" on one side no longer hides the other side's cards.
+  const [poolAbilityFilter, setPoolAbilityFilter] = useState(null);
+  const [chosenAbilityFilter, setChosenAbilityFilter] = useState(null);
   const [deckName, setDeckName] = useState("");
   const [selectedSavedDeck, setSelectedSavedDeck] = useState("");
   const pool = useMemo(() => poolForFaction(faction), [faction]);
@@ -3784,16 +3824,16 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
   const filtered = useMemo(
     () =>
       pool
-        .filter((c) => cardMatchesAbilityFilter(c, abilityFilter))
+        .filter((c) => cardMatchesAbilityFilter(c, poolAbilityFilter))
         .slice()
         .sort((a, b) => {
           const pa = a.power ?? 0, pb = b.power ?? 0;
           if (pa !== pb) return pb - pa;
           return (a.name || "").localeCompare(b.name || "");
         }),
-    [pool, abilityFilter]
+    [pool, poolAbilityFilter]
   );
-  useEffect(() => { setAbilityFilter(null); }, [faction]);
+  useEffect(() => { setPoolAbilityFilter(null); setChosenAbilityFilter(null); }, [faction]);
 
   const leaders = useMemo(() => leadersForFaction(faction), [faction]);
   const count = selectedIds.length;
@@ -3815,13 +3855,13 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       selectedIds
         .map(cardById)
         .filter(Boolean)
-        .filter((c) => cardMatchesAbilityFilter(c, abilityFilter))
+        .filter((c) => cardMatchesAbilityFilter(c, chosenAbilityFilter))
         .sort((a, b) => {
           const pa = a.power ?? 0, pb = b.power ?? 0;
           if (pa !== pb) return pb - pa;
           return (a.name || "").localeCompare(b.name || "");
         }),
-    [selectedIds, abilityFilter]
+    [selectedIds, chosenAbilityFilter]
   );
 
   return (
@@ -3829,98 +3869,82 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
 
-      {!lockFaction && (
-        <div className="faction-picker">
-          {FACTIONS.map((f) => (
+      <div className="deckbuilder-header">
+        {!lockFaction && (
+          <div className="faction-picker">
+            {FACTIONS.map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={"faction-pill" + (faction === f ? " active" : "")}
+                style={{ "--accent": FACTION_META[f].color }}
+                onClick={() => onFactionChange(f)}
+              >
+                {FACTION_META[f].label}
+              </button>
+            ))}
+          </div>
+        )}
+        {lockFaction && <div className="faction-locked">Faction: <strong>{FACTION_META[faction].label}</strong></div>}
+
+        {onSaveDeck && (
+          <div className="saved-decks-row">
+            <input
+              className="search-input deck-name-input"
+              placeholder="Deck name…"
+              value={deckName}
+              onChange={(e) => setDeckName(e.target.value)}
+            />
             <button
-              key={f}
               type="button"
-              className={"faction-pill" + (faction === f ? " active" : "")}
-              style={{ "--accent": FACTION_META[f].color }}
-              onClick={() => onFactionChange(f)}
+              className="btn btn-sm"
+              disabled={!deckName.trim() || count < 1}
+              onClick={() => { if (onSaveDeck(deckName)) setDeckName(""); }}
             >
-              {FACTION_META[f].label}
+              💾 Save deck
             </button>
-          ))}
-        </div>
-      )}
-      {lockFaction && <div className="faction-locked">Faction: <strong>{FACTION_META[faction].label}</strong></div>}
-
-      {onSaveDeck && (
-        <div className="saved-decks-row">
-          <input
-            className="search-input deck-name-input"
-            placeholder="Deck name…"
-            value={deckName}
-            onChange={(e) => setDeckName(e.target.value)}
-          />
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={!deckName.trim() || count < 1}
-            onClick={() => { if (onSaveDeck(deckName)) setDeckName(""); }}
-          >
-            💾 Save deck
-          </button>
-          {savedDecks && savedDecks.length > 0 && (
-            <>
-              <select
-                className="search-input saved-deck-select"
-                value={selectedSavedDeck}
-                onChange={(e) => setSelectedSavedDeck(e.target.value)}
-              >
-                <option value="">Load saved deck…</option>
-                {savedDecks.map((d) => (
-                  <option key={d.name} value={d.name}>
-                    {d.name} ({FACTION_META[d.faction]?.label || d.faction})
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={!selectedSavedDeck}
-                onClick={() => onLoadDeck(selectedSavedDeck)}
-              >
-                Load
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-danger"
-                disabled={!selectedSavedDeck}
-                onClick={() => { onDeleteDeck(selectedSavedDeck); setSelectedSavedDeck(""); }}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      <div className="ability-filter-row">
-        {activeFilters.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            title={f.label}
-            aria-label={`Filter: ${f.label}`}
-            className={"ability-filter-btn" + (abilityFilter === f.key ? " active" : "")}
-            onClick={() => setAbilityFilter(abilityFilter === f.key ? null : f.key)}
-          >
-            <span className="ability-filter-symbol">{f.symbol}</span>
-            <span className="ability-filter-label">{f.label}</span>
-          </button>
-        ))}
-        {abilityFilter && (
-          <button type="button" className="ability-filter-btn ability-filter-clear" onClick={() => setAbilityFilter(null)}>
-            Clear
-          </button>
+            {savedDecks && savedDecks.length > 0 && (
+              <>
+                <select
+                  className="search-input saved-deck-select"
+                  value={selectedSavedDeck}
+                  onChange={(e) => setSelectedSavedDeck(e.target.value)}
+                >
+                  <option value="">Load saved deck…</option>
+                  {savedDecks.map((d) => (
+                    <option key={d.name} value={d.name}>
+                      {d.name} ({FACTION_META[d.faction]?.label || d.faction})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={!selectedSavedDeck}
+                  onClick={() => onLoadDeck(selectedSavedDeck)}
+                >
+                  Load
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-danger"
+                  disabled={!selectedSavedDeck}
+                  onClick={() => { onDeleteDeck(selectedSavedDeck); setSelectedSavedDeck(""); }}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
 
       <div className="db-columns">
         <div className="db-col db-col-pool">
-          <span className="section-label">Available</span>
+          <div className="db-col-header">
+            <span className="section-label">Available</span>
+            <AbilityFilterRow filters={activeFilters} active={poolAbilityFilter} onChange={setPoolAbilityFilter} />
+          </div>
           <div className="pool-grid pg-grid">
             {unselectedFiltered.map((c) => (
               <CardTile key={c.id} card={c} size="pg" onClick={() => onToggleCard(c.id)} />
@@ -3947,7 +3971,10 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         </div>
 
         <div className="db-col db-col-chosen">
-          <span className="section-label">Chosen ({count})</span>
+          <div className="db-col-header">
+            <span className="section-label">Chosen ({count})</span>
+            <AbilityFilterRow filters={activeFilters} active={chosenAbilityFilter} onChange={setChosenAbilityFilter} />
+          </div>
           <div className="pool-grid pg-grid chosen-grid">
             {chosenCards.map((c) => (
               <CardTile key={c.id} card={c} size="pg" selected onClick={() => onToggleCard(c.id)} />
@@ -7014,36 +7041,49 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 
 /* ---- Deck builder ---- */
-.faction-picker { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 14px; width: 100%; }
-.faction-pill { flex: 1 1 0; font-family: var(--font-display); font-size: 0.78rem; padding: 6px 8px; border-radius: 16px; border: 1px solid var(--accent); background: transparent; color: var(--parchment); cursor: pointer; opacity: 0.6; text-align: center; white-space: nowrap; }
+.faction-picker { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; width: 100%; }
+.faction-pill { flex: 1 1 0; font-family: var(--font-display); font-size: 0.72rem; padding: 4px 8px; border-radius: 16px; border: 1px solid var(--accent); background: transparent; color: var(--parchment); cursor: pointer; opacity: 0.6; text-align: center; white-space: nowrap; }
 .faction-pill.active { opacity: 1; background: var(--accent); color: #12140d; font-weight: 700; }
-.faction-locked { font-size: 0.9rem; color: var(--muted); margin-bottom: 10px; }
-.section-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--gold-dim); display: block; margin-bottom: 6px; }
+.faction-locked { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+.section-label { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; color: var(--gold-dim); display: block; margin-bottom: 4px; white-space: nowrap; }
 /* ---- Deck builder v2: pool / leader / chosen columns ---- */
 /* Lock the whole builder to the viewport — internal panels scroll, the page never does. */
 .gwent-root:has(.deckbuilder-v2) { height: 100vh; overflow: hidden; }
 .deckbuilder-v2.screen {
   max-width: 100%;
-  padding: 14px 3% 14px;
+  padding: 10px 3% 10px;
   height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.deckbuilder-v2 .screen-title,
+/* Header block (title, faction tabs, save/load row) is capped so the card
+   grid — the actual point of this screen — gets the rest of the viewport. */
+.deckbuilder-v2 .screen-title { flex: 0 0 auto; font-size: 1.05rem; margin: 0 0 6px; }
+.deckbuilder-v2 .deckbuilder-header {
+  flex: 0 1 auto;
+  max-height: 18vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 .deckbuilder-v2 .faction-picker,
 .deckbuilder-v2 .faction-locked,
 .deckbuilder-v2 .saved-decks-row,
-.deckbuilder-v2 .ability-filter-row,
 .deckbuilder-v2 .deckbuilder-footer,
 .deckbuilder-v2 .deckbuilder-back { flex: 0 0 auto; }
-.db-columns { display: flex; gap: 2%; align-items: stretch; margin-top: 1.2rem; flex: 1 1 auto; min-height: 0; }
+.db-columns { display: flex; gap: 2%; align-items: stretch; margin-top: 0.6rem; flex: 1 1 auto; min-height: 0; }
 .db-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .db-col-pool, .db-col-chosen { flex: 1 1 34%; }
-.db-col-leader { flex: 1 1 32%; overflow-y: auto; justify-content: center; }
+.db-col-leader { flex: 1 1 32%; overflow: visible; justify-content: center; }
+.db-col-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.db-col-header .section-label { margin-bottom: 0; }
 .pg-grid.pool-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: min-content;
+  align-items: start;
   gap: 3%;
   flex: 1 1 auto;
   min-height: 0;
@@ -7054,7 +7094,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   border-radius: 8%;
   border: 1px solid var(--line);
 }
-.pg-grid .card-tile.card-pg { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
+.pg-grid .card-tile.card-pg { width: 100%; aspect-ratio: 0.537 / 1; height: auto; align-self: start; }
 .pg-grid .hint { grid-column: 1 / -1; }
 .chosen-grid { border-color: var(--gold-dim); }
 
@@ -7064,8 +7104,13 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .leader-icon-btn .card-tile.card-pg-icon { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transition: transform 0.15s; }
 .leader-icon-btn:hover .card-tile.card-pg-icon { transform: scale(1.05); }
 .leader-icon-hint { font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold-dim); }
+/* Zoomed leader carousel — a full-screen overlay (same backdrop language as
+   the generic per-card "held card" zoom) so the enlarged focused card and
+   its neighbors always have room and never get clipped or need a scrollbar. */
+.leader-zoom-overlay { padding: 4vh 2vw; }
+.leader-zoom-content { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 1100px; }
 .leader-expanded { display: flex; align-items: center; width: 100%; gap: 2%; }
-.leader-hoverzone { flex: 0 0 8%; align-self: stretch; min-height: 30vh; cursor: pointer; border-radius: 8%; }
+.leader-hoverzone { flex: 0 0 8%; align-self: stretch; min-height: 40vh; cursor: pointer; border-radius: 8%; }
 .leader-hoverzone:hover { background: rgba(201,162,75,0.08); }
 .leader-track {
   flex: 1 1 auto;
@@ -7073,33 +7118,40 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   align-items: center;
   gap: 4%;
   overflow-x: auto;
+  overflow-y: visible;
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
-  padding: 2% 0;
+  padding: 6% 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .leader-track::-webkit-scrollbar { display: none; }
-.leader-track-item { flex: 0 0 30%; scroll-snap-align: center; opacity: 0.55; transition: opacity 0.2s, transform 0.2s; }
+.leader-track-item { flex: 0 0 26%; scroll-snap-align: center; opacity: 0.5; transition: opacity 0.2s, transform 0.2s; cursor: pointer; }
 .leader-track-item.is-focused { opacity: 1; }
 .leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
-.leader-track .card-tile.card-pg-carousel-focus { width: 100%; aspect-ratio: 0.537 / 1; height: auto; transform: scale(1.15); }
+.leader-track .card-tile.card-pg-carousel-focus {
+  width: 100%; aspect-ratio: 0.537 / 1; height: auto;
+  transform: scale(1.28);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.7), 0 0 0 2px var(--gold);
+}
 .leader-ability-box { margin-top: 1rem; max-width: 90%; }
+.leader-zoom-ability-box { margin-top: 0; max-width: 480px; text-align: center; }
+.leader-zoom-hint { display: block; margin-top: 8px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--gold-dim); font-style: italic; }
 .leader-ability-box strong { display: block; color: var(--gold); font-family: var(--font-display); margin-bottom: 4px; }
 .leader-ability-box p { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
 .leader-expanded-actions { display: flex; gap: 8px; margin-top: 0.8rem; }
 .deck-count { font-family: var(--font-mono); margin-top: 14px; color: var(--gold); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; font-size: 0.82rem; text-align: center; }
 .random-deck-btn { margin-left: 4px; }
 .search-input { width: 100%; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); font-family: var(--font-body); margin-bottom: 12px; }
-.ability-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.ability-filter-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
+.ability-filter-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; justify-content: flex-end; }
+.ability-filter-btn { display: flex; align-items: center; justify-content: center; padding: 4px; width: 24px; height: 24px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel-2); color: var(--parchment); cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
 .ability-filter-btn:hover { border-color: var(--gold); transform: translateY(-1px); }
 .ability-filter-btn.active { background: var(--gold); color: #201603; border-color: var(--gold); font-weight: 600; }
-.ability-filter-symbol { font-size: 1rem; line-height: 1; }
-.ability-filter-clear { opacity: 0.8; font-style: italic; }
+.ability-filter-symbol { font-size: 0.85rem; line-height: 1; }
+.ability-filter-clear { opacity: 0.8; font-style: italic; font-size: 0.7rem; }
 .pool-grid { display: flex; flex-wrap: wrap; gap: 7px; max-height: 46vh; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--line); }
 .deckbuilder-footer { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
-.saved-decks-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.saved-decks-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; flex-wrap: wrap; }
 .deck-name-input { max-width: 180px; }
 .saved-deck-select { max-width: 220px; }
 .btn-danger { background: #6b1f1f; border-color: #8a2b2b; color: #f1d9d9; }
