@@ -7119,12 +7119,11 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   -ms-overflow-style: none;
 }
 .leader-track::-webkit-scrollbar { display: none; }
-.leader-track-item { flex: 0 0 26%; scroll-snap-align: center; opacity: 0.5; transition: opacity 0.2s, transform 0.2s; cursor: pointer; }
-.leader-track-item.is-focused { opacity: 1; }
+.leader-track-item { flex: 0 0 22%; scroll-snap-align: center; opacity: 0.5; transition: flex-basis 0.2s, opacity 0.2s, transform 0.2s; cursor: pointer; }
+.leader-track-item.is-focused { flex: 0 0 34%; opacity: 1; }
 .leader-track .card-tile.card-pg-carousel { width: 100%; aspect-ratio: 0.537 / 1; height: auto; }
 .leader-track .card-tile.card-pg-carousel-focus {
   width: 100%; aspect-ratio: 0.537 / 1; height: auto;
-  transform: scale(1.28);
   box-shadow: 0 10px 40px rgba(0,0,0,0.7), 0 0 0 2px var(--gold);
 }
 .leader-ability-box { margin-top: 1rem; max-width: 90%; }
