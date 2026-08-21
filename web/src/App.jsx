@@ -6469,6 +6469,7 @@ function lanWsUrl() {
 function OnlineGame({ onExit }) {
   const [phase, setPhase] = useState("choose"); // choose, deckbuild, waiting-deck, synced
   const [role, setRole] = useState(null); // p1 (host) | p2 (guest)
+  const [myDisplayName, setMyDisplayName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [joinInput, setJoinInput] = useState("");
   const [joinError, setJoinError] = useState("");
@@ -6599,7 +6600,7 @@ function OnlineGame({ onExit }) {
 
   async function confirmDeckOnline() {
     const payload = makePlayer({
-      name: role === "p1" ? "Host" : "Guest",
+      name: myDisplayName.trim().slice(0, 11) || "Player",
       faction: builder.faction, leaderId: builder.leaderId, deckIds: builder.selected, isAI: false,
     });
     payload.deck = builder.selected;
@@ -6721,6 +6722,15 @@ function OnlineGame({ onExit }) {
           </p>
         )}
         {lanStatus === "connecting" && <p className="mulligan-hint">Connecting to LAN server…</p>}
+        <div className="join-row" style={{ marginBottom: "10px" }}>
+          <input
+            className="search-input"
+            placeholder="Your name (shown to opponent)"
+            maxLength={11}
+            value={myDisplayName}
+            onChange={(e) => setMyDisplayName(e.target.value.slice(0, 11))}
+          />
+        </div>
         <div className="lobby-actions">
           <button type="button" className="btn btn-gold btn-lg" onClick={hostGame}>Host a game</button>
           <div className="join-row">
@@ -6738,7 +6748,7 @@ function OnlineGame({ onExit }) {
       <>
         {role === "p1" && <div className="room-code-badge">Room code: <strong>{roomCode}</strong> — share it with your opponent</div>}
         <DeckBuilder
-          playerLabel={role === "p1" ? "Host" : "Guest"}
+          playerLabel="You"
           faction={builder.faction} onFactionChange={builder.setFaction} lockFaction={false}
           selectedIds={builder.selected} onToggleCard={builder.toggle}
           leaderId={builder.leaderId} onSelectLeader={builder.setLeaderId}
@@ -6765,8 +6775,8 @@ function OnlineGame({ onExit }) {
 
   if (meta.phase === "scoiaChoice") {
     if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
-    const myName = role === "p1" ? "You (Host)" : "You (Guest)";
-    const oppName = role === "p1" ? "Guest" : "Host";
+    const myName = "You";
+    const oppName = theirs.name || "Player";
     if (meta.scoiaChooser === role) {
       return (
         <ScoiaChoicePanel
@@ -6782,8 +6792,8 @@ function OnlineGame({ onExit }) {
   if (meta.phase === "coinflip") {
     if (!mine || !theirs) return <div className="screen online-lobby"><p className="mulligan-hint">Syncing…</p></div>;
     const { caller, resolved, starter } = meta.coinFlip;
-    const myName = role === "p1" ? "You (Host)" : "You (Guest)";
-    const oppName = role === "p1" ? "Guest" : "Host";
+    const myName = "You";
+    const oppName = theirs.name || "Player";
     if (!caller) {
       // Host calls by convention.
       if (role === "p1") {
@@ -6844,7 +6854,7 @@ function OnlineGame({ onExit }) {
       if (!isTie) {
         const p1Won = p1s > p2s;
         const iAmP1 = role === "p1";
-        winnerName = p1Won === iAmP1 ? "You" : "Opponent";
+        winnerName = p1Won === iAmP1 ? "You" : (theirs.name || "Player");
       }
       roundBannerEl = <RoundBanner round={meta.round} score={meta.lastRoundScore} roundWinnerName={winnerName} isTie={isTie} hideButton viewerName="You" />;
     }
@@ -6859,7 +6869,7 @@ function OnlineGame({ onExit }) {
       if (!isTie) {
         const p1Won = p1s > p2s;
         const iAmP1 = role === "p1";
-        roundWinnerName = p1Won === iAmP1 ? "You" : "Opponent";
+        roundWinnerName = p1Won === iAmP1 ? "You" : (theirs.name || "Player");
       }
       const iWon = meta.gameWinner === role;
       const isDraw = meta.gameWinner === "draw";
@@ -6875,7 +6885,7 @@ function OnlineGame({ onExit }) {
             isTie={isTie}
             roundWinnerName={roundWinnerName}
             isGameEnd
-            gameWinnerName={isDraw ? null : (iWon ? "You" : "Opponent")}
+            gameWinnerName={isDraw ? null : (iWon ? "You" : (theirs.name || "Player"))}
             hideButton
             viewerName="You"
           />
@@ -6900,15 +6910,15 @@ function OnlineGame({ onExit }) {
       <>
         {oppDisconnected && (
           <div className="disconnect-banner">
-            {(oppRole === "p1" ? "Host" : "Guest")} has disconnected — forfeiting the game if they don't reconnect…
+            {theirs.name || "Player"} has disconnected — forfeiting the game if they don't reconnect…
           </div>
         )}
         <PlayBoard
           state={composeState(meta, mine, theirs, role, oppRole)}
           viewerRole={role}
           opponentRole={oppRole}
-          viewerName={role === "p1" ? "You (Host)" : "You (Guest)"}
-          opponentName={role === "p1" ? "Guest" : "Host"}
+          viewerName="You"
+          opponentName={theirs.name || "Player"}
           isMyTurn={isPlay && meta.turn === role}
           canAct={isPlay && meta.turn === role}
           onPlayCard={(cardId, options) => applyAction({ type: "PLAY_CARD", player: role, cardId, options })}
