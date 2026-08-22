@@ -3,6 +3,7 @@
 // -> your web app -> SDK setup and configuration -> Config).
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, update, onValue, off } from "firebase/database";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAQYJCmJ3pBMO4Segc6HSzSjQr2JBSPDbc",
@@ -16,9 +17,31 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
+const auth = getAuth(app);
 
-// Realtime DB keys can't contain '.', '#', '$', '[', ']' — the "kwent:CODE:role"
-// keys used by online mode only use ':' as a separator, which is safe as-is.
+// Silent anonymous sign-in — no login screen, just a stable per-browser UID
+// the DB security rules use to confirm a write is coming from one of the
+// two actual players in a room (see database.rules.json). Cached as a
+// promise so every caller during startup shares the same in-flight sign-in
+// instead of firing signInAnonymously() multiple times.
+let uidPromise = null;
+export function getUid() {
+  if (!uidPromise) {
+    uidPromise = new Promise((resolve, reject) => {
+      const unsub = onAuthStateChanged(auth, (user) => {
+        if (user) { unsub(); resolve(user.uid); }
+      }, reject);
+      signInAnonymously(auth).catch((e) => { unsub(); reject(e); });
+    });
+  }
+  return uidPromise;
+}
+
+// Realtime DB keys can't contain '.', '#', '$', '[', ']'. Online-mode keys
+// use '/' as the room/role separator (e.g. "kwent/CODE/meta") so each room
+// is a real nested DB path — that's what lets database.rules.json scope
+// read/write permission per-room via a $code wildcard, and lets joinGame()
+// patch in just the guestUid field with a single-path update() call.
 
 export async function dbGet(key) {
   try {
