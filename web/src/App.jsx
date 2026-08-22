@@ -7804,7 +7804,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .lobby-actions { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 20px; }
 .join-row { display: flex; gap: 8px; }
 .join-row .search-input { width: 160px; text-align: center; letter-spacing: 0.1em; text-transform: uppercase; }
-.room-code-badge { text-align: center; font-family: var(--font-mono); background: var(--bg-panel-2); border: 1px solid var(--gold-dim); border-radius: 8px; padding: 8px; margin: 10px auto; max-width: 420px; }
+.room-code-badge { text-align: center; font-family: var(--font-mono); background: var(--bg-panel-2); border: 1px solid var(--gold-dim); border-radius: 15%; padding: 0.5% 1%; margin: 0.5% auto; width: fit-content; white-space: nowrap; }
 
 @media (max-width: 520px) {
   .home-hero h1 { font-size: 1.9rem; }
