@@ -2912,7 +2912,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
               src={src}
               alt={card.name}
               decoding="async"
-              loading={size === "pg" ? "lazy" : "eager"}
+              loading="eager"
               onError={() => setArtStage((s) => s + 1)}
             />
           </div>
