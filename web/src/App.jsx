@@ -3809,7 +3809,7 @@ function AbilityFilterRow({ filters, active, onChange }) {
   );
 }
 
-function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack }) {
+function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selectedIds, onToggleCard, leaderId, onSelectLeader, onConfirm, busyLabel, onRandomize, savedDecks, onSaveDeck, onLoadDeck, onDeleteDeck, onBack, topBarExtra }) {
   // Available and Chosen each get their own independent ability filter —
   // picking e.g. "Spy" on one side no longer hides the other side's cards.
   const [poolAbilityFilter, setPoolAbilityFilter] = useState(null);
@@ -3867,7 +3867,12 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
   return (
     <div className="screen deckbuilder deckbuilder-v2">
-      {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
+      {(onBack || topBarExtra) && (
+        <div className="deckbuilder-topbar">
+          {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
+          {topBarExtra}
+        </div>
+      )}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
 
       <div className="deckbuilder-header">
@@ -6762,7 +6767,6 @@ function OnlineGame({ onExit }) {
   if (phase === "deckbuild") {
     return (
       <>
-        {role === "p1" && <div className="room-code-badge">Room code: <strong>{roomCode}</strong> — share it with your opponent</div>}
         <DeckBuilder
           playerLabel="You"
           faction={builder.faction} onFactionChange={builder.setFaction} lockFaction={false}
@@ -6772,6 +6776,7 @@ function OnlineGame({ onExit }) {
           onRandomize={builder.randomize}
           savedDecks={builder.savedDecks} onSaveDeck={builder.saveDeck} onLoadDeck={builder.loadDeck} onDeleteDeck={builder.deleteDeck}
           onBack={backToChoose}
+          topBarExtra={role === "p1" ? <div className="room-code-badge inline">Room code: <strong>{roomCode}</strong></div> : null}
         />
       </>
     );
@@ -7098,7 +7103,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deckbuilder-v2 .faction-locked,
 .deckbuilder-v2 .saved-decks-row,
 .deckbuilder-v2 .deckbuilder-footer,
-.deckbuilder-v2 .deckbuilder-back { flex: 0 0 auto; }
+.deckbuilder-v2 .deckbuilder-back,
+.deckbuilder-v2 .deckbuilder-topbar { flex: 0 0 auto; }
 .db-columns { display: flex; gap: 2%; align-items: stretch; margin-top: 0.6rem; flex: 1 1 auto; min-height: 0; }
 .db-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .db-col-pool, .db-col-chosen { flex: 1 1 34%; }
@@ -7812,6 +7818,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .join-row { display: flex; gap: 8px; }
 .join-row .search-input { width: 160px; text-align: center; letter-spacing: 0.1em; text-transform: uppercase; }
 .room-code-badge { text-align: center; font-family: var(--font-mono); background: var(--bg-panel-2); border: 1px solid var(--gold-dim); border-radius: 15%; padding: 0.5% 1%; margin: 0.5% auto; width: fit-content; white-space: nowrap; }
+.room-code-badge.inline { margin: 0; }
+.deckbuilder-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.deckbuilder-topbar .deckbuilder-back { margin-bottom: 0; }
 
 @media (max-width: 520px) {
   .home-hero h1 { font-size: 1.9rem; }
