@@ -20,3 +20,10 @@ export async function dbGet(key) { return active.dbGet(key); }
 export async function dbSet(key, value) { return active.dbSet(key, value); }
 export async function dbUpdate(updates) { return active.dbUpdate(updates); }
 export function dbListen(key, callback) { return active.dbListen(key, callback); }
+
+// Stable per-session id used by the DB security rules to confirm a write is
+// coming from one of the two actual players in a room. Firebase mode signs
+// in anonymously and returns the real auth UID; LAN mode has no DB rules to
+// satisfy (the relay is local-network-only) so it just hands back a random
+// per-tab id to keep the call uniform for App.jsx.
+export async function dbGetUid() { return active.getUid(); }
