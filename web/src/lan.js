@@ -63,6 +63,15 @@ export function setLanServerUrl(url) {
   return connect(url);
 }
 
+// No auth/rules on the LAN relay (it's local-network-only), so this is just
+// a random per-tab id — exists purely so net.js's dbGetUid() has the same
+// shape on both backends and App.jsx doesn't need to branch on netMode.
+let localUid = null;
+export async function getUid() {
+  if (!localUid) localUid = "lan-" + Math.random().toString(36).slice(2, 10);
+  return localUid;
+}
+
 export function isLanConnected() {
   return !!ws && ws.readyState === WebSocket.OPEN;
 }
