@@ -2912,7 +2912,7 @@ function CardTile({ card, size = "md", onClick, disabled, selected, faded, justP
               src={src}
               alt={card.name}
               decoding="async"
-              loading="eager"
+              loading={size === "pg" ? "lazy" : "eager"}
               onError={() => setArtStage((s) => s + 1)}
             />
           </div>
@@ -6491,6 +6491,13 @@ function OnlineGame({ onExit }) {
   // twin. Runs independently on each connected client off the synced meta,
   // so both sides reveal at roughly the same real time.
   const [revealGameOver, setRevealGameOver] = useState(false);
+
+  // Fire the anonymous sign-in the moment this screen mounts, not when the
+  // player clicks Host/Join — signInAnonymously() is a network round trip,
+  // and dbGetUid() (called by both) caches its promise, so by the time the
+  // click happens auth has very likely already resolved and the button no
+  // longer blocks on it. Runs unconditionally; harmless no-op for LAN mode.
+  useEffect(() => { dbGetUid(); }, []);
 
   useEffect(() => {
     if (!meta || meta.phase !== "gameEnd") { setRevealGameOver(false); return; }
