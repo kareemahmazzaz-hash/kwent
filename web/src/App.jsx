@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { dbGet, dbSet, dbUpdate, dbListen, setNetBackend } from "./net.js";
+import { dbGet, dbSet, dbUpdate, dbListen, setNetBackend, dbGetUid } from "./net.js";
 import { setLanServerUrl, getLastHello } from "./lan.js";
 
 /* =======================================================================
@@ -6386,9 +6386,9 @@ function TestGame({ onExit }) {
    at all. This is still a trust-based prototype with no server validation,
    consistent with the original design — just extended to cover more cases. */
 
-function metaKey(code) { return "kwent:" + code + ":meta"; }
-function playerKey(code, role) { return "kwent:" + code + ":" + role; }
-function presenceKey(code, role) { return "kwent:" + code + ":presence:" + role; }
+function metaKey(code) { return "kwent/" + code + "/meta"; }
+function playerKey(code, role) { return "kwent/" + code + "/" + role; }
+function presenceKey(code, role) { return "kwent/" + code + "/presence/" + role; }
 
 /* Firebase Realtime Database has no real concept of an empty array or a
    null leaf value — writing either one is treated as deleting that key.
@@ -6577,8 +6577,9 @@ function OnlineGame({ onExit }) {
 
   async function hostGame() {
     if (!(await connectBackend())) return;
+    const uid = await dbGetUid();
     const code = makeRoomCode();
-    await writeJSON(metaKey(code), { ...EMPTY_META, log: ["Room " + code + " created."], createdAt: Date.now() });
+    await writeJSON(metaKey(code), { ...EMPTY_META, log: ["Room " + code + " created."], createdAt: Date.now(), hostUid: uid });
     setRoomCode(code);
     setRole("p1");
     startListening(code, "p1");
@@ -6589,8 +6590,16 @@ function OnlineGame({ onExit }) {
     if (!(await connectBackend())) return;
     const code = joinInput.trim().toUpperCase();
     if (!code) return;
+    const uid = await dbGetUid();
     const m = await readJSON(metaKey(code));
     if (!m) { setJoinError("Room not found. Check the code and try again."); return; }
+    if (m.guestUid && m.guestUid !== uid) { setJoinError("Room is full."); return; }
+    // Claim the guest slot with a single-field update — the DB rules only
+    // allow this once (guestUid must not already be set to someone else),
+    // and every write to this room from here on checks auth.uid against
+    // whichever of hostUid/guestUid got recorded.
+    const ok = await dbUpdate({ [metaKey(code) + "/guestUid"]: uid });
+    if (!ok) { setJoinError("Could not join that room. Try again."); return; }
     setJoinError("");
     setRoomCode(code);
     setRole("p2");
