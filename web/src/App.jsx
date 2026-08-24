@@ -7819,7 +7819,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .join-row { display: flex; gap: 8px; }
 .join-row .search-input { width: 160px; text-align: center; letter-spacing: 0.1em; text-transform: uppercase; }
 .room-code-badge { text-align: center; font-family: var(--font-mono); background: var(--bg-panel-2); border: 1px solid var(--gold-dim); border-radius: 15%; padding: 0.5% 1%; margin: 0.5% auto; width: fit-content; white-space: nowrap; }
-.room-code-badge.inline { margin: 0; }
+.room-code-badge.inline { margin: 0; padding: 1.2% 3%; }
 .deckbuilder-topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
 .deckbuilder-topbar .deckbuilder-back { margin-bottom: 0; justify-self: start; }
 .deckbuilder-topbar-center { justify-self: center; }
