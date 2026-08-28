@@ -4382,6 +4382,30 @@ function PlayBoard({
   const scorchBurnPending = !!state.pendingBurn;
   const canAct = canActRaw && !soundGated && !medicChainPending && !scorchBurnPending;
 
+  // Debug-only: keeps window.__kwentDebug live with everything that feeds
+  // the click-gate, refreshed on a plain interval (not tied to a specific
+  // dependency array) so it's accurate even between game-state changes —
+  // e.g. while soundGated is counting down with no other re-render pending.
+  // Harmless no-op change to gameplay; purely so a freeze can be inspected
+  // from the console (window.__kwentDebug) instead of needing React DevTools
+  // or a fresh repro with logging added after the fact.
+  useEffect(() => {
+    const tick = () => {
+      window.__kwentDebug = {
+        turn: state.turn, phase: state.phase, viewerRole,
+        canActRaw, canAct, soundGated, soundGateRemainingMs: soundGateRemainingMs(),
+        medicChainPending, scorchBurnPending,
+        pendingBurn: state.pendingBurn, awaitingMedicRevive: state.awaitingMedicRevive,
+        meLeaderReveal: me.leaderReveal, oppLeaderReveal: opp.leaderReveal,
+        mePassed: me.passed, oppPassed: opp.passed,
+        updatedAt: new Date().toISOString(),
+      };
+    };
+    tick();
+    const t = setInterval(tick, 500);
+    return () => clearInterval(t);
+  });
+
   // forceRandomRevive (L08 Invader of the North) skips the picker entirely —
   // each link auto-resolves with a random eligible target instead of
   // waiting on a tap, but still goes through its own RESOLVE_MEDIC_REVIVE
@@ -6044,9 +6068,28 @@ function AIGame({ onExit }) {
     }
   }, [state]);
 
+  // AI's own leaderReveal window (L06 — "look at 3 opponent cards"): unlike
+  // the human side, there's no PlayBoard mounted for p2 to render the "Close"
+  // overlay and dispatch USE_LEADER's ackReveal — so without this, p2's
+  // leaderReveal would sit set forever, and finishTurnAfterMove's guard
+  // (`if (ns.players[actingPlayer].leaderReveal) return ns;`) would
+  // permanently block the turn from ever handing back to p1 once the AI uses
+  // L06. This just closes it on the AI's behalf after a beat, mirroring what
+  // a human player clicking "Close" would do.
   useEffect(() => {
     if (!state) return;
-    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive && !state.pendingBurn) {
+    if (state.phase === "play" && state.players.p2.leaderReveal) {
+      const delay = Math.max(900, soundGateRemainingMs());
+      aiTimerRef.current = setTimeout(() => {
+        setState((s) => gameReducer(s, { type: "USE_LEADER", player: "p2", options: { ackReveal: true } }));
+      }, delay);
+      return () => clearTimeout(aiTimerRef.current);
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
+    if (state.phase === "play" && state.turn === "p2" && !state.players.p2.passed && !state.awaitingMedicRevive && !state.pendingBurn && !state.players.p2.leaderReveal) {
       // Wait at least the usual "thinking" beat, but never fire before the
       // last move's sound has actually finished (see soundGateRemainingMs).
       const delay = Math.max(1300, soundGateRemainingMs());
