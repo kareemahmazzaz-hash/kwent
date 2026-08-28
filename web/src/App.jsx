@@ -4354,19 +4354,26 @@ function PlayBoard({
   const [pending, setPending] = useState(null);
   // Move pacing: don't let the next card/leader/pass action fire until
   // whatever sound is currently playing has actually finished — otherwise
-  // rapid-fire plays cut each other's audio off mid-clip. Re-renders every
-  // 150ms while something's playing purely so the "can I act yet" gate
-  // (and any disabled-button styling that depends on canAct) stays current;
-  // idle the rest of the time.
+  // rapid-fire plays cut each other's audio off mid-clip. The heartbeat
+  // below re-renders every 150ms for the component's whole life so the
+  // "can I act yet" gate (and any disabled-button styling that depends on
+  // canAct) stays current; the cost is negligible (one comparison per tick).
   const [, forceTick] = useState(0);
+  // Persistent heartbeat (mount-once, empty deps) instead of an effect that
+  // reinstalls on every render: the old version tore down and rebuilt its
+  // interval on every re-render (not just gate-related ones), so if the
+  // component went idle right as a render landed mid-gate — with nothing
+  // else scheduled to re-render it — the interval could be lost before it
+  // ever ticked, leaving `soundGated` frozen at stale `true` forever even
+  // after soundGateRemainingMs() had already hit 0 (the frozen-cards bug).
+  // A heartbeat that's created once and just polls for the component's
+  // whole life can't get lost in that teardown/rebuild race.
   useEffect(() => {
-    if (soundGateRemainingMs() <= 0) return;
     const t = setInterval(() => {
       forceTick((n) => n + 1);
-      if (soundGateRemainingMs() <= 0) clearInterval(t);
     }, 150);
     return () => clearInterval(t);
-  });
+  }, []);
   const soundGated = soundGateRemainingMs() > 0;
   const onPlayCard = (...args) => { if (soundGateRemainingMs() > 0) return; onPlayCardRaw(...args); };
   const onUseLeader = (...args) => { if (soundGateRemainingMs() > 0) return; onUseLeaderRaw(...args); };
@@ -4391,9 +4398,16 @@ function PlayBoard({
   // or a fresh repro with logging added after the fact.
   useEffect(() => {
     const tick = () => {
+      // Recompute soundGated/canAct live here rather than closing over the
+      // outer render-scoped consts — those go stale between renders, which
+      // previously made this debug snapshot itself misleading (it showed
+      // soundGateRemainingMs live at 0 but a frozen soundGated: true from
+      // whenever this closure was last (re)created).
+      const liveSoundGated = soundGateRemainingMs() > 0;
+      const liveCanAct = canActRaw && !liveSoundGated && !medicChainPending && !scorchBurnPending;
       window.__kwentDebug = {
         turn: state.turn, phase: state.phase, viewerRole,
-        canActRaw, canAct, soundGated, soundGateRemainingMs: soundGateRemainingMs(),
+        canActRaw, canAct: liveCanAct, soundGated: liveSoundGated, soundGateRemainingMs: soundGateRemainingMs(),
         medicChainPending, scorchBurnPending,
         pendingBurn: state.pendingBurn, awaitingMedicRevive: state.awaitingMedicRevive,
         meLeaderReveal: me.leaderReveal, oppLeaderReveal: opp.leaderReveal,
