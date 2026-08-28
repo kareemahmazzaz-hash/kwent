@@ -1051,11 +1051,36 @@ function medicEligible(discard) {
     return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row;
   });
 }
-// AI's revive heuristic: always grab the highest-power eligible card.
-function bestMedicRevive(discard) {
+// AI's revive heuristic: used to just grab the highest-power eligible card,
+// completely blind to ability. Reviving a plain vanilla body with a slightly
+// higher printed power over a Muster card whose siblings are still fetchable
+// (a whole chain, not just one card), another Medic (chains again), or a Spy
+// (redraws 2 cards) was consistently a worse pick than the raw power gap
+// suggested. Scored the same way a card in hand gets ranked by
+// estimateCardImpact: power, plus the live muster chain still findable in
+// hand/deck, plus a flat bonus for medic/spy since both pay out again on
+// replay. {hand, deck} are optional — omit them and it falls back to
+// power-only scoring (e.g. for a caller that hasn't got that context handy).
+function bestMedicRevive(discard, self = {}) {
   const eligible = medicEligible(discard);
   if (!eligible.length) return null;
-  return [...eligible].sort((a, b) => (cardById(b)?.power || 0) - (cardById(a)?.power || 0))[0];
+  const { hand = [], deck = [] } = self;
+  const score = (id) => {
+    const c = cardById(id);
+    if (!c) return 0;
+    let v = c.power || 0;
+    if (c.ability === "muster") {
+      v += musterFetchIds(c.id)
+        .filter((sid) => hand.includes(sid) || deck.includes(sid))
+        .reduce((sum, sid) => sum + (cardById(sid)?.power || 0), 0);
+    } else if (c.ability === "medic") {
+      v += 5; // eligibility (a discard to revive from) confirmed once it's actually the AI's turn again
+    } else if (c.ability === "spy") {
+      v += 6; // reliably banks another 2-card draw
+    }
+    return v;
+  };
+  return [...eligible].sort((a, b) => score(b) - score(a))[0];
 }
 
 function resolvePlayCard(state, actingKey, cardId, options = {}) {
@@ -2316,7 +2341,61 @@ function chooseAiDeck(aiFaction) {
   const rowCount = { close: 0, ranged: 0, siege: 0 };
   const unitIds = [];
   const leftover = [];
-  for (const s of unitPool) {
+
+  // Muster families are drafted as a whole, not card-by-card. A muster
+  // leader's whole value proposition is the chain it fetches — a leader
+  // that makes the deck without its siblings (or siblings without their
+  // leader) is a dead card that plays like an overpriced vanilla unit and
+  // fetches nothing. Self-play logs showed this exact failure with Cerys
+  // (no Clan Drummond Shield Maidens in the deck at all), plus the same gap
+  // for Gaunter O'Dimm, Vampire: Katakan, Crones and Ghouls. Build a
+  // card-id -> family-index lookup, group this faction's pool by it, and
+  // give each family a single combined priority (its best member's
+  // jittered score) so it drafts as one unit ahead of individual cards.
+  const familyIdOf = new Map();
+  MUSTER_GROUPS.forEach((g, idx) => {
+    (g.leader ? [g.leader, ...g.siblings] : g.siblings).forEach((id) => familyIdOf.set(id, idx));
+  });
+  const familyGroups = new Map();
+  const individualUnits = [];
+  unitPool.forEach((s) => {
+    const fam = familyIdOf.get(s.card.id);
+    if (fam === undefined) { individualUnits.push(s); return; }
+    if (!familyGroups.has(fam)) familyGroups.set(fam, []);
+    familyGroups.get(fam).push(s);
+  });
+
+  // Highest-value family first. For each, tally how many quota slots it
+  // needs per row (Agile members flex to whichever of Close/Ranged is
+  // thinner at placement time, same rule the individual-unit path below
+  // uses) and only place it if the WHOLE family fits in what's left of
+  // quota — a partial chain (leader in, one sibling crowded out) is worse
+  // than not drafting it at all, so a family that doesn't fully fit is
+  // skipped entirely rather than split.
+  const orderedFamilies = [...familyGroups.values()].sort(
+    (a, b) => Math.max(...b.map((s) => s.value)) - Math.max(...a.map((s) => s.value))
+  );
+  for (const members of orderedFamilies) {
+    const need = { close: 0, ranged: 0, siege: 0 };
+    const placement = members.map((s) => {
+      const row = s.card.row;
+      if (row === "agile") {
+        const target = (rowCount.close + need.close) <= (rowCount.ranged + need.ranged) ? "close" : "ranged";
+        need[target]++;
+        return { id: s.card.id, row: target };
+      }
+      if (ROWS.includes(row)) { need[row]++; return { id: s.card.id, row }; }
+      return { id: s.card.id, row: null };
+    });
+    const fits = ROWS.every((r) => rowCount[r] + need[r] <= quota[r]);
+    if (fits) {
+      placement.forEach((p) => { if (p.row) rowCount[p.row]++; unitIds.push(p.id); });
+    } else {
+      members.forEach((s) => leftover.push(s.card.id));
+    }
+  }
+
+  for (const s of individualUnits) {
     const row = s.card.row;
     if (row === "agile") {
       // Slot into whichever of Close/Ranged still needs it more.
@@ -2377,9 +2456,7 @@ function chooseAiDeck(aiFaction) {
 // Agile unit already down, ...) that literally cannot be true on turn 1
 // with an empty board — firing those unconditionally just burns the
 // leader for a permanent no-op, so they're checked live instead below.
-// L05/L07 fetch-and-play a weather card instantly — unlike L03's instant Horn
-// (a standing multiplier that's genuinely fine to pre-commit turn 1, since it
-// just buffs whatever gets played into that row later), firing these on a
+// L05/L07 fetch-and-play a weather card instantly — firing these on a
 // completely empty board freezes a row nothing is in yet. Self-play logs
 // caught this twice (08-08-39, 08-03-38): "freezing both sides' Siege row to
 // 1 power" as the literal opening move, before either side had a single Siege
@@ -2388,7 +2465,16 @@ function chooseAiDeck(aiFaction) {
 // side has committed to it is a coin flip that can just as easily deny the
 // AI's OWN plan as the opponent's — moved to leaderConditionMet so it fires
 // once there's an actual, favorable target instead of blindly turn 1.
-const LEADER_ALWAYS_GOOD_EARLY = new Set(["L03", "L04", "L06", "L10", "L11", "L14", "L16", "L18", "L20"]);
+//
+// L03/L14/L20 (the three instant-Horn leaders) used to live in this set too,
+// on the theory that Horn is a standing multiplier so it's fine to pre-commit
+// turn 1 and just buff whatever gets played into that row later. That only
+// holds if the AI's hand actually has a unit for that row this round — self-
+// play games 02-35-16 and 02-40-02 both fired Francesca's Horn-on-Ranged
+// turn 1, then played zero Ranged cards all round, wasting the entire
+// once-per-game leader charge for nothing. Moved to leaderConditionMet so
+// they only fire once there's a real Horn-eligible unit in hand.
+const LEADER_ALWAYS_GOOD_EARLY = new Set(["L04", "L06", "L10", "L11", "L16", "L18"]);
 
 function leaderConditionMet(state, aiKey, leaderId) {
   const me = state.players[aiKey];
@@ -2433,6 +2519,17 @@ function leaderConditionMet(state, aiKey, leaderId) {
         && opp.board.close.some((id) => cardById(id)?.cardType !== "Hero");
     case "L17": // Francesca — reposition Agile units, needs one on the board
       return [...me.board.close, ...me.board.ranged].some((id) => cardById(id)?.row === "agile");
+    case "L03": // Eredin: Commander of the Red Riders — Horn Close Combat.
+      // Only worth firing once there's a Close Combat (or Agile, which can
+      // land Close Combat) unit in hand to actually receive the buff —
+      // otherwise it's doubling a row nothing is ever played into.
+      return me.hand.some((id) => { const r = cardById(id)?.row; return r === "close" || r === "agile"; });
+    case "L14": // Foltest: The Siegemaster — Horn on Siege. No Agile overlap
+      // for Siege, so just check for a Siege unit in hand.
+      return me.hand.some((id) => cardById(id)?.row === "siege");
+    case "L20": // Francesca: The Beautiful — Horn on Ranged. Same reasoning
+      // as L03: needs a Ranged (or Agile) unit in hand first.
+      return me.hand.some((id) => { const r = cardById(id)?.row; return r === "ranged" || r === "agile"; });
     case "L21": // Crach an Craite — shuffle graveyards, needs at least one non-empty
       return me.discard.length > 0 || opp.discard.length > 0;
     default:
@@ -2453,7 +2550,33 @@ function computeAIAction(state, aiKey) {
     const isOpeningTurn = state.round === 1 && me.board.close.length === 0 && me.board.ranged.length === 0 && me.board.siege.length === 0;
     const shouldFire = LEADER_ALWAYS_GOOD_EARLY.has(me.leaderId) ? isOpeningTurn : leaderConditionMet(state, aiKey, me.leaderId);
     if (shouldFire) {
-      const options = me.leaderId === "L04" ? { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) } : {};
+      let options = {};
+      if (me.leaderId === "L04") {
+        options = { discardIds: [...me.hand].sort((a, b) => cardById(a).power - cardById(b).power).slice(0, 2) };
+      } else if (me.leaderId === "L05") {
+        // "Pick any weather" was defaulting to whichever weather card
+        // happened to be first in deck order (resolvePlayCard's fallback),
+        // with no regard for which row it actually hurts. Score each
+        // available weather type the same way a weather card in hand gets
+        // scored (opponent's non-Hero power in the affected row(s) minus
+        // our own) and fetch the one that does the most net damage.
+        const weatherCards = me.deck.filter((id) => cardById(id)?.ability === "weather");
+        if (weatherCards.length) {
+          let bestId = null, bestScore = -Infinity;
+          const seenTypes = new Set();
+          weatherCards.forEach((id) => {
+            const c = cardById(id);
+            if (seenTypes.has(c.name)) return; // every copy of a type scores identically
+            seenTypes.add(c.name);
+            const rows = Array.isArray(c.abilityMeta.row) ? c.abilityMeta.row : [c.abilityMeta.row];
+            const oppHit = rows.reduce((sum, r) => sum + rowNonHeroPower(opp.board, r, spyDoubled), 0);
+            const selfHit = rows.reduce((sum, r) => sum + rowNonHeroPower(me.board, r, spyDoubled), 0);
+            const score = oppHit - selfHit;
+            if (score > bestScore) { bestScore = score; bestId = id; }
+          });
+          if (bestId) options = { weatherId: bestId };
+        }
+      }
       return { type: "USE_LEADER", player: aiKey, options };
     }
   }
@@ -2503,9 +2626,19 @@ function computeAIAction(state, aiKey) {
   // losing round 1 game after game because cardEdge>=3 almost never happens
   // this early when both sides are trading cards roughly evenly — it only
   // banked when it had stockpiled a huge card lead, and just kept feeding
-  // cards into an unwinnable round otherwise. A mild edge (>=1), or a big
-  // enough board deficit that catching up would cost several more cards
-  // anyway, is reason enough to let round 1 go.
+  // cards into an unwinnable round otherwise. A big enough board deficit
+  // that catching up would cost several more cards anyway is reason enough
+  // to let round 1 go on its own.
+  //
+  // BUT a bare cardEdge>=1 alone was too permissive the other direction —
+  // logged games 00-44-08, 02-44-28 and 02-42-06 all conceded a round-1
+  // that was only 3-9 points down (margin) purely because the AI happened
+  // to be a single card ahead, when playing just one more card would very
+  // likely have won or tied it (in 00-44-08 the round even finished 3
+  // points apart, the exact gap it gave up on). A 1-card edge needs a real
+  // deficit behind it before it's worth folding a cheaply-winnable round;
+  // only a genuinely one-sided board (margin>=20) is reason enough by
+  // itself with no card-edge requirement at all.
   const roundOneIsFree = state.round === 1 && state.roundWins[aiKey] === 0 && state.roundWins[oppKey] === 0;
 
   const canAffordToConcede =
@@ -2515,7 +2648,7 @@ function computeAIAction(state, aiKey) {
     !oppAtMatchPoint &&
     (state.roundWins[aiKey] > state.roundWins[oppKey] ||
       cardEdge >= 3 ||
-      (roundOneIsFree && (cardEdge >= 1 || margin >= 20)));
+      (roundOneIsFree && (margin >= 20 || (cardEdge >= 2 && margin >= 8))));
 
   if (opp.passed) {
     if (myTotal > oppTotal) return { type: "PASS", player: aiKey, reason: "strategic-already-winning" };
@@ -2541,7 +2674,25 @@ function computeAIAction(state, aiKey) {
   // left than us to simply keep playing and overtake it — this is especially
   // true when the "lead" was inflated by the opponent's own Spy cards
   // landing on our board, which costs them nothing to keep doing.
-  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint && cardEdge >= 0;
+  // A bare cardEdge>=0 was too loose in one direction and too strict in the
+  // other. Logged games 00-41-49 and 02-35-16 both banked a razor-thin +2/+4
+  // point lead purely because the AI's hand was even-ish with the opponent's
+  // (8 vs 7) — the opponent then just kept playing their remaining 7 cards
+  // and overtook the frozen AI total to steal the round for free. Banking a
+  // slim lead needs a real margin (>=8) or genuine card-count dominance
+  // (>=3), not any non-negative edge.
+  //
+  // The opposite failure showed up in 00-46-43: the AI built a commanding
+  // +29 (then +65) point lead almost entirely off the opponent's own Spy
+  // cards landing on its board, but cardEdge stayed negative the whole time
+  // (the opponent kept drawing 2 cards per Spy played) — so canAffordToBank
+  // never once fired, and the AI dumped its entire hand chasing a round it
+  // still barely lost, then had ZERO cards left for round 2 (an automatic
+  // loss). A commanding margin, or a hand that's already down to its last
+  // couple cards, is reason enough to bank on its own regardless of the
+  // opponent's relative card count.
+  const canAffordToBank = winningThisRound && minCommitmentMet && !oppAtMatchPoint &&
+    (margin >= 8 || cardEdge >= 3 || me.hand.length <= 2);
 
   // Scale the roll by how real the lead/deficit actually is — a 2-point
   // margin barely moves the needle, a 20+ point margin is close to certain.
@@ -6075,7 +6226,7 @@ function AIGame({ onExit }) {
     if (state.phase === "play" && state.awaitingMedicRevive?.player === "p2") {
       const delay = Math.max(900, soundGateRemainingMs());
       aiTimerRef.current = setTimeout(() => {
-        const pick = bestMedicRevive(state.players.p2.discard);
+        const pick = bestMedicRevive(state.players.p2.discard, state.players.p2);
         setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p2", reviveId: pick }));
       }, delay);
       return () => clearTimeout(aiTimerRef.current);
@@ -6304,7 +6455,7 @@ function TestGame({ onExit }) {
     if (state.phase === "play" && state.awaitingMedicRevive?.player === "p2") {
       const delay = Math.max(900, soundGateRemainingMs());
       aiTimerRef.current = setTimeout(() => {
-        const pick = bestMedicRevive(state.players.p2.discard);
+        const pick = bestMedicRevive(state.players.p2.discard, state.players.p2);
         setState((s) => gameReducer(s, { type: "RESOLVE_MEDIC_REVIVE", player: "p2", reviveId: pick }));
       }, delay);
       return () => clearTimeout(aiTimerRef.current);
