@@ -3391,11 +3391,14 @@ function RowCardsCell({ board, rowKey, onClickCard, selectableIds, flashId, revi
    transform next frame and let the transition animate it home. Unmounts
    itself via onDone once landed — by then it's pixel-identical to the real
    tile sitting underneath it, so the swap is invisible. */
-function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
+function MedicRevivalGhost({ card, fromRect, cardId, side, frameRef, onDone }) {
   const [toRect, setToRect] = useState(null);
   const [flying, setFlying] = useState(false);
   useEffect(() => {
-    const el = document.querySelector(`[data-card-id="${cardId}"]`);
+    // Scoped to data-card-side too — an unscoped [data-card-id] match can
+    // land on the OPPONENT's tile when both boards hold a copy of the same
+    // card, making the ghost fly to (and appear to animate) their side.
+    const el = document.querySelector(`[data-card-id="${cardId}"][data-card-side="${side}"]`);
     const frame = frameRef.current;
     if (!el || !frame) { onDone && onDone(); return; }
     const elRect = el.getBoundingClientRect();
@@ -3405,7 +3408,7 @@ function MedicRevivalGhost({ card, fromRect, cardId, frameRef, onDone }) {
     const t = setTimeout(() => onDone && onDone(), 620);
     return () => { cancelAnimationFrame(raf); clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cardId]);
+  }, [cardId, side]);
   if (!card || !toRect) return null;
   const dx = fromRect.left - toRect.left;
   const dy = fromRect.top - toRect.top;
@@ -5415,6 +5418,7 @@ function PlayBoard({
                 key={"me-" + ghost.me.cardId}
                 card={ghost.me.card}
                 cardId={ghost.me.cardId}
+                side="me"
                 fromRect={ghost.me.fromRect}
                 frameRef={boardFrameRef}
                 onDone={() => { setGhost((g) => ({ ...g, me: null })); revealRevived("me", ghost.me.cardId); }}
@@ -5425,6 +5429,7 @@ function PlayBoard({
                 key={"opp-" + ghost.opp.cardId}
                 card={ghost.opp.card}
                 cardId={ghost.opp.cardId}
+                side="opp"
                 fromRect={ghost.opp.fromRect}
                 frameRef={boardFrameRef}
                 onDone={() => { setGhost((g) => ({ ...g, opp: null })); revealRevived("opp", ghost.opp.cardId); }}
