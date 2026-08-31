@@ -1460,8 +1460,8 @@ function resolveLeaderAbility(state, actingKey, options = {}) {
       }
       break;
     }
-    case "L09": { // Take a non-Hero card from opponent's discard and play it instantly
-      const oppDiscard = state.players[oppKey].discard.filter((id) => cardById(id)?.cardType !== "Hero");
+    case "L09": { // Take a non-Hero, non-Special card from opponent's discard and play it instantly
+      const oppDiscard = state.players[oppKey].discard.filter((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; });
       if (oppDiscard.length) {
         const pick = options.pickId && oppDiscard.includes(options.pickId) ? options.pickId : oppDiscard[Math.floor(Math.random() * oppDiscard.length)];
         const pickCard = cardById(pick);
@@ -5360,7 +5360,7 @@ function PlayBoard({
 
   const startLeader = () => {
     if (me.leaderId === "L04") return setPending({ kind: "leaderDiscard2", selected: [] });
-    if (me.leaderId === "L09" && opp.discard.some((id) => cardById(id)?.cardType !== "Hero")) return setPending({ kind: "leaderPickDiscard" });
+    if (me.leaderId === "L09" && opp.discard.some((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; })) return setPending({ kind: "leaderPickDiscard" });
     // L02 (Eredin: Bringer of Death) — same picker as a card-played Medic:
     // let the player choose which eligible card comes back instead of
     // always taking eligible[0]. Skipped when L08 (Invader of the North)
@@ -5782,11 +5782,14 @@ function PlayBoard({
       )}
 
       {pending?.kind === "leaderPickDiscard" && (
-        <div className="overlay" onClick={() => setPending(null)}>
-          <div className="round-banner" onClick={(e) => e.stopPropagation()}>
+        // No dismiss handler on the overlay — Emhyr: The Relentless is not
+        // cancelable. Once the leader button is clicked this picker is
+        // committed; the player must pick a target, there's no backing out.
+        <div className="overlay">
+          <div className="round-banner">
             <div className="ribbon">CHOOSE A CARD TO TAKE &amp; PLAY</div>
             <div className="pool-grid">
-              {opp.discard.filter((id) => cardById(id)?.cardType !== "Hero").map((id) => (
+              {opp.discard.filter((id) => { const c = cardById(id); return c && c.cardType !== "Hero" && c.cardType !== "Special" && c.row; }).map((id) => (
                 <CardTile key={id} card={cardById(id)} size="sm" onClick={() => confirmLeaderPick(id)} />
               ))}
             </div>
