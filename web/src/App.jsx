@@ -4197,7 +4197,7 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         <button type="button" className="btn btn-gold btn-lg desktop-only-el" disabled={!canConfirm} onClick={onConfirm}>
           {busyLabel || "Confirm deck"}
         </button>
-        {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count), no more than {MAX_SPECIAL_CARDS} special cards{needsLeader ? ", and a leader" : ""}.</span>}
+        {!canConfirm && <span className="hint desktop-only-el">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count), no more than {MAX_SPECIAL_CARDS} special cards{needsLeader ? ", and a leader" : ""}.</span>}
       </div>
     </div>
   );
@@ -8142,7 +8142,15 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .leader-zoom-overlay { height: 100dvh; padding: 1.5vh 2vw; }
   .leader-zoom-content { max-height: 97dvh; gap: 6px; }
   .leader-expanded { flex: 0 0 auto; }
-  .leader-track { height: 42dvh; padding: 2% 0; align-items: stretch; scroll-snap-type: x mandatory; }
+  /* Percentage flex-gap has been unreliable in mobile Safari (resolves to
+     0 in some versions), which is what was making the cards butt up
+     against each other with no visible seam ("overlapping"). vw sidesteps
+     that since it isn't a flex-relative percentage. Track height also
+     brought down a notch so there's room for a visible gap plus the next
+     card to peek in on a phone-width screen instead of each card being
+     almost the full screen width. */
+  .leader-track { height: 34dvh; padding: 2% 0; align-items: stretch; scroll-snap-type: x mandatory; gap: 3vw; }
+  .leader-track::before, .leader-track::after { flex: 0 0 26vw; }
   .leader-track-item, .leader-track-item.is-focused { flex: 0 0 auto; }
   .leader-track .card-tile.card-pg-carousel,
   .leader-track .card-tile.card-pg-carousel-focus {
