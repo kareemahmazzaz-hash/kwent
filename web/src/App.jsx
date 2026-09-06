@@ -5847,9 +5847,8 @@ function Home({ onSelect, onlineAvailable }) {
   return (
     <div className="screen home">
       <div className="home-hero">
-        <span className="eyebrow">A CARD GAME PROTOTYPE</span>
+        <span className="eyebrow">A CARD WAR</span>
         <h1>Kwent</h1>
-        <p>Build a 22-card deck, choose a leader, call the coin toss, and win two rounds of power before your opponent.</p>
       </div>
       <div className="mode-grid">
         <button type="button" className="mode-card" onClick={() => onSelect("hotseat")}>
@@ -5871,12 +5870,7 @@ function Home({ onSelect, onlineAvailable }) {
             {onlineAvailable ? "Host or join a room and play from two devices." : "Requires artifact storage — unavailable here."}
           </span>
         </button>
-        <button type="button" className="mode-card" onClick={() => onSelect("test")}>
-          <span className="mode-title">Test Mode</span>
-          <span className="mode-desc">Rig both hands and draw order, then play out a match vs. AI.</span>
-        </button>
       </div>
-      <p className="home-note">v3: real power values, sections and abilities for all 236 units + 22 leaders, per-faction automatic abilities, and a pre-game coin toss (or Scoia'tael's own call).</p>
     </div>
   );
 }
@@ -7213,17 +7207,16 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deckbuilder-back { margin-bottom: 10px; }
 
 /* ---- Home ---- */
-.home-hero { text-align: center; padding: 28px 8px 8px; }
+.home-hero { text-align: center; padding: 7% 2% 2%; }
 .eyebrow { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.18em; color: var(--gold-dim); }
-.home-hero h1 { font-family: var(--font-display); font-size: 2.4rem; margin: 8px 0; color: var(--gold); text-shadow: 0 2px 12px rgba(201,162,75,0.25); }
+.home-hero h1 { font-family: var(--font-display); font-size: 2.4rem; margin: 2% 0; color: var(--gold); text-shadow: 0 2px 12px rgba(201,162,75,0.25); }
 .home-hero p { color: var(--muted); max-width: 480px; margin: 0 auto; }
-.mode-grid { display: grid; gap: 12px; margin: 26px 0; }
-.mode-card { background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; color: var(--parchment); transition: border-color .15s, transform .15s; }
+.mode-grid { display: grid; gap: 3%; margin: 6% 0; }
+.mode-card { background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--line); border-radius: 10px; padding: 4% 4.5%; text-align: left; cursor: pointer; color: var(--parchment); transition: border-color .15s, transform .15s; }
 .mode-card:hover:not(.is-disabled) { border-color: var(--gold); transform: translateY(-2px); }
 .mode-card.is-disabled { opacity: 0.45; cursor: not-allowed; }
-.mode-title { display: block; font-family: var(--font-display); font-size: 1.05rem; color: var(--gold); margin-bottom: 4px; }
+.mode-title { display: block; font-family: var(--font-display); font-size: 1.05rem; color: var(--gold); margin-bottom: 1%; }
 .mode-desc { display: block; font-size: 0.88rem; color: var(--muted); }
-.home-note { text-align: center; font-size: 0.78rem; color: var(--muted); opacity: 0.8; margin-top: 30px; }
 
 /* ---- Buttons ---- */
 .btn { font-family: var(--font-display); background: var(--bg-panel-2); border: 1px solid var(--line); color: var(--parchment); padding: 9px 16px; border-radius: 7px; cursor: pointer; letter-spacing: 0.02em; }
