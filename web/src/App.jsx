@@ -3817,14 +3817,49 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
   const trackRef = useRef(null);
   const hoverTimer = useRef(null);
   const focusIndexRef = useRef(selectedIndex);
+  const scrollSyncTimer = useRef(null);
+  const programmaticScroll = useRef(false);
 
   useEffect(() => { if (!expanded) setFocusIndex(selectedIndex); }, [selectedIndex, expanded]);
   useEffect(() => { focusIndexRef.current = focusIndex; }, [focusIndex]);
   useEffect(() => () => clearInterval(hoverTimer.current), []);
+  useEffect(() => () => clearTimeout(scrollSyncTimer.current), []);
+
+  // Free-swipe (touch/trackpad) scrolling never went through focusLeader,
+  // so focusIndex — and the ability text below the strip — stayed stuck on
+  // whatever card was focused before the swipe. scroll-snap-type: mandatory
+  // (see CSS) guarantees the track always comes to rest centered on some
+  // card; once scrolling settles we find that nearest item by geometry and
+  // sync focusIndex to it, same as a click would.
+  const handleTrackScroll = () => {
+    if (programmaticScroll.current) return;
+    clearTimeout(scrollSyncTimer.current);
+    scrollSyncTimer.current = setTimeout(() => {
+      const track = trackRef.current;
+      if (!track) return;
+      const trackRect = track.getBoundingClientRect();
+      const center = trackRect.left + trackRect.width / 2;
+      let bestIdx = focusIndexRef.current;
+      let bestDist = Infinity;
+      Array.from(track.children).forEach((child, idx) => {
+        const r = child.getBoundingClientRect();
+        const dist = Math.abs((r.left + r.width / 2) - center);
+        if (dist < bestDist) { bestDist = dist; bestIdx = idx; }
+      });
+      if (bestIdx !== focusIndexRef.current) {
+        focusIndexRef.current = bestIdx;
+        setFocusIndex(bestIdx);
+      }
+    }, 120);
+  };
 
   const scrollToIndex = (idx, behavior = "smooth") => {
     const item = trackRef.current && trackRef.current.children[idx];
-    if (item) item.scrollIntoView({ behavior, inline: "center", block: "nearest" });
+    if (!item) return;
+    programmaticScroll.current = true;
+    item.scrollIntoView({ behavior, inline: "center", block: "nearest" });
+    clearTimeout(scrollSyncTimer.current);
+    scrollSyncTimer.current = setTimeout(() => { programmaticScroll.current = false; }, behavior === "smooth" ? 400 : 50);
   };
 
   const focusLeader = (idx) => {
@@ -3886,7 +3921,6 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
 
       {shown && !expanded && (
         <div className="leader-ability-box">
-          <strong>{shown.name}</strong>
           <p>{abilityDescriptionFor(shown)}</p>
         </div>
       )}
@@ -3902,7 +3936,7 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
         <div className="card-zoom-overlay leader-zoom-overlay" onClick={() => setExpanded(false)}>
           <div className="leader-zoom-content" onClick={(e) => e.stopPropagation()}>
             <div className="leader-expanded">
-              <div className="leader-track" ref={trackRef}>
+              <div className="leader-track" ref={trackRef} onScroll={handleTrackScroll}>
                 {leaders.map((l, idx) => {
                   const dir = idx < focusIndex ? -1 : idx > focusIndex ? 1 : 0;
                   return (
@@ -3925,7 +3959,6 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
             </div>
             {shown && (
               <div className="leader-ability-box leader-zoom-ability-box">
-                <strong>{shown.name}</strong>
                 <p>{abilityDescriptionFor(shown)}</p>
               </div>
             )}
@@ -4026,7 +4059,11 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
         <div className="deckbuilder-topbar">
           {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
           <div className="deckbuilder-topbar-center">{topBarExtra}</div>
-          <div className="deckbuilder-topbar-spacer" aria-hidden="true" />
+          <div className="deckbuilder-topbar-confirm">
+            <button type="button" className="btn btn-gold btn-sm" disabled={!canConfirm} onClick={onConfirm}>
+              {busyLabel || "Confirm deck"}
+            </button>
+          </div>
         </div>
       )}
       <h2 className="screen-title">{playerLabel}: build your deck</h2>
@@ -4097,6 +4134,11 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
                 </button>
               </>
             )}
+            {onRandomize && (
+              <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
+                🎲 Random deck
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -4123,13 +4165,8 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
             factionLabel={FACTION_META[faction].label}
           />
           <div className="deck-count">
-            <span className="deck-count-line">Selected: <strong>{count}</strong> cards — <strong>{unitCount}</strong> / {DECK_SIZE} minimum unit cards</span>
-            <span className="deck-count-line"><strong>{specialCount}</strong> / {MAX_SPECIAL_CARDS} max special cards</span>
-            {onRandomize && (
-              <button type="button" className="btn btn-sm random-deck-btn" onClick={onRandomize}>
-                🎲 Random deck
-              </button>
-            )}
+            <span className="deck-count-line">Unit: <strong>{unitCount}</strong>/{DECK_SIZE}</span>
+            <span className="deck-count-line">Special: <strong>{specialCount}</strong>/{MAX_SPECIAL_CARDS}</span>
           </div>
         </div>
 
@@ -4148,9 +4185,11 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
       </div>
 
       <div className="deckbuilder-footer">
-        <button type="button" className="btn btn-gold btn-lg" disabled={!canConfirm} onClick={onConfirm}>
-          {busyLabel || "Confirm deck"}
-        </button>
+        {!(onBack || topBarExtra) && (
+          <button type="button" className="btn btn-gold btn-lg" disabled={!canConfirm} onClick={onConfirm}>
+            {busyLabel || "Confirm deck"}
+          </button>
+        )}
         {!canConfirm && <span className="hint">Pick at least {DECK_SIZE} unit cards (weather, decoys, horns etc. don't count), no more than {MAX_SPECIAL_CARDS} special cards{needsLeader ? ", and a leader" : ""}.</span>}
       </div>
     </div>
@@ -7361,7 +7400,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   gap: 4%;
   overflow-x: auto;
   overflow-y: visible;
-  scroll-snap-type: x proximity;
+  scroll-snap-type: x mandatory;
   scroll-behavior: smooth;
   scroll-padding-inline: 50%;
   padding: 6% 0;
@@ -8033,7 +8072,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .deckbuilder-topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
 .deckbuilder-topbar .deckbuilder-back { margin-bottom: 0; justify-self: start; }
 .deckbuilder-topbar-center { justify-self: center; }
-.deckbuilder-topbar-spacer { justify-self: end; }
+.deckbuilder-topbar-confirm { justify-self: end; }
+.deckbuilder-topbar-confirm .btn[disabled] { opacity: 0.5; }
 
 @media (max-width: 520px) {
   .banner-score { font-size: 1.8rem; }
@@ -8051,9 +8091,12 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .deckbuilder-back { padding: 3px 8px; font-size: 0.72rem; margin-bottom: 0; }
   .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; margin-bottom: 4px; }
   .faction-pill { flex: 0 0 auto; padding: 3px 10px; font-size: 0.72rem; }
-  .saved-decks-row { gap: 5px; margin: 3px 0 0; }
-  .saved-decks-row .btn-sm { padding: 3px 8px; font-size: 0.68rem; }
-  .deck-name-input { max-width: 110px; padding: 3px 6px; font-size: 0.72rem; }
+  .saved-decks-row { gap: 5px; margin: 3px 0 0; align-items: center; }
+  .saved-decks-row > * { height: 24px; box-sizing: border-box; }
+  .saved-decks-row .btn-sm { padding: 0 8px; font-size: 0.66rem; line-height: 24px; }
+  .deck-name-input, .saved-deck-select { max-width: 100px; padding: 0 6px; font-size: 0.68rem; }
+  .saved-decks-row .random-deck-btn { margin-left: auto; }
+  .deckbuilder-topbar-confirm .btn { padding: 3px 10px; font-size: 0.72rem; }
 
   /* Shrink the pool/leader/chosen area itself so the confirm button below
      it has room and stops overlapping the last visible row of cards */
@@ -8062,10 +8105,21 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
   .leader-icon-btn { width: 100%; gap: 4%; }
   .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
-  .leader-ability-box strong { font-size: 0.6rem; line-height: 1.1; }
-  .leader-ability-box p { font-size: 0.54rem; line-height: 1.15; }
+  .leader-ability-box p { font-size: 0.56rem; line-height: 1.2; }
   .leader-icon-hint { font-size: 0.56rem; }
   .pg-grid.pool-grid, .chosen-grid { min-height: 22vw; max-height: 38vh; }
+
+  /* Leader zoom overlay: use the dynamic viewport unit so mobile browser
+     chrome (address bar) doesn't leave a gap at the bottom where page
+     content behind the fixed overlay could show through, and let the
+     ability text scroll instead of getting clipped/overlapping the strip. */
+  .leader-zoom-overlay { height: 100dvh; padding: 2vh 2vw; }
+  .leader-zoom-content { max-height: 96dvh; gap: 8px; }
+  .leader-zoom-ability-box { max-height: 22dvh; overflow-y: auto; padding: 0 4px; }
+  .leader-zoom-ability-box p { font-size: 0.7rem; line-height: 1.3; }
+  .leader-track::before, .leader-track::after { flex-basis: 30%; }
+  .leader-track-item { flex-basis: 32%; }
+  .leader-track-item.is-focused { flex-basis: 38%; }
 
   /* Filter icons: always one line, shrink to fit rather than wrap */
   .ability-filter-row { flex-wrap: nowrap; justify-content: center; gap: 2px; }
