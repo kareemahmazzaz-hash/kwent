@@ -7212,8 +7212,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .home-hero h1 { font-family: var(--font-display); font-size: 2.4rem; margin: 8px 0; color: var(--gold); text-shadow: 0 2px 12px rgba(201,162,75,0.25); }
 .home-hero p { color: var(--muted); max-width: 480px; margin: 0 auto; }
 .mode-grid { display: grid; gap: 12px; margin: 26px 0; }
-.mode-card { background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; color: var(--parchment); transition: border-color .15s, transform .15s; }
-.mode-card:hover:not(.is-disabled) { border-color: var(--gold); transform: translateY(-2px); }
+.mode-card { background: linear-gradient(180deg, var(--bg-panel-2), var(--bg-panel)); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; color: var(--parchment); transition: border-color .15s, box-shadow .15s; }
+.mode-card:hover:not(.is-disabled) { border-color: var(--gold); box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 0 1px var(--gold); }
 .mode-card.is-disabled { opacity: 0.45; cursor: not-allowed; }
 .mode-title { display: block; font-family: var(--font-display); font-size: 1.05rem; color: var(--gold); margin-bottom: 4px; }
 .mode-desc { display: block; font-size: 0.88rem; color: var(--muted); }
