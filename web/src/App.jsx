@@ -8037,21 +8037,24 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 @media (max-width: 520px) {
   .banner-score { font-size: 1.8rem; }
 }
-/* DeckBuilder on phones: the 3-across pool/leader/chosen layout has no room
-   to breathe at phone widths — the leader card's height is driven by its
-   own aspect-ratio, not by the column's (squeezed) height, so it was
-   bleeding out over the faction tabs above it (overflow: visible), while
-   the pool/chosen grids collapsed toward zero height and hid their cards.
-   Stack the three sections instead and cap each grid to its own scrollable
-   height so nothing overlaps and every card stays reachable. */
+/* DeckBuilder on phones: keep pool/leader/chosen side-by-side, but the
+   leader column used to claim a full third of the width for a
+   full-size card (aspect-ratio driven, overflow: visible), which starved
+   the pool/chosen grids and bled out over the faction tabs above. Squeeze
+   the leader down to roughly one card's width between the two grids
+   instead, and give the grids enough height to clear one full row. */
 @media (max-width: 520px), (max-height: 480px) {
-  .gwent-root:has(.deckbuilder-v2) { height: auto; min-height: 100vh; overflow: visible; }
-  .deckbuilder-v2.screen { height: auto; min-height: 100vh; overflow: visible; }
-  .db-columns { flex-direction: column; overflow: visible; }
-  .db-col-pool, .db-col-leader, .db-col-chosen { flex: 0 0 auto; width: 100%; overflow: visible; }
-  .db-col-leader { padding: 6px 0; }
-  .leader-icon-btn { width: 34%; margin: 0 auto; }
-  .pg-grid.pool-grid, .chosen-grid { max-height: 34vh; }
+  .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; }
+  .faction-pill { flex: 0 0 auto; padding: 4px 12px; }
+  .db-columns { gap: 1.5%; }
+  .db-col-pool, .db-col-chosen { flex: 1 1 42%; }
+  .db-col-leader { flex: 0 0 auto; width: 16%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
+  .leader-icon-btn { width: 100%; gap: 4%; }
+  .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
+  .leader-ability-box strong { font-size: 0.66rem; line-height: 1.15; }
+  .leader-ability-box p { font-size: 0.6rem; line-height: 1.2; }
+  .leader-icon-hint { font-size: 0.62rem; }
+  .pg-grid.pool-grid, .chosen-grid { min-height: 26vw; max-height: 42vh; }
   .ability-filter-row { justify-content: center; }
 }
 @media (max-width: 520px), (max-height: 480px) {
