@@ -3855,6 +3855,7 @@ function LeaderCarousel({ leaders, leaderId, onSelectLeader, factionLabel }) {
   };
 
   const startHoverScroll = (dir) => {
+    if (typeof window !== "undefined" && window.matchMedia && !window.matchMedia("(hover: hover)").matches) return;
     clearInterval(hoverTimer.current);
     hoverTimer.current = setInterval(() => {
       focusLeader(focusIndexRef.current + dir);
@@ -8044,18 +8045,33 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    the leader down to roughly one card's width between the two grids
    instead, and give the grids enough height to clear one full row. */
 @media (max-width: 520px), (max-height: 480px) {
-  .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; }
-  .faction-pill { flex: 0 0 auto; padding: 4px 12px; }
-  .db-columns { gap: 1.5%; }
-  .db-col-pool, .db-col-chosen { flex: 1 1 42%; }
-  .db-col-leader { flex: 0 0 auto; width: 16%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
+  /* Reclaim vertical space up top so the card grids get more room */
+  .deckbuilder-v2 .screen-title { font-size: 1rem; margin: 0 0 4px; }
+  .deckbuilder-topbar { margin-bottom: 4px; }
+  .deckbuilder-back { padding: 3px 8px; font-size: 0.72rem; margin-bottom: 0; }
+  .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; margin-bottom: 4px; }
+  .faction-pill { flex: 0 0 auto; padding: 3px 10px; font-size: 0.72rem; }
+  .saved-decks-row { gap: 5px; margin: 3px 0 0; }
+  .saved-decks-row .btn-sm { padding: 3px 8px; font-size: 0.68rem; }
+  .deck-name-input { max-width: 110px; padding: 3px 6px; font-size: 0.72rem; }
+
+  /* Shrink the pool/leader/chosen area itself so the confirm button below
+     it has room and stops overlapping the last visible row of cards */
+  .db-columns { gap: 1.5%; max-width: 92%; margin: 0 auto; }
+  .db-col-pool, .db-col-chosen { flex: 1 1 43.5%; }
+  .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
   .leader-icon-btn { width: 100%; gap: 4%; }
   .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
-  .leader-ability-box strong { font-size: 0.66rem; line-height: 1.15; }
-  .leader-ability-box p { font-size: 0.6rem; line-height: 1.2; }
-  .leader-icon-hint { font-size: 0.62rem; }
-  .pg-grid.pool-grid, .chosen-grid { min-height: 26vw; max-height: 42vh; }
-  .ability-filter-row { justify-content: center; }
+  .leader-ability-box strong { font-size: 0.6rem; line-height: 1.1; }
+  .leader-ability-box p { font-size: 0.54rem; line-height: 1.15; }
+  .leader-icon-hint { font-size: 0.56rem; }
+  .pg-grid.pool-grid, .chosen-grid { min-height: 22vw; max-height: 38vh; }
+
+  /* Filter icons: always one line, shrink to fit rather than wrap */
+  .ability-filter-row { flex-wrap: nowrap; justify-content: center; gap: 2px; }
+  .ability-filter-btn { width: 17px; height: 17px; padding: 2px; }
+  .ability-filter-symbol { font-size: 0.6rem; }
+  .ability-filter-clear { font-size: 0.55rem; }
 }
 @media (max-width: 520px), (max-height: 480px) {
   .screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; padding: 4% 5%; }
