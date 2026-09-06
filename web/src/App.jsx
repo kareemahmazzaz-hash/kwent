@@ -8036,6 +8036,8 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 @media (max-width: 520px) {
   .banner-score { font-size: 1.8rem; }
+}
+@media (max-width: 520px), (max-height: 480px) {
   .screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; padding: 4% 5%; }
   .home-hero { padding: 0 0 3vh; flex: 0 0 auto; }
   .eyebrow { font-size: clamp(0.65rem, 2.2vh, 0.85rem); }
