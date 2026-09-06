@@ -8037,6 +8037,23 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 @media (max-width: 520px) {
   .banner-score { font-size: 1.8rem; }
 }
+/* DeckBuilder on phones: the 3-across pool/leader/chosen layout has no room
+   to breathe at phone widths — the leader card's height is driven by its
+   own aspect-ratio, not by the column's (squeezed) height, so it was
+   bleeding out over the faction tabs above it (overflow: visible), while
+   the pool/chosen grids collapsed toward zero height and hid their cards.
+   Stack the three sections instead and cap each grid to its own scrollable
+   height so nothing overlaps and every card stays reachable. */
+@media (max-width: 520px), (max-height: 480px) {
+  .gwent-root:has(.deckbuilder-v2) { height: auto; min-height: 100vh; overflow: visible; }
+  .deckbuilder-v2.screen { height: auto; min-height: 100vh; overflow: visible; }
+  .db-columns { flex-direction: column; overflow: visible; }
+  .db-col-pool, .db-col-leader, .db-col-chosen { flex: 0 0 auto; width: 100%; overflow: visible; }
+  .db-col-leader { padding: 6px 0; }
+  .leader-icon-btn { width: 34%; margin: 0 auto; }
+  .pg-grid.pool-grid, .chosen-grid { max-height: 34vh; }
+  .ability-filter-row { justify-content: center; }
+}
 @media (max-width: 520px), (max-height: 480px) {
   .screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; padding: 4% 5%; }
   .home-hero { padding: 0 0 3vh; flex: 0 0 auto; }
