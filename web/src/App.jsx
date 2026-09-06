@@ -7203,6 +7203,7 @@ const CSS = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@5
 html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 
 .screen { padding: 18px 16px 28px; max-width: 720px; margin: 0 auto; min-height: 480px; }
+.screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
 .screen-title { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.03em; font-size: 1.3rem; margin: 4px 0 14px; color: var(--gold); text-transform: uppercase; }
 .deckbuilder-back { margin-bottom: 10px; }
 
