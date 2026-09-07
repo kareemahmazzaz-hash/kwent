@@ -8118,7 +8118,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .saved-decks-row { gap: 1.25vw; margin: 2vw 0 2vw 0; align-items: center; }
   .saved-decks-row > * { height: 5.5vw; box-sizing: border-box; margin: 0; line-height: 5vw; vertical-align: middle; }
   .saved-decks-row .btn-sm { padding: 0 2vw; font-size: 0.62rem; }
-  .saved-decks-row select.saved-deck-select { -webkit-appearance: none; appearance: none; }
+  .saved-decks-row select.saved-deck-select { -webkit-appearance: none; appearance: none; line-height: 3vw; }
   .deck-name-input, .saved-deck-select { max-width: 22.5vw; padding: 0 1.5vw; font-size: 0.62rem; }
   .saved-decks-row .random-deck-btn { margin-left: auto; }
   /* Confirm button spans the full height of the header block (back-button
@@ -8137,7 +8137,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .leader-icon-btn { width: 100%; gap: 4%; }
   .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
   .leader-ability-box p { font-size: 0.56rem; line-height: 1.2; }
-  .pg-grid.pool-grid, .chosen-grid { min-height: 20vh; grid-template-columns: repeat(auto-fill, minmax(19.5vw, 1fr)); }
+  .pg-grid.pool-grid, .chosen-grid { min-height: 20vh; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); }
   .deck-count { font-size: 0.62rem; }
 
   /* Leader zoom overlay: use the dynamic viewport unit so mobile browser
