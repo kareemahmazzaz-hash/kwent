@@ -8109,15 +8109,15 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      left over via flex instead of a fixed vh cap (see pool/chosen-grid
      below) — no more need to squeeze every row to claw back a fixed
      amount of vertical space. */
-  .deckbuilder-v2 .screen-title { font-size: 1rem; margin: 0 0 2vw; }
+  .deckbuilder-v2 .screen-title { font-size: 1rem; margin: 0 0 1vw; }
   .deckbuilder-header-top { position: relative; padding-right: 23vw; }
-  .deckbuilder-topbar { margin-bottom: 2.5vw; }
-  .deckbuilder-back { padding: 0.75vw 2vw; font-size: 0.72rem; margin-bottom: 0; }
-  .faction-picker { flex-wrap: nowrap; margin-bottom: 2vw; }
-  .faction-pill { flex: 1 1 0; padding: 0.75vw 1vw; font-size: 0.66rem; }
-  .saved-decks-row { gap: 1.25vw; margin: 2vw 0 2vw 0; align-items: center; }
-  .saved-decks-row > * { height: 5.5vw; box-sizing: border-box; margin: 0; line-height: 5vw; vertical-align: middle; }
-  .saved-decks-row .btn-sm { padding: 0 2vw; font-size: 0.62rem; }
+  .deckbuilder-topbar { margin-bottom: 1vw; }
+  .deckbuilder-back { padding: 0.15vw 1vw; font-size: 0.72rem; margin-bottom: 0; }
+  .faction-picker { flex-wrap: nowrap; margin-bottom: 1vw; }
+  .faction-pill { flex: 1 1 0; padding: 0.15vw 1vw; font-size: 0.66rem; }
+  .saved-decks-row { gap: 1.25vw; margin: 0vw 0 1vw 0; align-items: center; }
+  .saved-decks-row > * { height: 3vw; box-sizing: border-box; margin: 0; line-height: 5vw; vertical-align: middle; display: flex; align-items: center; }
+  .saved-decks-row .btn-sm { padding: 0 1.5vw; font-size: 0.62rem; }
   .saved-decks-row select.saved-deck-select { -webkit-appearance: none; appearance: none; line-height: 3vw; }
   .deck-name-input, .saved-deck-select { max-width: 22.5vw; padding: 0 1.5vw; font-size: 0.62rem; }
   .saved-decks-row .random-deck-btn { margin-left: auto; }
@@ -8125,7 +8125,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      row through the title row) instead of sitting in just one row —
      positioned against the padding-right reserved above so it never
      overlaps the back button or title text. */
-  .deckbuilder-topbar-confirm { position: absolute; top: 0; right: 0; bottom: 0; width: 21vw; display: flex; }
+  .deckbuilder-topbar-confirm { position: absolute; top: 0; right: 0; bottom: 0; width: 21vw; margin-bottom: 1vw; display: flex; }
   .deckbuilder-topbar-confirm .btn { width: 100%; height: 100%; padding: 1vw; font-size: 0.85rem; line-height: 1.2; white-space: normal; }
 
   /* Shrink the leader column so the pool/chosen grids get most of the
@@ -8192,7 +8192,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      — that made the filter row's position inconsistent depending on how
      many icons were active. */
   .db-col-header { flex-direction: column; align-items: stretch; gap: 0.5vw; }
-  .ability-filter-btn { width: 4.25vw; height: 4.25vw; padding: 0.5vw; }
+  .ability-filter-btn { width: 2vw; height: 2vw; padding: 0.5vw; }
   .ability-filter-symbol { font-size: 0.6rem; }
   .ability-filter-clear { font-size: 0.55rem; }
 }
