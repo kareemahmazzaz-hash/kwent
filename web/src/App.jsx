@@ -4057,18 +4057,20 @@ function DeckBuilder({ playerLabel, faction, onFactionChange, lockFaction, selec
 
   return (
     <div className="screen deckbuilder deckbuilder-v2">
-      {(onBack || topBarExtra) && (
-        <div className="deckbuilder-topbar">
-          {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
-          <div className="deckbuilder-topbar-center">{topBarExtra}</div>
-          <div className="deckbuilder-topbar-confirm mobile-only-el">
-            <button type="button" className="btn btn-gold btn-sm" disabled={!canConfirm} onClick={onConfirm}>
-              {busyLabel || "Confirm deck"}
-            </button>
+      <div className="deckbuilder-header-top">
+        {(onBack || topBarExtra) && (
+          <div className="deckbuilder-topbar">
+            {onBack && <button type="button" className="btn btn-sm deckbuilder-back" onClick={onBack}>← Back</button>}
+            <div className="deckbuilder-topbar-center">{topBarExtra}</div>
           </div>
+        )}
+        <h2 className="screen-title">{playerLabel}: build your deck</h2>
+        <div className="deckbuilder-topbar-confirm mobile-only-el">
+          <button type="button" className="btn btn-gold btn-sm" disabled={!canConfirm} onClick={onConfirm}>
+            {busyLabel || "Confirm deck"}
+          </button>
         </div>
-      )}
-      <h2 className="screen-title">{playerLabel}: build your deck</h2>
+      </div>
 
       <div className="deckbuilder-header">
         {!lockFaction && (
@@ -8088,10 +8090,9 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .join-row .search-input { width: 160px; text-align: center; letter-spacing: 0.1em; text-transform: uppercase; }
 .room-code-badge { text-align: center; font-family: var(--font-mono); background: var(--bg-panel-2); border: 1px solid var(--gold-dim); border-radius: 15%; padding: 0.5% 1%; margin: 0.5% auto; width: fit-content; white-space: nowrap; }
 .room-code-badge.inline { margin: 0; padding: 2.2% 4%; }
-.deckbuilder-topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
-.deckbuilder-topbar .deckbuilder-back { margin-bottom: 0; justify-self: start; }
-.deckbuilder-topbar-center { justify-self: center; }
-.deckbuilder-topbar-confirm { justify-self: end; }
+.deckbuilder-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.deckbuilder-topbar .deckbuilder-back { margin-bottom: 0; }
+.deckbuilder-topbar-center { flex: 1 1 auto; text-align: center; }
 .deckbuilder-topbar-confirm .btn[disabled] { opacity: 0.5; }
 
 @media (max-width: 520px) {
@@ -8104,29 +8105,39 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
    the leader down to roughly one card's width between the two grids
    instead, and give the grids enough height to clear one full row. */
 @media (max-width: 520px), (max-height: 480px) {
-  /* Reclaim vertical space up top so the card grids get more room */
-  .deckbuilder-v2 .screen-title { font-size: 1rem; margin: 0 0 4px; }
-  .deckbuilder-topbar { margin-bottom: 4px; }
+  /* Header rows get real spacing now that the grids below fill whatever's
+     left over via flex instead of a fixed vh cap (see pool/chosen-grid
+     below) — no more need to squeeze every row to claw back a fixed
+     amount of vertical space. */
+  .deckbuilder-v2 .screen-title { font-size: 1rem; margin: 0 0 8px; }
+  .deckbuilder-header-top { position: relative; padding-right: 92px; }
+  .deckbuilder-topbar { margin-bottom: 10px; }
   .deckbuilder-back { padding: 3px 8px; font-size: 0.72rem; margin-bottom: 0; }
-  .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; margin-bottom: 4px; }
+  .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; margin-bottom: 8px; }
   .faction-pill { flex: 0 0 auto; padding: 3px 10px; font-size: 0.72rem; }
-  .saved-decks-row { gap: 5px; margin: 3px 0 0; align-items: center; }
+  .saved-decks-row { gap: 5px; margin: 8px 0 0; align-items: center; }
   .saved-decks-row > * { height: 22px; box-sizing: border-box; margin: 0; line-height: 20px; vertical-align: middle; }
   .saved-decks-row .btn-sm { padding: 0 8px; font-size: 0.62rem; }
   .saved-decks-row select.saved-deck-select { -webkit-appearance: none; appearance: none; }
   .deck-name-input, .saved-deck-select { max-width: 90px; padding: 0 6px; font-size: 0.62rem; }
   .saved-decks-row .random-deck-btn { margin-left: auto; }
-  .deckbuilder-topbar-confirm .btn { padding: 3px 10px; font-size: 0.72rem; }
+  /* Confirm button spans the full height of the header block (back-button
+     row through the title row) instead of sitting in just one row —
+     positioned against the padding-right reserved above so it never
+     overlaps the back button or title text. */
+  .deckbuilder-topbar-confirm { position: absolute; top: 0; right: 0; bottom: 0; width: 84px; display: flex; }
+  .deckbuilder-topbar-confirm .btn { width: 100%; height: 100%; padding: 4px; font-size: 0.68rem; line-height: 1.2; white-space: normal; }
 
-  /* Shrink the pool/leader/chosen area itself so the confirm button below
-     it has room and stops overlapping the last visible row of cards */
+  /* Shrink the leader column so the pool/chosen grids get most of the
+     width; the grids' own height now comes from flex (no fixed cap), so
+     they naturally fill whatever's left instead of leaving dead space. */
   .db-columns { gap: 1.5%; max-width: 92%; margin: 0 auto; }
   .db-col-pool, .db-col-chosen { flex: 1 1 43.5%; }
   .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
   .leader-icon-btn { width: 100%; gap: 4%; }
   .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
   .leader-ability-box p { font-size: 0.56rem; line-height: 1.2; }
-  .pg-grid.pool-grid, .chosen-grid { min-height: 22vw; max-height: 38vh; }
+  .pg-grid.pool-grid, .chosen-grid { min-height: 20vh; }
 
   /* Leader zoom overlay: use the dynamic viewport unit so mobile browser
      chrome (address bar) doesn't leave a gap at the bottom where page
@@ -8146,8 +8157,13 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      0 in some versions), which is what was making the cards butt up
      against each other with no visible seam. vw sidesteps that since it
      isn't a flex-relative percentage. */
-  .leader-track { height: auto; min-height: 32dvh; padding: 3% 0; align-items: center; scroll-snap-type: x mandatory; gap: 3vw; }
-  .leader-track::before, .leader-track::after { flex: 0 0 26vw; }
+  /* Base rule also sets scroll-padding-inline: 50%, which combined with
+     our manual gutters below double-compensates the centering math and
+     makes the first/last card's snap target land outside the actual
+     scrollable range — unreachable no matter how far you swipe. The
+     manual gutters alone are enough. */
+  .leader-track { height: auto; min-height: 38dvh; padding: 3% 0; align-items: center; scroll-snap-type: x mandatory; scroll-padding-inline: 0; gap: 3vw; }
+  .leader-track::before, .leader-track::after { flex: 0 0 22vw; }
   .leader-track-item, .leader-track-item.is-focused { flex: 0 0 auto; }
   /* height: 100% inside a stretched flex item is fragile in mobile
      Safari — it was collapsing to a tiny intrinsic size, which is why the
@@ -8156,7 +8172,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      definite, so width follows from the card's own aspect-ratio. */
   .leader-track .card-tile.card-pg-carousel,
   .leader-track .card-tile.card-pg-carousel-focus {
-    width: auto; height: 30dvh;
+    width: auto; height: 36dvh;
   }
   /* The focused card's glow (0 10px 40px blur) was bleeding across the
      small gap onto its neighbors, reading as visual overlap even though
