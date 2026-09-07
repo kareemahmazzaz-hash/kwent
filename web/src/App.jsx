@@ -8144,23 +8144,37 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .leader-expanded { flex: 0 0 auto; }
   /* Percentage flex-gap has been unreliable in mobile Safari (resolves to
      0 in some versions), which is what was making the cards butt up
-     against each other with no visible seam ("overlapping"). vw sidesteps
-     that since it isn't a flex-relative percentage. Track height also
-     brought down a notch so there's room for a visible gap plus the next
-     card to peek in on a phone-width screen instead of each card being
-     almost the full screen width. */
-  .leader-track { height: 34dvh; padding: 2% 0; align-items: stretch; scroll-snap-type: x mandatory; gap: 3vw; }
+     against each other with no visible seam. vw sidesteps that since it
+     isn't a flex-relative percentage. */
+  .leader-track { height: auto; min-height: 32dvh; padding: 3% 0; align-items: center; scroll-snap-type: x mandatory; gap: 3vw; }
   .leader-track::before, .leader-track::after { flex: 0 0 26vw; }
   .leader-track-item, .leader-track-item.is-focused { flex: 0 0 auto; }
+  /* height: 100% inside a stretched flex item is fragile in mobile
+     Safari — it was collapsing to a tiny intrinsic size, which is why the
+     cards rendered "very small" and the track had nothing left to
+     actually scroll. An explicit dvh height sidesteps that: it's always
+     definite, so width follows from the card's own aspect-ratio. */
   .leader-track .card-tile.card-pg-carousel,
   .leader-track .card-tile.card-pg-carousel-focus {
-    width: auto; height: 100%;
+    width: auto; height: 30dvh;
+  }
+  /* The focused card's glow (0 10px 40px blur) was bleeding across the
+     small gap onto its neighbors, reading as visual overlap even though
+     the cards themselves don't touch. Tighter, smaller-blur shadow for
+     phones. */
+  .leader-track .card-tile.card-pg-carousel-focus {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.55), 0 0 0 2px var(--gold);
   }
   .leader-zoom-ability-box { max-height: 30dvh; overflow-y: auto; padding: 0 4px; }
   .leader-zoom-ability-box p { font-size: 0.7rem; line-height: 1.3; }
 
   /* Filter icons: always one line, shrink to fit rather than wrap */
   .ability-filter-row { flex-wrap: nowrap; justify-content: center; gap: 2px; }
+  /* Force the header to always stack label-then-filters, instead of
+     relying on flex-wrap to decide when they no longer fit side by side
+     — that made the filter row's position inconsistent depending on how
+     many icons were active. */
+  .db-col-header { flex-direction: column; align-items: stretch; gap: 2px; }
   .ability-filter-btn { width: 17px; height: 17px; padding: 2px; }
   .ability-filter-symbol { font-size: 0.6rem; }
   .ability-filter-clear { font-size: 0.55rem; }
