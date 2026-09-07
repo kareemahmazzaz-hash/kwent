@@ -8115,7 +8115,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .deckbuilder-back { padding: 3px 8px; font-size: 0.72rem; margin-bottom: 0; }
   .faction-picker { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; margin-bottom: 8px; }
   .faction-pill { flex: 0 0 auto; padding: 3px 10px; font-size: 0.72rem; }
-  .saved-decks-row { gap: 5px; margin: 8px 0 0; align-items: center; }
+  .saved-decks-row { gap: 5px; margin: 8px 0 8px 0; align-items: center; }
   .saved-decks-row > * { height: 22px; box-sizing: border-box; margin: 0; line-height: 20px; vertical-align: middle; }
   .saved-decks-row .btn-sm { padding: 0 8px; font-size: 0.62rem; }
   .saved-decks-row select.saved-deck-select { -webkit-appearance: none; appearance: none; }
@@ -8126,18 +8126,19 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      positioned against the padding-right reserved above so it never
      overlaps the back button or title text. */
   .deckbuilder-topbar-confirm { position: absolute; top: 0; right: 0; bottom: 0; width: 84px; display: flex; }
-  .deckbuilder-topbar-confirm .btn { width: 100%; height: 100%; padding: 4px; font-size: 0.68rem; line-height: 1.2; white-space: normal; }
+  .deckbuilder-topbar-confirm .btn { width: 100%; height: 100%; padding: 4px; font-size: 0.85rem; line-height: 1.2; white-space: normal; }
 
   /* Shrink the leader column so the pool/chosen grids get most of the
      width; the grids' own height now comes from flex (no fixed cap), so
      they naturally fill whatever's left instead of leaving dead space. */
   .db-columns { gap: 1.5%; max-width: 92%; margin: 0 auto; }
   .db-col-pool, .db-col-chosen { flex: 1 1 43.5%; }
-  .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 2px; }
+  .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 4%; }
   .leader-icon-btn { width: 100%; gap: 4%; }
   .leader-ability-box { margin-top: 0.4rem; max-width: 100%; }
   .leader-ability-box p { font-size: 0.56rem; line-height: 1.2; }
   .pg-grid.pool-grid, .chosen-grid { min-height: 20vh; }
+  .deck-count { font-size: 0.62rem; }
 
   /* Leader zoom overlay: use the dynamic viewport unit so mobile browser
      chrome (address bar) doesn't leave a gap at the bottom where page
@@ -8162,7 +8163,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      makes the first/last card's snap target land outside the actual
      scrollable range — unreachable no matter how far you swipe. The
      manual gutters alone are enough. */
-  .leader-track { height: auto; min-height: 38dvh; padding: 3% 0; align-items: center; scroll-snap-type: x mandatory; scroll-padding-inline: 0; gap: 3vw; }
+  .leader-track { height: auto; min-height: 38dvh; padding: 3% 0; align-items: center; overflow-x: auto; -webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory; scroll-padding-inline: 0; gap: 3vw; }
   .leader-track::before, .leader-track::after { flex: 0 0 22vw; }
   .leader-track-item, .leader-track-item.is-focused { flex: 0 0 auto; }
   /* height: 100% inside a stretched flex item is fragile in mobile
@@ -8172,7 +8173,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      definite, so width follows from the card's own aspect-ratio. */
   .leader-track .card-tile.card-pg-carousel,
   .leader-track .card-tile.card-pg-carousel-focus {
-    width: auto; height: 36dvh;
+    width: auto; height: 65dvh;
   }
   /* The focused card's glow (0 10px 40px blur) was bleeding across the
      small gap onto its neighbors, reading as visual overlap even though
