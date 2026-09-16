@@ -8197,7 +8197,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   .ability-filter-clear { font-size: 0.55rem; }
 }
 @media (max-width: 520px), (max-height: 480px) {
-  .screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; padding: 2% 2%; }
+  .screen.home { min-height: unset; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; padding: 1% 0%; }
   .home-hero { padding: 0 0 3vh; flex: 0 0 auto; }
   .eyebrow { font-size: clamp(0.65rem, 2.2vh, 0.85rem); }
   .home-hero h1 { font-size: clamp(1.8rem, 8vh, 3.2rem); margin: 1.2vh 0; }
