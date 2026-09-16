@@ -8131,7 +8131,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   /* Shrink the leader column so the pool/chosen grids get most of the
      width; the grids' own height now comes from flex (no fixed cap), so
      they naturally fill whatever's left instead of leaving dead space. */
-  .db-columns { gap: 1.5%; max-width: 92%; margin: 0 auto; }
+  .db-columns { gap: 1.5%; margin: 0; }
   .db-col-pool, .db-col-chosen { flex: 1 1 43.5%; }
   .db-col-leader { flex: 0 0 auto; width: 9%; overflow: visible; justify-content: flex-start; padding-top: 4%; }
   .leader-icon-btn { width: 100%; gap: 4%; }
