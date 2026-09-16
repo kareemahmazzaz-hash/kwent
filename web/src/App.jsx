@@ -8192,7 +8192,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
      — that made the filter row's position inconsistent depending on how
      many icons were active. */
   .db-col-header { flex-direction: column; align-items: stretch; gap: 0.5vw; }
-  .ability-filter-btn { width: 2vw; height: 2vw; padding: 0.5vw; }
+  .ability-filter-btn { width: 2.5vw; height: 2.5vw; padding: 0.5vw; }
   .ability-filter-symbol { font-size: 0.6rem; }
   .ability-filter-clear { font-size: 0.55rem; }
 }
