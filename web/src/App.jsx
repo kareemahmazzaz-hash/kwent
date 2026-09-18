@@ -7546,7 +7546,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
   scroll-padding-inline: 50%;
-  padding: 6% 0;
+  padding: 2% 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
