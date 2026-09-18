@@ -7579,7 +7579,7 @@ html, body { min-height: 100%; margin: 0; background: #0d0f0a; }
 .ability-filter-btn:hover { border-color: var(--gold); transform: translateY(-0.0694vw); }
 .ability-filter-btn.active { background: var(--gold); color: #201603; border-color: var(--gold); font-weight: 600; }
 .ability-filter-symbol { font-size: 0.85rem; line-height: 1; }
-.ability-filter-btn .ability-icon-svg { width: 68%; height: 68%; display: block; }
+.ability-filter-btn .ability-icon-svg { width: 100%; height: 100%; display: block; }
 .ability-filter-clear { opacity: 0.8; font-style: italic; font-size: 0.7rem; }
 .pool-grid { display: flex; flex-wrap: wrap; gap: 0.4861vw; max-height: 46vh; overflow-y: auto; padding: 0.4167vw; background: rgba(0,0,0,0.2); border-radius: 0.5556vw; border: 1px solid var(--line); }
 .deckbuilder-footer { display: flex; align-items: center; gap: 0.8333vw; margin-top: 1.1111vw; flex-wrap: wrap; }
